@@ -11,6 +11,17 @@ type Cylinder = {
   height: number;
 };
 
+type GizmoDrag = {
+  field: keyof Cylinder;
+  startMouseX: number;
+  startMouseY: number;
+  startValue: number;
+  screenAxis: THREE.Vector2;
+  min: number;
+  max: number;
+  sensitivity: number;
+};
+
 let uid = 1;
 
 export default function Scene3D() {
@@ -22,12 +33,14 @@ export default function Scene3D() {
   const groundRef = useRef<THREE.Mesh | null>(null);
   const orbitRef = useRef({ theta: 0.4, phi: 1.1, r: 15, dragging: false, lx: 0, ly: 0 });
   const dragMovedRef = useRef(false);
+  const gizmoHandlesRef = useRef<THREE.Mesh[]>([]);
+  const gizmoDragRef = useRef<GizmoDrag | null>(null);
+  const hoveredFieldRef = useRef<string | null>(null);
 
   const cylinders = useSignal<Cylinder[]>([]);
   const selected = useSignal<number | null>(null);
   const placing = useSignal(false);
 
-  // Init Three.js
   useEffect(() => {
     const canvas = canvasRef.current!;
     const scene = new THREE.Scene();
@@ -44,17 +57,14 @@ export default function Scene3D() {
     renderer.shadowMap.enabled = true;
     rendererRef.current = renderer;
 
-    // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.2);
     sun.position.set(8, 14, 6);
     sun.castShadow = true;
     scene.add(sun);
 
-    // Grid
     scene.add(new THREE.GridHelper(20, 20, 0x334466, 0x222244));
 
-    // Invisible ground plane for raycasting
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(40, 40),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
@@ -62,6 +72,99 @@ export default function Scene3D() {
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
     groundRef.current = ground;
+
+    // ── Gizmo ─────────────────────────────────────────────────────────────
+    const gizmoGroup = new THREE.Group();
+    gizmoGroup.visible = false;
+    scene.add(gizmoGroup);
+
+    // Per-mesh material so each can be independently colored on hover
+    const mkMat = (color: number) =>
+      new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 });
+
+    // Map field → [shaft, cone] or [sphere] for hover updates
+    const gizmoMeshesByField = new Map<string, THREE.Mesh[]>();
+
+    const shaftGeo = new THREE.CylinderGeometry(0.07, 0.07, 1.5, 8);
+    const coneGeo  = new THREE.ConeGeometry(0.14, 0.35, 8);
+    const sphereGeo = new THREE.SphereGeometry(0.2, 12, 12);
+
+    // Build an interactive arrow (shaft + cone share the same field/axis data)
+    const addArrow = (
+      normalColor: number, hoverColor: number,
+      shaftPos: THREE.Vector3, conePos: THREE.Vector3, rz: number, rx: number,
+      field: keyof Cylinder, worldAxis: THREE.Vector3,
+      min: number, max: number, sensitivity: number,
+    ) => {
+      const ud = { field, worldAxis: worldAxis.clone(), min, max, sensitivity, normalColor, hoverColor };
+      const meshes: THREE.Mesh[] = [];
+      for (const [geo, pos] of [[shaftGeo, shaftPos], [coneGeo, conePos]] as [THREE.BufferGeometry, THREE.Vector3][]) {
+        const m = new THREE.Mesh(geo, mkMat(normalColor));
+        m.position.copy(pos);
+        m.rotation.z = rz; m.rotation.x = rx;
+        m.renderOrder = 998;
+        m.userData = ud;
+        gizmoGroup.add(m);
+        gizmoHandlesRef.current.push(m);
+        meshes.push(m);
+      }
+      gizmoMeshesByField.set(field as string, meshes);
+    };
+
+    // Build an interactive sphere handle (height / radius)
+    const addSphere = (
+      normalColor: number, hoverColor: number, pos: THREE.Vector3,
+      field: keyof Cylinder, worldAxis: THREE.Vector3,
+      min: number, max: number, sensitivity: number,
+    ) => {
+      const ud = { field, worldAxis: worldAxis.clone(), min, max, sensitivity, normalColor, hoverColor };
+      const m = new THREE.Mesh(sphereGeo, mkMat(normalColor));
+      m.position.copy(pos);
+      m.renderOrder = 999;
+      m.userData = ud;
+      gizmoGroup.add(m);
+      gizmoHandlesRef.current.push(m);
+      gizmoMeshesByField.set(field as string, [m]);
+      return m;
+    };
+
+    // X=red, Y=green, Z=blue — shafts 0→1.5, cones 1.5→1.85
+    addArrow(0xff4444, 0xff9999, new THREE.Vector3(0.75, 0, 0),  new THREE.Vector3(1.675, 0, 0),  -Math.PI / 2, 0,          "x", new THREE.Vector3(1, 0, 0), -9,  9,  14);
+    addArrow(0x44ff44, 0x99ff99, new THREE.Vector3(0, 0.75, 0),  new THREE.Vector3(0, 1.675, 0),  0,            0,          "y", new THREE.Vector3(0, 1, 0),  0,  8,  10);
+    addArrow(0x4488ff, 0x88bbff, new THREE.Vector3(0, 0, 0.75),  new THREE.Vector3(0, 0, 1.675),  0,            Math.PI / 2,"z", new THREE.Vector3(0, 0, 1), -9,  9,  14);
+
+    // Height (yellow) and radius (cyan) sphere handles — positioned dynamically in loop
+    const heightHandle = addSphere(0xffdd00, 0xffee88, new THREE.Vector3(0, 3, 0),   "height", new THREE.Vector3(0, 1, 0), 0.2, 10, 8);
+    const radiusHandle = addSphere(0x00ddff, 0x88eeff, new THREE.Vector3(1, 0, 0),   "radius", new THREE.Vector3(1, 0, 0), 0.1,  4, 5);
+
+    // Dynamic connector lines for height and radius handles
+    const mkDynLine = (color: number) => {
+      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.45 }));
+      line.renderOrder = 997;
+      gizmoGroup.add(line);
+      return geo;
+    };
+    const hLineGeo = mkDynLine(0xffdd00);
+    const rLineGeo = mkDynLine(0x00ddff);
+
+    // Hover helpers
+    const setHover = (field: string | null) => {
+      if (field === hoveredFieldRef.current) return;
+      if (hoveredFieldRef.current) {
+        for (const m of gizmoMeshesByField.get(hoveredFieldRef.current) ?? []) {
+          (m.material as THREE.MeshBasicMaterial).color.setHex(m.userData.normalColor);
+        }
+      }
+      hoveredFieldRef.current = field;
+      if (field) {
+        for (const m of gizmoMeshesByField.get(field) ?? []) {
+          (m.material as THREE.MeshBasicMaterial).color.setHex(m.userData.hoverColor);
+        }
+      }
+      canvas.style.cursor = field ? "grab" : "";
+    };
+    // ── End gizmo ──────────────────────────────────────────────────────────
 
     const syncCamera = () => {
       const { theta, phi, r } = orbitRef.current;
@@ -77,44 +180,146 @@ export default function Scene3D() {
     let raf: number;
     const loop = () => {
       raf = requestAnimationFrame(loop);
+
+      const selId = selected.value;
+      if (selId !== null) {
+        const cyl = cylinders.value.find((c) => c.id === selId);
+        if (cyl) {
+          gizmoGroup.visible = true;
+          gizmoGroup.position.set(cyl.x, cyl.y, cyl.z);
+
+          const hOff = cyl.height + 0.35;
+          const rOff = cyl.radius + 0.35;
+          heightHandle.position.set(0, hOff, 0);
+          radiusHandle.position.set(rOff, cyl.height / 2, 0);
+
+          const hp = hLineGeo.attributes.position as THREE.BufferAttribute;
+          hp.setXYZ(0, 0, cyl.height, 0); hp.setXYZ(1, 0, hOff, 0); hp.needsUpdate = true;
+
+          const rp = rLineGeo.attributes.position as THREE.BufferAttribute;
+          rp.setXYZ(0, 0, cyl.height / 2, 0); rp.setXYZ(1, rOff, cyl.height / 2, 0); rp.needsUpdate = true;
+        } else {
+          gizmoGroup.visible = false;
+        }
+      } else {
+        gizmoGroup.visible = false;
+      }
+
       renderer.render(scene, camera);
     };
     loop();
 
     const ro = new ResizeObserver(() => {
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
     });
     ro.observe(canvas);
 
+    const screenAxis = (worldAxis: THREE.Vector3): THREE.Vector2 => {
+      const o = new THREE.Vector3(0, 0, 0).project(camera);
+      const a = worldAxis.clone().project(camera);
+      return new THREE.Vector2(a.x - o.x, -(a.y - o.y)).normalize();
+    };
+
+    const raycastNDC = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(ndc, camera);
+      return { ray, ndc };
+    };
+
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
+
+      if (gizmoGroup.visible && gizmoHandlesRef.current.length > 0) {
+        const { ray } = raycastNDC(e.clientX, e.clientY);
+        const hits = ray.intersectObjects(gizmoHandlesRef.current);
+        if (hits.length > 0) {
+          const ud = hits[0].object.userData;
+          const cyl = cylinders.value.find((c) => c.id === selected.value);
+          if (cyl) {
+            gizmoDragRef.current = {
+              field: ud.field,
+              startMouseX: e.clientX,
+              startMouseY: e.clientY,
+              startValue: cyl[ud.field as keyof Cylinder] as number,
+              screenAxis: screenAxis(ud.worldAxis as THREE.Vector3),
+              min: ud.min, max: ud.max, sensitivity: ud.sensitivity,
+            };
+            setHover(null);
+            canvas.style.cursor = "grabbing";
+            dragMovedRef.current = true;
+            return;
+          }
+        }
+      }
+
       orbitRef.current.dragging = true;
       orbitRef.current.lx = e.clientX;
       orbitRef.current.ly = e.clientY;
       dragMovedRef.current = false;
     };
+
     const onMove = (e: MouseEvent) => {
-      if (!orbitRef.current.dragging) return;
-      const dx = e.clientX - orbitRef.current.lx;
-      const dy = e.clientY - orbitRef.current.ly;
-      if (Math.abs(dx) + Math.abs(dy) > 4) dragMovedRef.current = true;
-      orbitRef.current.theta -= dx * 0.008;
-      orbitRef.current.phi = Math.max(0.15, Math.min(1.55, orbitRef.current.phi + dy * 0.008));
-      orbitRef.current.lx = e.clientX;
-      orbitRef.current.ly = e.clientY;
-      syncCamera();
+      const drag = gizmoDragRef.current;
+      if (drag) {
+        const dx = e.clientX - drag.startMouseX;
+        const dy = e.clientY - drag.startMouseY;
+        const dot = (dx / canvas.clientWidth) * 2 * drag.screenAxis.x
+                  + (dy / canvas.clientHeight) * 2 * drag.screenAxis.y;
+        const newVal = Math.max(drag.min, Math.min(drag.max, drag.startValue + dot * drag.sensitivity));
+        const selId = selected.value;
+        cylinders.value = cylinders.value.map((c) =>
+          c.id === selId ? { ...c, [drag.field]: parseFloat(newVal.toFixed(3)) } : c
+        );
+        return;
+      }
+
+      if (orbitRef.current.dragging) {
+        const dx = e.clientX - orbitRef.current.lx;
+        const dy = e.clientY - orbitRef.current.ly;
+        if (Math.abs(dx) + Math.abs(dy) > 4) dragMovedRef.current = true;
+        orbitRef.current.theta -= dx * 0.008;
+        orbitRef.current.phi = Math.max(0.15, Math.min(1.55, orbitRef.current.phi + dy * 0.008));
+        orbitRef.current.lx = e.clientX;
+        orbitRef.current.ly = e.clientY;
+        syncCamera();
+        return;
+      }
+
+      // Hover detection (only when idle)
+      if (gizmoGroup.visible) {
+        const { ray } = raycastNDC(e.clientX, e.clientY);
+        const hits = ray.intersectObjects(gizmoHandlesRef.current);
+        setHover(hits.length > 0 ? hits[0].object.userData.field as string : null);
+      } else {
+        setHover(null);
+      }
     };
-    const onUp = () => { orbitRef.current.dragging = false; };
+
+    const onUp = () => {
+      orbitRef.current.dragging = false;
+      if (gizmoDragRef.current) {
+        gizmoDragRef.current = null;
+        canvas.style.cursor = "";
+      }
+    };
+
     const onWheel = (e: WheelEvent) => {
       orbitRef.current.r = Math.max(3, Math.min(50, orbitRef.current.r + e.deltaY * 0.02));
       syncCamera();
     };
 
+    const onLeave = () => setHover(null);
+
     canvas.addEventListener("mousedown", onDown);
+    canvas.addEventListener("mouseleave", onLeave);
     globalThis.addEventListener("mousemove", onMove);
     globalThis.addEventListener("mouseup", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: true });
@@ -124,7 +329,9 @@ export default function Scene3D() {
       cancelAnimationFrame(raf);
       ro.disconnect();
       renderer.dispose();
+      gizmoHandlesRef.current = [];
       canvas.removeEventListener("mousedown", onDown);
+      canvas.removeEventListener("mouseleave", onLeave);
       globalThis.removeEventListener("mousemove", onMove);
       globalThis.removeEventListener("mouseup", onUp);
       canvas.removeEventListener("wheel", onWheel);
@@ -152,7 +359,6 @@ export default function Scene3D() {
 
       if (!meshMapRef.current.has(cyl.id)) {
         const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.2 });
-        // Unit cylinder: radius=1, height=1 — driven entirely by scale
         const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 32), mat);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
