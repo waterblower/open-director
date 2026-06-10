@@ -57,6 +57,7 @@ export default function Scene3D() {
   const syncCameraRef  = useRef<(() => void) | null>(null);
   const gizmoHandlesRef = useRef<THREE.Mesh[]>([]);
   const gizmoDragRef    = useRef<GizmoDrag | null>(null);
+  const imageDragRef    = useRef<{ id: number; plane: THREE.Plane; offsetX: number; offsetZ: number } | null>(null);
   const hoveredFieldRef = useRef<string | null>(null);
   const fileInputRef    = useRef<HTMLInputElement>(null);
   const panoFileRef     = useRef<HTMLInputElement>(null);
@@ -275,9 +276,10 @@ export default function Scene3D() {
       }
       if (e.button !== 0) return;
 
+      const ray = mkRay(e.clientX, e.clientY);
+
       // Gizmo hit-test (visible handles only)
       if (gizmoGroup.visible) {
-        const ray     = mkRay(e.clientX, e.clientY);
         const visible = gizmoHandlesRef.current.filter(m => m.visible);
         const hits    = ray.intersectObjects(visible);
         if (hits.length > 0) {
@@ -319,6 +321,25 @@ export default function Scene3D() {
         }
       }
 
+      // Image mesh drag — hit test against all image planes
+      const imgHits = ray.intersectObjects([...imageMeshMapRef.current.values()], false);
+      if (imgHits.length > 0) {
+        const { id } = imgHits[0].object.userData as { id: number };
+        const img = images.value.find(i => i.id === id);
+        if (img) {
+          const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -img.y);
+          const hitPoint  = new THREE.Vector3();
+          ray.ray.intersectPlane(dragPlane, hitPoint);
+          imageDragRef.current = {
+            id, plane: dragPlane,
+            offsetX: img.x - hitPoint.x,
+            offsetZ: img.z - hitPoint.z,
+          };
+          dragMovedRef.current = false;
+          return;
+        }
+      }
+
       orbitRef.current.dragging = true;
       orbitRef.current.lx = e.clientX;
       orbitRef.current.ly = e.clientY;
@@ -334,6 +355,21 @@ export default function Scene3D() {
         orbitRef.current.lx    = e.clientX;
         orbitRef.current.ly    = e.clientY;
         syncCamera();
+        return;
+      }
+      const imgDrag = imageDragRef.current;
+      if (imgDrag) {
+        dragMovedRef.current = true;
+        canvas.style.cursor  = "grabbing";
+        const r   = mkRay(e.clientX, e.clientY);
+        const hit = new THREE.Vector3();
+        if (r.ray.intersectPlane(imgDrag.plane, hit)) {
+          images.value = images.value.map(i =>
+            i.id === imgDrag.id
+              ? { ...i, x: parseFloat((hit.x + imgDrag.offsetX).toFixed(3)), z: parseFloat((hit.z + imgDrag.offsetZ).toFixed(3)) }
+              : i
+          );
+        }
         return;
       }
       const drag = gizmoDragRef.current;
@@ -355,18 +391,25 @@ export default function Scene3D() {
         syncCamera();
         return;
       }
+      // Hover: gizmo handles take priority, then image planes
       if (gizmoGroup.visible) {
-        const ray     = mkRay(e.clientX, e.clientY);
+        const r       = mkRay(e.clientX, e.clientY);
         const visible = gizmoHandlesRef.current.filter(m => m.visible);
-        const hits    = ray.intersectObjects(visible);
+        const hits    = r.intersectObjects(visible);
         setHover(hits.length > 0 ? hits[0].object.userData.field as string : null);
       } else {
         setHover(null);
+      }
+      if (!hoveredFieldRef.current) {
+        const r       = mkRay(e.clientX, e.clientY);
+        const imgHits = r.intersectObjects([...imageMeshMapRef.current.values()], false);
+        canvas.style.cursor = imgHits.length > 0 ? "move" : "";
       }
     };
 
     const onUp = (e: MouseEvent) => {
       if (e.button === 1) { orbitRef.current.midDragging = false; return; }
+      if (imageDragRef.current) { imageDragRef.current = null; canvas.style.cursor = ""; return; }
       orbitRef.current.dragging = false;
       if (gizmoDragRef.current) { gizmoDragRef.current = null; canvas.style.cursor = ""; }
     };
