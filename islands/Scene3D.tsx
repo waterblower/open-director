@@ -895,7 +895,7 @@ export default function Scene3D() {
     const hits = ray.intersectObjects([
       ...meshMapRef.current.values(),
       ...imageMeshMapRef.current.values(),
-    ]);
+    ], false);
     if (hits.length > 0) {
       const { kind, id } = hits[0].object.userData as {
         kind: string;
