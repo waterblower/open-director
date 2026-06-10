@@ -206,6 +206,118 @@ const mkRay = (
   return ray;
 };
 
+type SceneFile = {
+  version: number;
+  camera?: { theta: number; phi: number; r: number; tx: number; ty: number; tz: number };
+  cylinders?: Cylinder[];
+  images?: (Omit<ImagePlane, "url"> & { data: string })[];
+  panorama?: { name: string; data: string } | null;
+};
+
+async function blobUrlToDataUrl(url: string): Promise<string> {
+  const blob = await fetch(url).then((r) => r.blob());
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ── Scene localStorage helpers ─────────────────────────────────────────
+const LS_INDEX = "od_scenes";
+const LS_DATA  = "od_scene_";
+const LS_AUTO  = "od_autosave";
+
+type SceneIndexEntry = { id: string; name: string; savedAt: number };
+
+function lsIndex(): SceneIndexEntry[] {
+  try { return JSON.parse(localStorage.getItem(LS_INDEX) ?? "[]"); }
+  catch { return []; }
+}
+function lsSetIndex(v: SceneIndexEntry[]): void {
+  localStorage.setItem(LS_INDEX, JSON.stringify(v));
+}
+function lsScene(id: string): SceneFile | null {
+  try { const s = localStorage.getItem(LS_DATA + id); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function lsSetScene(id: string, d: SceneFile): void {
+  localStorage.setItem(LS_DATA + id, JSON.stringify(d));
+}
+function lsDel(id: string): void {
+  localStorage.removeItem(LS_DATA + id);
+  lsSetIndex(lsIndex().filter((e) => e.id !== id));
+}
+
+// Collect current scene state → SceneFile (converts blob URLs to data URLs)
+const mkCaptureScene = (args: {
+  cylinders: Signal<Cylinder[]>;
+  images: Signal<ImagePlane[]>;
+  panoUrl: Signal<string | null>;
+  panoName: Signal<string | null>;
+  orbitRef: { current: OrbitState };
+}) => async (): Promise<SceneFile> => {
+  const { cylinders, images, panoUrl, panoName, orbitRef } = args;
+  const imgData = await Promise.all(
+    images.value.map(async ({ url, ...rest }) => ({
+      ...rest, data: await blobUrlToDataUrl(url),
+    })),
+  );
+  const panoData = panoUrl.value
+    ? { name: panoName.value ?? "", data: await blobUrlToDataUrl(panoUrl.value) }
+    : null;
+  const { theta, phi, r, tx, ty, tz } = orbitRef.current;
+  return { version: 1, camera: { theta, phi, r, tx, ty, tz }, cylinders: cylinders.value, images: imgData, panorama: panoData };
+};
+
+// Apply a SceneFile → signals (converts data URLs back to blob URLs)
+const mkApplyScene = (args: {
+  cylinders: Signal<Cylinder[]>;
+  images: Signal<ImagePlane[]>;
+  selected: Signal<number | null>;
+  selectedImgId: Signal<number | null>;
+  placing: Signal<boolean>;
+  panoUrl: Signal<string | null>;
+  panoName: Signal<string | null>;
+  orbitRef: { current: OrbitState };
+  syncCameraRef: { current: (() => void) | null };
+}) => async (data: SceneFile): Promise<void> => {
+  const { cylinders, images, selected, selectedImgId, placing, panoUrl, panoName, orbitRef, syncCameraRef } = args;
+
+  for (const img of images.value) URL.revokeObjectURL(img.url);
+  if (panoUrl.value) URL.revokeObjectURL(panoUrl.value);
+
+  const loaded: ImagePlane[] = await Promise.all(
+    (data.images ?? []).map(async ({ data: d, ...rest }) => {
+      const blob = await fetch(d).then((r) => r.blob());
+      return { ...rest, id: uid++, url: URL.createObjectURL(blob) };
+    }),
+  );
+
+  cylinders.value = (data.cylinders ?? []).map((c) => ({ ...c, id: uid++ }));
+  images.value = loaded;
+  selected.value = null;
+  selectedImgId.value = null;
+  placing.value = false;
+
+  if (data.panorama) {
+    const blob = await fetch(data.panorama.data).then((r) => r.blob());
+    panoUrl.value = URL.createObjectURL(blob);
+    panoName.value = data.panorama.name;
+  } else {
+    panoUrl.value = null;
+    panoName.value = null;
+  }
+
+  if (data.camera) {
+    Object.assign(orbitRef.current, data.camera);
+    orbitRef.current.dragging = false;
+    orbitRef.current.midDragging = false;
+    syncCameraRef.current?.();
+  }
+};
+
 const texLoader = new THREE.TextureLoader();
 let uid = 1;
 
@@ -241,17 +353,26 @@ export default function Scene3D() {
     { id: number; plane: THREE.Plane; offsetX: number; offsetZ: number } | null
   >(null);
   const hoveredFieldRef = useRef<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const panoFileRef = useRef<HTMLInputElement>(null);
-  const panoTexRef = useRef<THREE.Texture | null>(null);
+  const fileInputRef    = useRef<HTMLInputElement>(null);
+  const panoFileRef     = useRef<HTMLInputElement>(null);
+  const panoTexRef      = useRef<THREE.Texture | null>(null);
+  const loadFileRef     = useRef<HTMLInputElement>(null);
+  const autoSaveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cylinders = useSignal<Cylinder[]>([]);
-  const selected = useSignal<number | null>(null);
-  const placing = useSignal(false);
-  const images = useSignal<ImagePlane[]>([]);
+  const cylinders     = useSignal<Cylinder[]>([]);
+  const selected      = useSignal<number | null>(null);
+  const placing       = useSignal(false);
+  const images        = useSignal<ImagePlane[]>([]);
   const selectedImgId = useSignal<number | null>(null);
-  const panoUrl = useSignal<string | null>(null);
-  const panoName = useSignal<string | null>(null);
+  const panoUrl       = useSignal<string | null>(null);
+  const panoName      = useSignal<string | null>(null);
+  const saving        = useSignal(false);
+  const sceneName     = useSignal("Untitled");
+  const sceneId       = useSignal<string | null>(null);
+  const sceneIndex    = useSignal<SceneIndexEntry[]>(lsIndex());
+  const showScenes    = useSignal(false);
+  const saveModal     = useSignal<"save" | "saveas" | null>(null);
+  const saveModalName = useSignal("");
 
   // ── Three.js init ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -861,6 +982,113 @@ export default function Scene3D() {
     }
   }, [panoUrl.value]);
 
+  // ── Scene management ───────────────────────────────────────────────────
+  const captureScene = mkCaptureScene({ cylinders, images, panoUrl, panoName, orbitRef });
+  const applyScene   = mkApplyScene({ cylinders, images, selected, selectedImgId, placing, panoUrl, panoName, orbitRef, syncCameraRef });
+
+  // Persist a named scene to localStorage and update the index
+  const persistScene = async (name: string, id: string) => {
+    const data = await captureScene();
+    lsSetScene(id, data);
+    const idx = lsIndex();
+    const entry: SceneIndexEntry = { id, name, savedAt: Date.now() };
+    const pos = idx.findIndex((e) => e.id === id);
+    if (pos >= 0) idx[pos] = entry; else idx.unshift(entry);
+    lsSetIndex(idx);
+    sceneIndex.value = lsIndex();
+    sceneName.value = name;
+    sceneId.value = id;
+  };
+
+  // Save: overwrite current scene if one is open, otherwise show the name modal
+  const saveScene = async () => {
+    if (sceneId.value) {
+      saving.value = true;
+      try { await persistScene(sceneName.value, sceneId.value); }
+      finally { saving.value = false; }
+    } else {
+      saveModalName.value = sceneName.value;
+      saveModal.value = "save";
+    }
+  };
+
+  // Save As: always prompt for a new name
+  const saveSceneAs = () => {
+    saveModalName.value = sceneName.value;
+    saveModal.value = "saveas";
+  };
+
+  // Confirm from the modal
+  const confirmSave = async () => {
+    const name = saveModalName.value.trim();
+    if (!name) return;
+    const id = saveModal.value === "saveas" ? `s_${Date.now()}` : (sceneId.value ?? `s_${Date.now()}`);
+    saveModal.value = null;
+    saving.value = true;
+    try { await persistScene(name, id); }
+    finally { saving.value = false; }
+  };
+
+  // Load a named scene from localStorage
+  const loadSceneById = async (id: string) => {
+    const data = lsScene(id);
+    if (!data) return;
+    await applyScene(data);
+    const entry = lsIndex().find((e) => e.id === id);
+    sceneId.value = id;
+    sceneName.value = entry?.name ?? "Untitled";
+    showScenes.value = false;
+  };
+
+  // Delete a named scene from localStorage
+  const deleteSceneById = (id: string) => {
+    lsDel(id);
+    sceneIndex.value = lsIndex();
+    if (sceneId.value === id) sceneId.value = null;
+  };
+
+  // Export current scene as a downloadable file
+  const exportScene = async () => {
+    saving.value = true;
+    try {
+      const data = await captureScene();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      a.download = `${sceneName.value}.od.json`;
+      a.click();
+    } finally { saving.value = false; }
+  };
+
+  // Import scene from a JSON file (does not create a named entry)
+  const importScene = async (file: File) => {
+    const data = JSON.parse(await file.text()) as SceneFile;
+    await applyScene(data);
+    sceneId.value = null;
+    sceneName.value = file.name.replace(/\.(od\.)?json$/i, "");
+  };
+
+  // Auto-save: debounce 2 s after any scene modification
+  useEffect(() => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      autoSaveTimer.current = null;
+      try {
+        const data = await captureScene();
+        if (sceneId.value) {
+          // Keep the named scene up to date
+          lsSetScene(sceneId.value, data);
+          const idx = lsIndex().map((e) =>
+            e.id === sceneId.value ? { ...e, savedAt: Date.now() } : e
+          );
+          lsSetIndex(idx);
+          sceneIndex.value = lsIndex();
+        }
+        // Always write to the autosave slot as crash recovery
+        localStorage.setItem(LS_AUTO, JSON.stringify(data));
+      } catch { /* storage quota exceeded — fail silently */ }
+    }, 2000);
+  }, [cylinders.value, images.value, panoUrl.value, panoName.value]);
+
   // ── Click: place cylinder or select object ────────────────────────────
   const handleClick = (e: MouseEvent) => {
     if (dragMovedRef.current) return;
@@ -977,6 +1205,12 @@ export default function Scene3D() {
 
   return (
     <div style="position:relative;width:100vw;height:100vh;overflow:hidden;font-family:ui-sans-serif,sans-serif;">
+      <style>{`
+        .od-btn { transition: filter 100ms ease, transform 80ms ease; }
+        .od-btn:hover:not(:disabled) { filter: brightness(1.3); }
+        .od-btn:active:not(:disabled) { filter: brightness(0.88); transform: translateY(1px); }
+        .od-btn:disabled { opacity: 0.45; cursor: default !important; }
+      `}</style>
       <canvas
         ref={canvasRef}
         style="display:block;width:100%;height:100%;"
@@ -988,8 +1222,22 @@ export default function Scene3D() {
           3D SCENE
         </span>
 
+        {/* ── Scene management ── */}
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          <div style="font-size:11px;color:#88aaff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title={sceneName.value}>
+            {sceneName.value}{sceneId.value ? "" : " *"}
+          </div>
+          <button class="od-btn"
+            onClick={() => showScenes.value = true}
+            style="padding:7px 10px;border:1px solid #2a3a66;border-radius:4px;font-size:12px;background:rgba(20,24,60,0.9);color:#88aaff;cursor:pointer;text-align:left;"
+          >
+            ☰  Scenes
+          </button>
+        </div>
+        <div style="border-top:1px solid #1e1e30;" />
+
         {/* Add buttons */}
-        <button
+        <button class="od-btn"
           onClick={() => {
             placing.value = !placing.value;
             selectedImgId.value = null;
@@ -1000,7 +1248,7 @@ export default function Scene3D() {
         >
           {placing.value ? "✕  Cancel" : "+  Cylinder"}
         </button>
-        <button
+        <button class="od-btn"
           onClick={() => fileInputRef.current?.click()}
           style="padding:6px 10px;border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;background:#226633;"
         >
@@ -1048,7 +1296,7 @@ export default function Scene3D() {
                     ? panoName.value.slice(0, 22) + "…"
                     : panoName.value}
                 </span>
-                <button
+                <button class="od-btn"
                   onClick={() => {
                     panoUrl.value = null;
                     panoName.value = null;
@@ -1060,7 +1308,7 @@ export default function Scene3D() {
               </div>
             )
             : (
-              <button
+              <button class="od-btn"
                 onClick={() => panoFileRef.current?.click()}
                 style="padding:6px 10px;border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;background:#443322;"
               >
@@ -1152,7 +1400,7 @@ export default function Scene3D() {
                 />
               </label>
             ))}
-            <button
+            <button class="od-btn"
               onClick={() => {
                 cylinders.value = cylinders.value.filter((c) =>
                   c.id !== selected.value
@@ -1199,7 +1447,7 @@ export default function Scene3D() {
                 />
               </label>
             ))}
-            <button
+            <button class="od-btn"
               onClick={() => {
                 images.value = images.value.filter((i) =>
                   i.id !== selectedImgId.value
@@ -1214,7 +1462,7 @@ export default function Scene3D() {
         )}
       </aside>
 
-      <button
+      <button class="od-btn"
         onClick={() => {
           orbitRef.current.tx = 0;
           orbitRef.current.ty = 0;
@@ -1230,6 +1478,157 @@ export default function Scene3D() {
         WASD · pan &nbsp;|&nbsp; Mid-drag · orbit &nbsp;|&nbsp; Scroll · zoom
         &nbsp;|&nbsp; Click · select
       </div>
+
+      {/* Hidden file input for import — lives at top level so it's always reachable */}
+      <input
+        ref={loadFileRef}
+        type="file"
+        accept=".json"
+        style="display:none;"
+        onChange={(e) => {
+          const file = (e.target as HTMLInputElement).files?.[0];
+          if (!file) return;
+          importScene(file);
+          (e.target as HTMLInputElement).value = "";
+        }}
+      />
+
+      {/* Scenes modal */}
+      {showScenes.value && (
+        <div
+          style="position:fixed;inset:0;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;z-index:200;"
+          onClick={(e) => { if (e.target === e.currentTarget && !saveModal.value) showScenes.value = false; }}
+        >
+          <div style="background:#0e0e1c;border:1px solid #2a3a66;border-radius:12px;padding:32px;width:580px;max-width:92vw;max-height:82vh;display:flex;flex-direction:column;gap:24px;box-shadow:0 20px 60px rgba(0,0,0,0.75);">
+
+            {/* Header */}
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:20px;font-weight:700;color:#88aaff;letter-spacing:.04em;">Scenes</span>
+              <button class="od-btn"
+                onClick={() => { showScenes.value = false; saveModal.value = null; }}
+                style="width:32px;height:32px;border:1px solid #2a3a66;border-radius:6px;background:transparent;color:#667;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Save name input (shown when saving) */}
+            {saveModal.value
+              ? (
+                <div style="display:flex;flex-direction:column;gap:12px;background:rgba(20,28,70,0.7);border:1px solid #2a4488;border-radius:8px;padding:20px;">
+                  <span style="font-size:15px;color:#aabbdd;">
+                    {saveModal.value === "saveas" ? "Save as new scene" : "Save scene"}
+                  </span>
+                  <input
+                    type="text"
+                    value={saveModalName.value}
+                    onInput={(e) => saveModalName.value = (e.target as HTMLInputElement).value}
+                    onKeyDown={(e) => { if (e.key === "Enter") confirmSave(); if (e.key === "Escape") saveModal.value = null; }}
+                    placeholder="Scene name"
+                    autoFocus
+                    style="padding:10px 14px;background:#0c0c1a;border:1px solid #2a4488;border-radius:6px;color:#ddd;font-size:16px;outline:none;width:100%;box-sizing:border-box;"
+                  />
+                  <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="od-btn"
+                      onClick={() => saveModal.value = null}
+                      style="padding:8px 20px;background:transparent;border:1px solid #334455;border-radius:6px;color:#778899;font-size:14px;cursor:pointer;"
+                    >
+                      Cancel
+                    </button>
+                    <button class="od-btn"
+                      onClick={confirmSave}
+                      disabled={!saveModalName.value.trim()}
+                      style={`padding:8px 20px;background:#1a2a6c;border:1px solid #3355aa;border-radius:6px;font-size:14px;cursor:${saveModalName.value.trim() ? "pointer" : "default"};color:${saveModalName.value.trim() ? "#88aaff" : "#445566"};`}
+                    >
+                      {saving.value ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              )
+              : (
+                <>
+                  {/* Current scene + action buttons */}
+                  <div style="display:flex;flex-direction:column;gap:12px;">
+                    <div style="font-size:14px;color:#667788;">
+                      Current scene:{" "}
+                      <span style="color:#88aaff;font-weight:600;">{sceneName.value}</span>
+                      {!sceneId.value && <span style="color:#886655;font-style:italic;"> — unsaved</span>}
+                    </div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                      <button class="od-btn"
+                        onClick={saveScene}
+                        disabled={saving.value}
+                        style={`padding:10px 22px;border:1px solid #3355aa;border-radius:7px;font-size:15px;background:#1a2a6c;color:${saving.value ? "#445" : "#88aaff"};cursor:${saving.value ? "default" : "pointer"};font-weight:600;`}
+                      >
+                        {saving.value ? "Saving…" : "Save"}
+                      </button>
+                      <button class="od-btn"
+                        onClick={saveSceneAs}
+                        style="padding:10px 22px;border:1px solid #2a3a66;border-radius:7px;font-size:15px;background:rgba(20,24,60,0.9);color:#88aaff;cursor:pointer;"
+                      >
+                        Save As
+                      </button>
+                      <button class="od-btn"
+                        onClick={exportScene}
+                        disabled={saving.value}
+                        style={`padding:10px 22px;border:1px solid #2a3a55;border-radius:7px;font-size:15px;background:rgba(15,20,45,0.9);color:${saving.value ? "#445" : "#99aabb"};cursor:${saving.value ? "default" : "pointer"};`}
+                      >
+                        Export file
+                      </button>
+                      <button class="od-btn"
+                        onClick={() => loadFileRef.current?.click()}
+                        style="padding:10px 22px;border:1px solid #2a3a55;border-radius:7px;font-size:15px;background:rgba(15,20,45,0.9);color:#99aabb;cursor:pointer;"
+                      >
+                        Import file
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style="border-top:1px solid #1a1a30;" />
+
+                  {/* Scene list */}
+                  <div style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;min-height:0;">
+                    <span style="font-size:13px;color:#445566;text-transform:uppercase;letter-spacing:.07em;">Saved scenes</span>
+                    {sceneIndex.value.length === 0
+                      ? (
+                        <div style="text-align:center;color:#334455;font-size:15px;padding:40px 0;">
+                          No saved scenes yet
+                        </div>
+                      )
+                      : sceneIndex.value.map((entry) => (
+                        <div
+                          key={entry.id}
+                          style={`display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:8px;border:1px solid ${entry.id === sceneId.value ? "#2a4488" : "#1a1a2e"};background:${entry.id === sceneId.value ? "rgba(25,45,110,0.4)" : "rgba(255,255,255,0.025)"};`}
+                        >
+                          <div style="flex:1;min-width:0;">
+                            <div style="font-size:15px;color:#ccddee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;">{entry.name}</div>
+                            <div style="font-size:12px;color:#445566;margin-top:3px;">
+                              {new Date(entry.savedAt).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                          <button class="od-btn"
+                            onClick={() => loadSceneById(entry.id)}
+                            style="padding:8px 18px;font-size:14px;border:1px solid #2a4488;border-radius:6px;background:rgba(20,40,110,0.7);color:#88aaff;cursor:pointer;flex-shrink:0;font-weight:500;"
+                          >
+                            Load
+                          </button>
+                          <button class="od-btn"
+                            onClick={() => deleteSceneById(entry.id)}
+                            style="padding:8px 14px;font-size:14px;border:1px solid #441122;border-radius:6px;background:rgba(50,10,20,0.7);color:#cc6677;cursor:pointer;flex-shrink:0;"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </>
+              )
+            }
+          </div>
+        </div>
+      )}
     </div>
   );
 }
