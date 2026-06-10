@@ -51,8 +51,10 @@ export default function Scene3D() {
   const imageUrlMapRef  = useRef<Map<number, string>>(new Map());
   const groundRef       = useRef<THREE.Mesh | null>(null);
 
-  const orbitRef      = useRef({ theta: 0.4, phi: 1.1, r: 15, dragging: false, lx: 0, ly: 0 });
+  const orbitRef      = useRef({ theta: 0.4, phi: 1.1, r: 15, tx: 0, ty: 0, tz: 0, dragging: false, midDragging: false, lx: 0, ly: 0 });
   const dragMovedRef  = useRef(false);
+  const keysRef        = useRef<Set<string>>(new Set());
+  const syncCameraRef  = useRef<(() => void) | null>(null);
   const gizmoHandlesRef = useRef<THREE.Mesh[]>([]);
   const gizmoDragRef    = useRef<GizmoDrag | null>(null);
   const hoveredFieldRef = useRef<string | null>(null);
@@ -175,14 +177,15 @@ export default function Scene3D() {
     // ── End gizmo ──────────────────────────────────────────────────────
 
     const syncCamera = () => {
-      const { theta, phi, r } = orbitRef.current;
+      const { theta, phi, r, tx, ty, tz } = orbitRef.current;
       camera.position.set(
-        r * Math.sin(phi) * Math.sin(theta),
-        r * Math.cos(phi),
-        r * Math.sin(phi) * Math.cos(theta),
+        tx + r * Math.sin(phi) * Math.sin(theta),
+        ty + r * Math.cos(phi),
+        tz + r * Math.sin(phi) * Math.cos(theta),
       );
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(tx, ty, tz);
     };
+    syncCameraRef.current = syncCamera;
     syncCamera();
 
     let raf: number;
@@ -218,6 +221,18 @@ export default function Scene3D() {
       hLine.visible        = isCyl && active;
       rLine.visible        = isCyl && active;
 
+      // WASD pan — move anchor in camera's XZ plane
+      const keys = keysRef.current;
+      if (keys.size > 0) {
+        const { theta } = orbitRef.current;
+        const spd = 0.04;
+        if (keys.has("w")) { orbitRef.current.tx -= Math.sin(theta) * spd; orbitRef.current.tz -= Math.cos(theta) * spd; }
+        if (keys.has("s")) { orbitRef.current.tx += Math.sin(theta) * spd; orbitRef.current.tz += Math.cos(theta) * spd; }
+        if (keys.has("a")) { orbitRef.current.tx -= Math.cos(theta) * spd; orbitRef.current.tz += Math.sin(theta) * spd; }
+        if (keys.has("d")) { orbitRef.current.tx += Math.cos(theta) * spd; orbitRef.current.tz -= Math.sin(theta) * spd; }
+        syncCamera();
+      }
+
       renderer.render(scene, camera);
     };
     loop();
@@ -247,6 +262,13 @@ export default function Scene3D() {
     };
 
     const onDown = (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        orbitRef.current.midDragging = true;
+        orbitRef.current.lx = e.clientX;
+        orbitRef.current.ly = e.clientY;
+        return;
+      }
       if (e.button !== 0) return;
 
       // Gizmo hit-test (visible handles only)
@@ -300,6 +322,16 @@ export default function Scene3D() {
     };
 
     const onMove = (e: MouseEvent) => {
+      if (orbitRef.current.midDragging) {
+        const dx = e.clientX - orbitRef.current.lx;
+        const dy = e.clientY - orbitRef.current.ly;
+        orbitRef.current.theta -= dx * 0.008;
+        orbitRef.current.phi   = Math.max(0.15, Math.min(1.55, orbitRef.current.phi + dy * 0.008));
+        orbitRef.current.lx    = e.clientX;
+        orbitRef.current.ly    = e.clientY;
+        syncCamera();
+        return;
+      }
       const drag = gizmoDragRef.current;
       if (drag) {
         const dx  = e.clientX - drag.startMouseX;
@@ -329,7 +361,8 @@ export default function Scene3D() {
       }
     };
 
-    const onUp = () => {
+    const onUp = (e: MouseEvent) => {
+      if (e.button === 1) { orbitRef.current.midDragging = false; return; }
       orbitRef.current.dragging = false;
       if (gizmoDragRef.current) { gizmoDragRef.current = null; canvas.style.cursor = ""; }
     };
@@ -339,12 +372,22 @@ export default function Scene3D() {
       syncCamera();
     };
 
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const key = e.key.toLowerCase();
+      if (["w", "a", "s", "d"].includes(key)) { e.preventDefault(); keysRef.current.add(key); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => { keysRef.current.delete(e.key.toLowerCase()); };
+
     canvas.addEventListener("mousedown",   onDown);
     canvas.addEventListener("mouseleave",  () => setHover(null));
     globalThis.addEventListener("mousemove", onMove);
     globalThis.addEventListener("mouseup",   onUp);
     canvas.addEventListener("wheel",       onWheel, { passive: true });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    globalThis.addEventListener("keydown", onKeyDown);
+    globalThis.addEventListener("keyup",   onKeyUp);
 
     return () => {
       cancelAnimationFrame(raf);
@@ -355,6 +398,8 @@ export default function Scene3D() {
       globalThis.removeEventListener("mousemove", onMove);
       globalThis.removeEventListener("mouseup",   onUp);
       canvas.removeEventListener("wheel", onWheel);
+      globalThis.removeEventListener("keydown", onKeyDown);
+      globalThis.removeEventListener("keyup",   onKeyUp);
     };
   }, []);
 
@@ -627,8 +672,15 @@ export default function Scene3D() {
         )}
       </aside>
 
+      <button
+        onClick={() => { orbitRef.current.tx = 0; orbitRef.current.ty = 0; orbitRef.current.tz = 0; syncCameraRef.current?.(); }}
+        style="position:absolute;top:12px;right:12px;padding:5px 10px;background:rgba(20,20,40,0.85);border:1px solid #2a4488;border-radius:4px;color:#88aaff;font-size:11px;cursor:pointer;"
+      >
+        Reset View
+      </button>
+
       <div style="position:absolute;bottom:10px;right:12px;color:#333;font-size:10px;text-align:right;pointer-events:none;">
-        Left-drag · orbit &nbsp;|&nbsp; Scroll · zoom &nbsp;|&nbsp; Click · select
+        WASD · pan &nbsp;|&nbsp; Mid-drag · orbit &nbsp;|&nbsp; Scroll · zoom &nbsp;|&nbsp; Click · select
       </div>
     </div>
   );
