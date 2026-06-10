@@ -59,12 +59,16 @@ export default function Scene3D() {
   const gizmoDragRef    = useRef<GizmoDrag | null>(null);
   const hoveredFieldRef = useRef<string | null>(null);
   const fileInputRef    = useRef<HTMLInputElement>(null);
+  const panoFileRef     = useRef<HTMLInputElement>(null);
+  const panoTexRef      = useRef<THREE.Texture | null>(null);
 
   const cylinders      = useSignal<Cylinder[]>([]);
   const selected       = useSignal<number | null>(null);
   const placing        = useSignal(false);
   const images         = useSignal<ImagePlane[]>([]);
   const selectedImgId  = useSignal<number | null>(null);
+  const panoUrl        = useSignal<string | null>(null);
+  const panoName       = useSignal<string | null>(null);
 
   // ── Three.js init ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -494,6 +498,36 @@ export default function Scene3D() {
     }
   }, [images.value, selectedImgId.value]);
 
+  // ── Sync panorama background ──────────────────────────────────────────
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // Dispose previous texture and revoke its blob URL
+    if (panoTexRef.current) {
+      panoTexRef.current.dispose();
+      panoTexRef.current = null;
+    }
+
+    if (panoUrl.value) {
+      const tex = texLoader.load(panoUrl.value);
+      tex.mapping    = THREE.EquirectangularReflectionMapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      panoTexRef.current = tex;
+      scene.background   = tex;
+      scene.environment  = tex;
+      scene.fog          = null;
+
+      return () => {
+        URL.revokeObjectURL(panoUrl.value!);
+      };
+    } else {
+      scene.background  = new THREE.Color(0x181824);
+      scene.environment = null;
+      scene.fog         = new THREE.Fog(0x181824, 25, 60);
+    }
+  }, [panoUrl.value]);
+
   // ── Click: place cylinder or select object ────────────────────────────
   const handleClick = (e: MouseEvent) => {
     if (dragMovedRef.current) return;
@@ -601,6 +635,44 @@ export default function Scene3D() {
             (e.target as HTMLInputElement).value = "";
           }}
         />
+
+        {/* 360 Panorama */}
+        <div style="border-top:1px solid #1e1e30;padding-top:8px;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;color:#445;text-transform:uppercase;letter-spacing:.08em;">Environment</div>
+          {panoName.value
+            ? (
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span style="font-size:10px;color:#88aaff;word-break:break-all;">
+                  {panoName.value.length > 24 ? panoName.value.slice(0, 22) + "…" : panoName.value}
+                </span>
+                <button
+                  onClick={() => { panoUrl.value = null; panoName.value = null; }}
+                  style="padding:4px 8px;background:#331122;border:1px solid #552244;border-radius:3px;color:#cc88aa;font-size:11px;cursor:pointer;"
+                >
+                  Clear panorama
+                </button>
+              </div>
+            )
+            : (
+              <button
+                onClick={() => panoFileRef.current?.click()}
+                style="padding:6px 10px;border:none;border-radius:4px;cursor:pointer;font-size:12px;color:#fff;background:#443322;"
+              >
+                +  360 Panorama
+              </button>
+            )
+          }
+          <input
+            ref={panoFileRef} type="file" accept="image/*" style="display:none;"
+            onChange={(e) => {
+              const file = (e.target as HTMLInputElement).files?.[0];
+              if (!file) return;
+              panoUrl.value  = URL.createObjectURL(file);
+              panoName.value = file.name;
+              (e.target as HTMLInputElement).value = "";
+            }}
+          />
+        </div>
 
         {placing.value && <p style="font-size:11px;color:#6677aa;margin:0;">Click the ground to place</p>}
 
