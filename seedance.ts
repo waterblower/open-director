@@ -46,21 +46,108 @@ export type AspectRatio =
     | "1:1"
     | "4:3"
     | "3:4"
+    | "21:9"
+    | "adaptive"
     | (string & {});
+
+export type Resolution = "480p" | "720p" | "1080p";
+
+export type ServiceTier = "default" | "flex";
 
 export type SeedanceModel = "doubao-seedance-2-0-260128";
 
+/** Tool the model may call. Only supported by Seedance 2.0 & 2.0 fast. */
+export interface SeedanceTool {
+    type: string;
+    [key: string]: unknown;
+}
+
 export interface CreateTaskRequest {
-    /** Model ID */
-    model: SeedanceModel;
-    /** Multimodal prompt — text, images, video reference, audio reference */
+    /** Model ID, or an inference endpoint ID (ep-...) configured with a video model */
+    model: SeedanceModel | (string & {});
+    /**
+     * Multimodal prompt — text, images, video reference, audio reference,
+     * or a draft task ID. Supported combinations: text alone, or optional
+     * text plus any of image / video / image+audio / image+video /
+     * video+audio / image+video+audio.
+     */
     content: ContentItem[];
-    /** Generate audio track for the output video */
+    /**
+     * Callback URL notified via POST whenever the task status changes
+     * (queued / running / succeeded / failed / expired). The payload matches
+     * the query-task API response body.
+     */
+    callback_url?: string;
+    /**
+     * true: also produce the last frame of the generated video (PNG, same
+     * dimensions as the video, no watermark), retrievable via the query-task
+     * API. Useful for chaining consecutive videos. Default false.
+     */
+    return_last_frame?: boolean;
+    /**
+     * Generate an audio track (voice, sound effects, background music)
+     * synchronized with the video. Put dialogue in double quotes for best
+     * results. Only Seedance 2.0 & 2.0 fast and Seedance 1.5 pro.
+     */
     generate_audio?: boolean;
-    /** Output aspect ratio */
+    /**
+     * Draft (sample) mode — generates a cheap preview video to validate scene
+     * structure, camera work, and prompt intent. Only Seedance 1.5 pro.
+     */
+    draft?: boolean;
+    /** Tools the model may call. Only Seedance 2.0 & 2.0 fast. */
+    tools?: SeedanceTool[];
+    /**
+     * Stable, unique end-user identifier (≤64 ASCII chars) to help the
+     * platform detect policy violations. Prefer a hash of the username,
+     * user ID, or email.
+     */
+    safety_identifier?: string;
+    /**
+     * Service tier. "default": online inference (lower RPM/concurrency
+     * quota, low latency). "flex": offline inference (higher TPD quota,
+     * 50% of the online price). Seedance 2.0 & 2.0 fast do not support
+     * "flex". Cannot be changed after the task is submitted.
+     */
+    service_tier?: ServiceTier;
+    /**
+     * Task expiry in seconds, counted from created_at. Tasks still queued or
+     * running past this are terminated and marked "expired".
+     * Range [3600, 259200]. Defaults to 172800 (48 h).
+     */
+    execution_expires_after?: number;
+    /**
+     * Output resolution. "1080p" is not supported by Seedance 2.0 fast or
+     * Seedance 1.0 lite reference-image mode. Defaults to "720p"
+     * ("1080p" for Seedance 1.0 pro & pro-fast).
+     */
+    resolution?: Resolution;
+    /**
+     * Output aspect ratio. "adaptive" picks the best fit for the input.
+     * Defaults to "adaptive" for Seedance 2.0 & 2.0 fast and 1.5 pro;
+     * for other models, "16:9" (text-to-video) or "adaptive" (image-to-video).
+     */
     ratio?: AspectRatio;
-    /** Output duration in seconds */
+    /**
+     * Output duration in whole seconds. Seedance 2.0 & 2.0 fast: [4, 15]
+     * or -1; Seedance 1.5 pro: [4, 12] or -1; Seedance 1.0 pro / pro-fast /
+     * lite: [2, 12]. If both are set, `frames` takes precedence.
+     */
     duration?: number;
+    /**
+     * Output length in frames (duration × 24 fps) for fractional-second
+     * videos. Valid values: integers of the form 25 + 4n within [29, 289].
+     * Takes precedence over `duration`. Not supported by Seedance 2.0 &
+     * 2.0 fast or Seedance 1.5 pro.
+     */
+    frames?: number;
+    /** Random seed controlling generation. Integer in [-1, 2^32-1]. */
+    seed?: number;
+    /**
+     * true: append a fixed-camera instruction to the prompt (best effort).
+     * Not supported in reference-image mode or by Seedance 2.0 & 2.0 fast.
+     */
+    camera_fixed?: boolean;
     /** Embed watermark in the output video */
     watermark?: boolean;
 }
@@ -74,12 +161,15 @@ export type TaskStatus =
     | "running"
     | "succeeded"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "expired";
 
 export interface TaskOutput {
     video_url?: string;
     audio_url?: string;
     cover_image_url?: string;
+    /** Last frame of the video (PNG, no watermark) when return_last_frame was true */
+    last_frame_url?: string;
 }
 
 export interface TaskError {
@@ -329,7 +419,7 @@ export class SeedanceClient {
 
             if (
                 task.status === "succeeded" || task.status === "failed" ||
-                task.status === "cancelled"
+                task.status === "cancelled" || task.status === "expired"
             ) {
                 return task;
             }
