@@ -28,10 +28,63 @@ const RATIOS = [
 
 const RESOLUTIONS: Resolution[] = ["480p", "720p", "1080p"];
 
+const KIND_LABEL: Record<AttachmentKind, string> = {
+    image: "图片",
+    video: "视频",
+    audio: "音频",
+};
+
+type Mention = {
+    /** Index of the "@" character in the prompt */
+    index: number;
+    x: number;
+    y: number;
+};
+
 function kindOf(file: File): AttachmentKind {
     if (file.type.startsWith("video/")) return "video";
     if (file.type.startsWith("audio/")) return "audio";
     return "image";
+}
+
+// Mirror-div trick: a textarea exposes no caret geometry, so render the text
+// up to `pos` in an identically-styled hidden div and measure a marker span.
+function caretCoords(
+    ta: HTMLTextAreaElement,
+    pos: number,
+): { x: number; y: number } {
+    const style = getComputedStyle(ta);
+    const div = document.createElement("div");
+    for (
+        const prop of [
+            "font-family",
+            "font-size",
+            "font-weight",
+            "line-height",
+            "letter-spacing",
+            "padding",
+            "border",
+            "box-sizing",
+        ]
+    ) {
+        div.style.setProperty(prop, style.getPropertyValue(prop));
+    }
+    div.style.position = "absolute";
+    div.style.top = "0";
+    div.style.left = "0";
+    div.style.visibility = "hidden";
+    div.style.whiteSpace = "pre-wrap";
+    div.style.overflowWrap = "break-word";
+    div.style.width = `${ta.clientWidth}px`;
+    div.textContent = ta.value.slice(0, pos);
+    const marker = document.createElement("span");
+    marker.textContent = "|";
+    div.appendChild(marker);
+    (ta.parentElement ?? document.body).appendChild(div);
+    const x = marker.offsetLeft;
+    const y = marker.offsetTop - ta.scrollTop;
+    div.remove();
+    return { x, y };
 }
 
 // ---------------------------------------------------------------------------
@@ -149,9 +202,25 @@ export default function Seedance() {
     const count = useSignal(1);
     const audio = useSignal(true);
     const popover = useSignal<Popover>(null);
+    const mention = useSignal<Mention | null>(null);
+    const mentionActive = useSignal(0);
 
     const fileInput = useRef<HTMLInputElement>(null);
+    const promptRef = useRef<HTMLTextAreaElement>(null);
     const nextId = useRef(1);
+
+    // Attachments with their display labels: 图片1, 图片2, 视频1, …
+    const labeled = useComputed(() => {
+        const counters: Record<AttachmentKind, number> = {
+            image: 0,
+            video: 0,
+            audio: 0,
+        };
+        return attachments.value.map((a) => ({
+            ...a,
+            label: `${KIND_LABEL[a.kind]}${++counters[a.kind]}`,
+        }));
+    });
 
     const durationLabel = useComputed(() =>
         durationMode.value === "smart" ? "智能" : `${duration.value}秒`
@@ -186,6 +255,77 @@ export default function Seedance() {
         attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
         attachments.value = [];
         prompt.value = "";
+        mention.value = null;
+    };
+
+    const openMention = (ta: HTMLTextAreaElement, atIndex: number) => {
+        const { x, y } = caretCoords(ta, atIndex);
+        // 176px = popup width; keep it inside the editor
+        mention.value = {
+            index: atIndex,
+            x: Math.max(0, Math.min(x, ta.clientWidth - 176)),
+            y,
+        };
+        mentionActive.value = 0;
+    };
+
+    const selectMention = (label: string) => {
+        const m = mention.value;
+        const ta = promptRef.current;
+        if (!m || !ta) return;
+        const text = prompt.value;
+        const insert = `@${label} `;
+        prompt.value = text.slice(0, m.index) + insert +
+            text.slice(m.index + 1);
+        mention.value = null;
+        const caret = m.index + insert.length;
+        requestAnimationFrame(() => {
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+        });
+    };
+
+    const onPromptInput = (ta: HTMLTextAreaElement) => {
+        prompt.value = ta.value;
+        const caret = ta.selectionStart ?? 0;
+        if (caret > 0 && ta.value[caret - 1] === "@") {
+            openMention(ta, caret - 1);
+        } else {
+            mention.value = null;
+        }
+    };
+
+    const onPromptKeyDown = (e: KeyboardEvent) => {
+        if (!mention.value) return;
+        const items = labeled.value;
+        if (e.key === "Escape") {
+            e.preventDefault();
+            mention.value = null;
+        } else if (e.key === "ArrowDown" && items.length > 0) {
+            e.preventDefault();
+            mentionActive.value = (mentionActive.value + 1) % items.length;
+        } else if (e.key === "ArrowUp" && items.length > 0) {
+            e.preventDefault();
+            mentionActive.value = (mentionActive.value + items.length - 1) %
+                items.length;
+        } else if (e.key === "Enter" && items.length > 0) {
+            e.preventDefault();
+            selectMention(items[mentionActive.value].label);
+        }
+    };
+
+    const mentionFromToolbar = () => {
+        const ta = promptRef.current;
+        if (!ta) return;
+        ta.focus();
+        const caret = ta.selectionStart ?? prompt.value.length;
+        const text = prompt.value;
+        prompt.value = text.slice(0, caret) + "@" + text.slice(caret);
+        // Measure after the new value has been rendered into the textarea
+        requestAnimationFrame(() => {
+            ta.setSelectionRange(caret + 1, caret + 1);
+            openMention(ta, caret);
+        });
     };
 
     return (
@@ -217,7 +357,7 @@ export default function Seedance() {
                         }}
                     />
 
-                    {attachments.value.map((att, i) => {
+                    {attachments.value.map((att) => {
                         return (
                             <div
                                 key={att.id}
@@ -276,13 +416,75 @@ export default function Seedance() {
                 </div>
 
                 {/* Prompt */}
-                <textarea
-                    value={prompt.value}
-                    onInput={(e) => prompt.value = e.currentTarget.value}
-                    placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
-                    rows={3}
-                    class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 mb-3"
-                />
+                <div class="relative mb-3">
+                    <textarea
+                        ref={promptRef}
+                        value={prompt.value}
+                        onInput={(e) => onPromptInput(e.currentTarget)}
+                        onKeyDown={onPromptKeyDown}
+                        onBlur={() => mention.value = null}
+                        placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
+                        rows={3}
+                        class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block"
+                    />
+
+                    {/* Mention picker */}
+                    {mention.value && (
+                        <div
+                            class="absolute z-30 w-44 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5"
+                            style={{
+                                left: `${mention.value.x}px`,
+                                top: `${mention.value.y}px`,
+                                transform: "translateY(calc(-100% - 6px))",
+                            }}
+                        >
+                            {labeled.value.length === 0
+                                ? (
+                                    <div class="px-3 py-2 text-sm text-gray-400">
+                                        暂无素材，请先上传
+                                    </div>
+                                )
+                                : labeled.value.map((att, i) => (
+                                    <button
+                                        key={att.id}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => selectMention(att.label)}
+                                        onMouseEnter={() =>
+                                            mentionActive.value = i}
+                                        class={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-sm text-gray-800 ${
+                                            i === mentionActive.value
+                                                ? "bg-indigo-50"
+                                                : ""
+                                        }`}
+                                    >
+                                        <span class="size-8 rounded-md overflow-hidden bg-gray-100 flex items-center justify-center text-gray-400 shrink-0">
+                                            {att.kind === "image" && (
+                                                <img
+                                                    src={att.url}
+                                                    alt={att.label}
+                                                    class="w-full h-full object-cover"
+                                                />
+                                            )}
+                                            {att.kind === "video" && (
+                                                <video
+                                                    src={`${att.url}#t=0.001`}
+                                                    preload="metadata"
+                                                    muted
+                                                    playsInline
+                                                    class="w-full h-full object-cover pointer-events-none"
+                                                />
+                                            )}
+                                            {att.kind === "audio" && (
+                                                <MusicIcon class="size-4" />
+                                            )}
+                                        </span>
+                                        {att.label}
+                                    </button>
+                                ))}
+                        </div>
+                    )}
+                </div>
 
                 {/* Toolbar */}
                 <div class="flex items-center gap-2">
@@ -510,6 +712,7 @@ export default function Seedance() {
                     {/* Mention */}
                     <button
                         type="button"
+                        onClick={mentionFromToolbar}
                         class="size-9 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50"
                         aria-label="引用素材"
                     >
