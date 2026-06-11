@@ -1,6 +1,11 @@
 import { useComputed, useSignal } from "@preact/signals";
 import { useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
+import { SeedanceClient } from "../seedance.ts";
+import type { ContentItem, CreateTaskRequest, Task } from "../seedance.ts";
+const client = new SeedanceClient({
+    apiKey: "ark-d923d38d-5530-46b9-9ce3-912dc4aea736-739de",
+});
 
 type AttachmentKind = "image" | "video" | "audio";
 
@@ -45,6 +50,17 @@ function kindOf(file: File): AttachmentKind {
     if (file.type.startsWith("video/")) return "video";
     if (file.type.startsWith("audio/")) return "audio";
     return "image";
+}
+
+// The API can't fetch blob: object URLs, so inline the bytes as a data URL
+async function toDataUrl(objectUrl: string): Promise<string> {
+    const blob = await (await fetch(objectUrl)).blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+    });
 }
 
 // Mirror-div trick: a textarea exposes no caret geometry, so render the text
@@ -204,6 +220,9 @@ export default function Seedance() {
     const popover = useSignal<Popover>(null);
     const mention = useSignal<Mention | null>(null);
     const mentionActive = useSignal(0);
+    const generating = useSignal(false);
+    const genError = useSignal<string | null>(null);
+    const results = useSignal<Task[]>([]);
 
     const fileInput = useRef<HTMLInputElement>(null);
     const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -311,6 +330,75 @@ export default function Seedance() {
         } else if (e.key === "Enter" && items.length > 0) {
             e.preventDefault();
             selectMention(items[mentionActive.value].label);
+        }
+    };
+
+    const buildRequest = async (): Promise<CreateTaskRequest> => {
+        const content: ContentItem[] = [];
+        const text = prompt.value.trim();
+        if (text) content.push({ type: "text", text });
+        for (const att of attachments.value) {
+            const url = await toDataUrl(att.url);
+            if (att.kind === "image") {
+                content.push({
+                    type: "image_url",
+                    image_url: { url },
+                    role: "reference_image",
+                });
+            } else if (att.kind === "video") {
+                content.push({
+                    type: "video_url",
+                    video_url: { url },
+                    role: "reference_video",
+                });
+            } else {
+                content.push({
+                    type: "audio_url",
+                    audio_url: { url },
+                    role: "reference_audio",
+                });
+            }
+        }
+        return {
+            model: "doubao-seedance-2-0-260128",
+            content,
+            generate_audio: audio.value,
+            ratio: ratio.value === "智能" ? "adaptive" : ratio.value,
+            ...(durationMode.value === "seconds"
+                ? { duration: duration.value }
+                : {}),
+        };
+    };
+
+    const generate = async () => {
+        if (!canSubmit.value || generating.value) return;
+        generating.value = true;
+        genError.value = null;
+        try {
+            const request = await buildRequest();
+            // The API generates one video per task, so 多条 = parallel tasks
+            const tasks = await Promise.all(
+                Array.from(
+                    { length: count.value },
+                    () => client.generate(request, { timeoutMs: 600_000 }),
+                ),
+            );
+            const failed = tasks.find((t) => t.status !== "succeeded");
+            if (failed) {
+                genError.value = failed.error
+                    ? `${failed.error.code}: ${failed.error.message}`
+                    : `任务${failed.status}`;
+            }
+            results.value = [
+                ...tasks.filter((t) =>
+                    t.status === "succeeded" && t.output?.video_url
+                ),
+                ...results.value,
+            ];
+        } catch (err) {
+            genError.value = err instanceof Error ? err.message : String(err);
+        } finally {
+            generating.value = false;
         }
     };
 
@@ -730,20 +818,48 @@ export default function Seedance() {
                         全部清空
                     </button>
 
-                    {/* Submit — API wiring intentionally left out */}
+                    {/* Submit */}
                     <button
                         type="button"
-                        disabled={!canSubmit.value}
+                        disabled={!canSubmit.value || generating.value}
                         class="size-9 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white flex items-center justify-center ml-1"
                         aria-label="生成"
-                        onClick={() => {
-                            console.log("generate!");
-                        }}
+                        onClick={generate}
                     >
-                        <ArrowUpIcon />
+                        {generating.value
+                            ? (
+                                <span class="size-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                            )
+                            : <ArrowUpIcon />}
                     </button>
                 </div>
             </div>
+
+            {/* Generation status & results */}
+            {generating.value && (
+                <div class="mt-6 text-sm text-gray-500">
+                    生成中，预计需要数分钟…
+                </div>
+            )}
+            {genError.value && (
+                <div class="mt-6 text-sm text-red-500 max-w-4xl break-all">
+                    生成失败：{genError.value}
+                </div>
+            )}
+            {results.value.length > 0 && (
+                <div class="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 pb-16">
+                    {results.value.map((task) => (
+                        <video
+                            key={task.id}
+                            src={task.output!.video_url}
+                            poster={task.output!.cover_image_url}
+                            controls
+                            playsInline
+                            class="w-full rounded-xl bg-black"
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Click-away for popovers */}
             {popover.value && (
