@@ -579,7 +579,6 @@ export default function Seedance() {
                             </span>
                             <span class="px-2.5">{resolution.value}</span>
                             <span class="px-2.5">{durationLabel.value}</span>
-                            <span class="px-2.5">{count.value}条</span>
                         </button>
 
                         {popover.value === "settings" && (
