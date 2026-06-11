@@ -333,75 +333,6 @@ export default function Seedance() {
         }
     };
 
-    const buildRequest = async (): Promise<CreateTaskRequest> => {
-        const content: ContentItem[] = [];
-        const text = prompt.value.trim();
-        if (text) content.push({ type: "text", text });
-        for (const att of attachments.value) {
-            const url = await toDataUrl(att.url);
-            if (att.kind === "image") {
-                content.push({
-                    type: "image_url",
-                    image_url: { url },
-                    role: "reference_image",
-                });
-            } else if (att.kind === "video") {
-                content.push({
-                    type: "video_url",
-                    video_url: { url },
-                    role: "reference_video",
-                });
-            } else {
-                content.push({
-                    type: "audio_url",
-                    audio_url: { url },
-                    role: "reference_audio",
-                });
-            }
-        }
-        return {
-            model: "doubao-seedance-2-0-260128",
-            content,
-            generate_audio: audio.value,
-            ratio: ratio.value === "智能" ? "adaptive" : ratio.value,
-            ...(durationMode.value === "seconds"
-                ? { duration: duration.value }
-                : {}),
-        };
-    };
-
-    const generate = async () => {
-        if (!canSubmit.value || generating.value) return;
-        generating.value = true;
-        genError.value = null;
-        try {
-            const request = await buildRequest();
-            // The API generates one video per task, so 多条 = parallel tasks
-            const tasks = await Promise.all(
-                Array.from(
-                    { length: count.value },
-                    () => client.generate(request, { timeoutMs: 600_000 }),
-                ),
-            );
-            const failed = tasks.find((t) => t.status !== "succeeded");
-            if (failed) {
-                genError.value = failed.error
-                    ? `${failed.error.code}: ${failed.error.message}`
-                    : `任务${failed.status}`;
-            }
-            results.value = [
-                ...tasks.filter((t) =>
-                    t.status === "succeeded" && t.output?.video_url
-                ),
-                ...results.value,
-            ];
-        } catch (err) {
-            genError.value = err instanceof Error ? err.message : String(err);
-        } finally {
-            generating.value = false;
-        }
-    };
-
     const mentionFromToolbar = () => {
         const ta = promptRef.current;
         if (!ta) return;
@@ -871,3 +802,71 @@ export default function Seedance() {
         </div>
     );
 }
+
+const generate = async () => {
+    if (!canSubmit.value || generating.value) return;
+    generating.value = true;
+    genError.value = null;
+
+    const content: ContentItem[] = [];
+    const text = prompt.value.trim();
+    if (text) content.push({ type: "text", text });
+    for (const att of attachments.value) {
+        const url = await toDataUrl(att.url);
+        if (att.kind === "image") {
+            content.push({
+                type: "image_url",
+                image_url: { url },
+                role: "reference_image",
+            });
+        } else if (att.kind === "video") {
+            content.push({
+                type: "video_url",
+                video_url: { url },
+                role: "reference_video",
+            });
+        } else {
+            content.push({
+                type: "audio_url",
+                audio_url: { url },
+                role: "reference_audio",
+            });
+        }
+    }
+    const request: CreateTaskRequest = {
+        model: "doubao-seedance-2-0-260128",
+        content,
+        generate_audio: audio.value,
+        ratio: ratio.value === "智能" ? "adaptive" : ratio.value,
+        ...(durationMode.value === "seconds"
+            ? { duration: duration.value }
+            : {}),
+    };
+
+    try {
+        const request = await buildRequest();
+        // The API generates one video per task, so 多条 = parallel tasks
+        const tasks = await Promise.all(
+            Array.from(
+                { length: count.value },
+                () => client.generate(request, { timeoutMs: 600_000 }),
+            ),
+        );
+        const failed = tasks.find((t) => t.status !== "succeeded");
+        if (failed) {
+            genError.value = failed.error
+                ? `${failed.error.code}: ${failed.error.message}`
+                : `任务${failed.status}`;
+        }
+        results.value = [
+            ...tasks.filter((t) =>
+                t.status === "succeeded" && t.output?.video_url
+            ),
+            ...results.value,
+        ];
+    } catch (err) {
+        genError.value = err instanceof Error ? err.message : String(err);
+    } finally {
+        generating.value = false;
+    }
+};
