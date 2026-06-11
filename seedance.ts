@@ -48,12 +48,7 @@ export type AspectRatio =
     | "3:4"
     | (string & {});
 
-export type SeedanceModel =
-    | "doubao-seedance-2-0-260128"
-    | "doubao-seedance-1-0-lite-i2v-250415"
-    | "doubao-seedance-1-0-i2v-250415"
-    | "doubao-seedance-1-0-t2v-250415"
-    | (string & {});
+export type SeedanceModel = "doubao-seedance-2-0-260128";
 
 export interface CreateTaskRequest {
     /** Model ID */
@@ -148,6 +143,65 @@ export interface ListTasksResponse {
 export interface CancelTaskResponse {
     id: string;
     status: TaskStatus;
+}
+
+// ---------------------------------------------------------------------------
+// File API types
+// ---------------------------------------------------------------------------
+
+export type FilePurpose =
+    | "user_data"
+    | "agent";
+
+export type FileStatus = "uploaded" | "processed" | "error";
+
+export interface ArkFile {
+    id: string;
+    object: "file";
+    /** File size in bytes */
+    bytes: number;
+    /** Unix timestamp (seconds) when the file was created */
+    created_at: number;
+    /** Unix timestamp (seconds) when the file expires */
+    expire_at?: number;
+    filename: string;
+    mime_type?: string;
+    purpose: FilePurpose;
+    status: FileStatus;
+    /** Error details when status is "error" */
+    status_details?: string;
+}
+
+export interface ListFilesRequest {
+    /** Filter by purpose */
+    purpose?: FilePurpose;
+    /** Maximum number of files to return (1–10000). Defaults to 10000. */
+    limit?: number;
+    /** Cursor for forward pagination — file ID to start after */
+    after?: string;
+    /** Sort order by created_at. "asc" or "desc". Defaults to "desc". */
+    order?: "asc" | "desc";
+}
+
+export interface ListFilesResponse {
+    object: "list";
+    data: ArkFile[];
+    has_more: boolean;
+    first_id?: string;
+    last_id?: string;
+}
+
+export interface DeleteFileResponse {
+    id: string;
+    object: "file";
+    deleted: boolean;
+}
+
+export interface UploadFileRequest {
+    /** The file content — a Blob, File, or any BodyInit-compatible value */
+    file: Blob | File;
+    /** Intended use of the file */
+    purpose: FilePurpose;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,8 +359,47 @@ export class SeedanceClient {
     }
 
     // -------------------------------------------------------------------------
+    // File API
+    // -------------------------------------------------------------------------
+
+    async uploadFile(request: UploadFileRequest): Promise<ArkFile> {
+        const form = new FormData();
+        form.append("file", request.file);
+        form.append("purpose", request.purpose);
+        return this.postForm<ArkFile>("/files", form);
+    }
+
+    async getFile(fileId: string): Promise<ArkFile> {
+        return this.get<ArkFile>(`/files/${encodeURIComponent(fileId)}`);
+    }
+
+    async listFiles(params?: ListFilesRequest): Promise<ListFilesResponse> {
+        const query = new URLSearchParams();
+        if (params?.purpose) query.set("purpose", params.purpose);
+        if (params?.limit !== undefined) {
+            query.set("limit", String(params.limit));
+        }
+        if (params?.after) query.set("after", params.after);
+        if (params?.order) query.set("order", params.order);
+        const qs = query.toString();
+        return this.get<ListFilesResponse>(`/files${qs ? `?${qs}` : ""}`);
+    }
+
+    async deleteFile(fileId: string): Promise<DeleteFileResponse> {
+        return this.delete<DeleteFileResponse>(
+            `/files/${encodeURIComponent(fileId)}`,
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Internal HTTP helpers
     // -------------------------------------------------------------------------
+
+    async postForm<T>(path: string, form: FormData): Promise<T> {
+        // Do NOT set Content-Type — the browser/runtime must set it with the boundary
+        const res = await this.fetchRaw(path, { method: "POST", body: form });
+        return this.parseResponse<T>(res);
+    }
 
     async post<T>(path: string, body: unknown): Promise<T> {
         const res = await this.fetchRaw(path, {
