@@ -1,4 +1,5 @@
 import { useComputed, useSignal } from "@preact/signals";
+import type { Signal } from "@preact/signals";
 import { useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { SeedanceClient } from "../seedance.ts";
@@ -215,7 +216,6 @@ export default function Seedance() {
     const resolution = useSignal<Resolution>("480p");
     const durationMode = useSignal<DurationMode>("seconds");
     const duration = useSignal(4);
-    const count = useSignal(1);
     const audio = useSignal(true);
     const popover = useSignal<Popover>(null);
     const mention = useSignal<Mention | null>(null);
@@ -306,6 +306,8 @@ export default function Seedance() {
 
     const onPromptInput = (ta: HTMLTextAreaElement) => {
         prompt.value = ta.value;
+        ta.style.height = "auto";
+        ta.style.height = `${ta.scrollHeight}px`;
         const caret = ta.selectionStart ?? 0;
         if (caret > 0 && ta.value[caret - 1] === "@") {
             openMention(ta, caret - 1);
@@ -443,8 +445,8 @@ export default function Seedance() {
                         onKeyDown={onPromptKeyDown}
                         onBlur={() => mention.value = null}
                         placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
-                        rows={3}
-                        class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block"
+                        rows={1}
+                        class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block overflow-hidden"
                     />
 
                     {/* Mention picker */}
@@ -688,28 +690,6 @@ export default function Seedance() {
                                         </span>
                                     </div>
                                 )}
-
-                                <div class="text-sm text-gray-500 mb-2">
-                                    选择生成数量
-                                </div>
-                                <div class="flex items-center gap-4">
-                                    <input
-                                        type="range"
-                                        min={1}
-                                        max={4}
-                                        step={1}
-                                        value={count.value}
-                                        onInput={(e) =>
-                                            count.value = Number(
-                                                e.currentTarget.value,
-                                            )}
-                                        class="flex-1 accent-indigo-500"
-                                    />
-                                    <span class="w-16 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-sm text-gray-700 gap-1">
-                                        {count.value}
-                                        <span class="text-gray-400">条</span>
-                                    </span>
-                                </div>
                             </div>
                         )}
                     </div>
@@ -755,7 +735,23 @@ export default function Seedance() {
                         disabled={!canSubmit.value || generating.value}
                         class="size-9 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white flex items-center justify-center ml-1"
                         aria-label="生成"
-                        onClick={generate}
+                        onClick={async () => {
+                            genError.value = null;
+                            const err = await generate({
+                                prompt: prompt.value.trim(),
+                                attachments: attachments.value,
+                                ratio: ratio.value,
+                                durationMode: durationMode.value,
+                                duration: duration.value,
+                                audio: audio.value,
+                            }, generating);
+                            if (err instanceof Error) {
+                                console.error(err);
+                                genError.value = err.message;
+                            } else {
+                                console.log(err);
+                            }
+                        }}
                     >
                         {generating.value
                             ? (
@@ -803,15 +799,22 @@ export default function Seedance() {
     );
 }
 
-const generate = async () => {
-    if (!canSubmit.value || generating.value) return;
+const generate = async (
+    args: {
+        prompt: string;
+        attachments: Attachment[];
+        ratio: string;
+        durationMode: DurationMode;
+        duration: number;
+        audio: boolean;
+    },
+    generating: Signal<boolean>,
+): Promise<Task | Error> => {
     generating.value = true;
-    genError.value = null;
 
     const content: ContentItem[] = [];
-    const text = prompt.value.trim();
-    if (text) content.push({ type: "text", text });
-    for (const att of attachments.value) {
+    if (args.prompt) content.push({ type: "text", text: args.prompt });
+    for (const att of args.attachments) {
         const url = await toDataUrl(att.url);
         if (att.kind === "image") {
             content.push({
@@ -836,37 +839,22 @@ const generate = async () => {
     const request: CreateTaskRequest = {
         model: "doubao-seedance-2-0-260128",
         content,
-        generate_audio: audio.value,
-        ratio: ratio.value === "智能" ? "adaptive" : ratio.value,
-        ...(durationMode.value === "seconds"
-            ? { duration: duration.value }
-            : {}),
+        generate_audio: args.audio,
+        ratio: args.ratio === "智能" ? "adaptive" : args.ratio,
+        ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
     };
 
-    try {
-        const request = await buildRequest();
-        // The API generates one video per task, so 多条 = parallel tasks
-        const tasks = await Promise.all(
-            Array.from(
-                { length: count.value },
-                () => client.generate(request, { timeoutMs: 600_000 }),
-            ),
+    const task = await client.generate(request, { timeoutMs: 600_000 });
+
+    generating.value = false;
+
+    if (task.status !== "succeeded") {
+        return new Error(
+            task.error
+                ? `${task.error.code}: ${task.error.message}`
+                : `任务${task.status}`,
         );
-        const failed = tasks.find((t) => t.status !== "succeeded");
-        if (failed) {
-            genError.value = failed.error
-                ? `${failed.error.code}: ${failed.error.message}`
-                : `任务${failed.status}`;
-        }
-        results.value = [
-            ...tasks.filter((t) =>
-                t.status === "succeeded" && t.output?.video_url
-            ),
-            ...results.value,
-        ];
-    } catch (err) {
-        genError.value = err instanceof Error ? err.message : String(err);
-    } finally {
-        generating.value = false;
     }
+
+    return task;
 };
