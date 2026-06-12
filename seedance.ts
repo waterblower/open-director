@@ -164,11 +164,10 @@ export type TaskStatus =
     | "cancelled"
     | "expired";
 
-export interface TaskOutput {
+export interface TaskContent {
+    /** URL of the generated video. Present once the task has succeeded. Valid for 24h. */
     video_url?: string;
-    audio_url?: string;
-    cover_image_url?: string;
-    /** Last frame of the video (PNG, no watermark) when return_last_frame was true */
+    /** URL of the video's last frame image. Returned when return_last_frame was true. Valid for 24h. */
     last_frame_url?: string;
 }
 
@@ -178,10 +177,10 @@ export interface TaskError {
 }
 
 export interface TaskUsage {
+    /** Tokens consumed generating the video */
+    completion_tokens?: number;
     /** Total tokens consumed */
     total_tokens?: number;
-    /** Video duration in seconds billed */
-    video_duration?: number;
 }
 
 export interface Task {
@@ -191,39 +190,38 @@ export interface Task {
     model: string;
     /** Current task status */
     status: TaskStatus;
+    /** Generated output. `video_url` is present once status is "succeeded". */
+    content?: TaskContent;
+    usage?: TaskUsage;
     /** Unix timestamp (seconds) when the task was created */
     created_at: number;
-    /** Unix timestamp (seconds) when the task finished */
-    finished_at?: number;
-    /** The content submitted in the creation request */
-    content: ContentItem[];
-    /** Available when status is "succeeded" */
-    output?: TaskOutput;
+    /** Unix timestamp (seconds) when the task was last updated */
+    updated_at?: number;
+    /** Random seed used for generation */
+    seed?: number;
+    resolution?: Resolution;
+    ratio?: AspectRatio;
+    /** Output duration in whole seconds */
+    duration?: number;
+    /** Output frame rate */
+    framespersecond?: number;
+    service_tier?: ServiceTier;
+    /** Task expiry in seconds, counted from created_at */
+    execution_expires_after?: number;
+    generate_audio?: boolean;
+    draft?: boolean;
+    priority?: number;
     /** Available when status is "failed" */
     error?: TaskError;
-    usage?: TaskUsage;
 }
 
 // ---------------------------------------------------------------------------
 // List endpoint types
 // ---------------------------------------------------------------------------
 
-export interface ListTasksRequest {
-    /** Page number, 1-based */
-    page_num?: number;
-    /** Items per page */
-    page_size?: number;
-    /** Filter by status */
-    status?: TaskStatus;
-    /** Filter by model */
-    model?: string;
-}
-
 export interface ListTasksResponse {
     items: Task[];
     total: number;
-    page_num: number;
-    page_size: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,8 +316,6 @@ export interface SeedanceClientOptions {
     apiKey: string;
     /** Defaults to "https://ark.cn-beijing.volces.com/api/v3" */
     baseUrl?: string;
-    /** Default fetch timeout in milliseconds. Defaults to 30_000. */
-    timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,14 +336,12 @@ export interface PollOptions {
 export class SeedanceClient {
     readonly apiKey: string;
     readonly baseUrl: string;
-    readonly timeoutMs: number;
 
     constructor(options: SeedanceClientOptions) {
         this.apiKey = options.apiKey;
         this.baseUrl =
             (options.baseUrl ?? "https://ark.cn-beijing.volces.com/api/v3")
                 .replace(/\/$/, "");
-        this.timeoutMs = options.timeoutMs ?? 30_000;
     }
 
     // -------------------------------------------------------------------------
@@ -375,7 +369,20 @@ export class SeedanceClient {
     // GET /contents/generations/tasks
     // -------------------------------------------------------------------------
 
-    async listTasks(params?: ListTasksRequest): Promise<ListTasksResponse> {
+    async listTasks(params?: {
+        /** Page number, 1-based. Range [1, 500]. Defaults to 1. */
+        page_num?: number;
+        /** Items per page. Range [1, 500]. Defaults to 20. */
+        page_size?: number;
+        /** Filter by task status */
+        status?: TaskStatus;
+        /** Filter by task IDs (exact match, multiple allowed) */
+        task_ids?: string[];
+        /** Filter by inference endpoint ID (exact match) */
+        model?: string;
+        /** Filter by service tier */
+        service_tier?: ServiceTier;
+    }): Promise<ListTasksResponse> {
         const query = new URLSearchParams();
         if (params?.page_num !== undefined) {
             query.set("page_num", String(params.page_num));
@@ -383,10 +390,17 @@ export class SeedanceClient {
         if (params?.page_size !== undefined) {
             query.set("page_size", String(params.page_size));
         }
-        if (params?.status) query.set("status", params.status);
-        if (params?.model) query.set("model", params.model);
+        if (params?.status) query.set("filter.status", params.status);
+        // task_ids is passed as a repeated query parameter
+        for (const id of params?.task_ids ?? []) {
+            query.append("filter.task_ids", id);
+        }
+        if (params?.model) query.set("filter.model", params.model);
+        if (params?.service_tier) {
+            query.set("filter.service_tier", params.service_tier);
+        }
         const qs = query.toString();
-        return this.get<ListTasksResponse>(
+        return await this.get<ListTasksResponse>(
             `/contents/generations/tasks${qs ? `?${qs}` : ""}`,
         );
     }
@@ -513,7 +527,7 @@ export class SeedanceClient {
     async fetchRaw(path: string, init: RequestInit): Promise<Response> {
         const url = `${this.baseUrl}${path}`;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        const timer = setTimeout(() => controller.abort(), 1000 * 60 * 30); // 30 minutes
 
         try {
             return await fetch(url, {

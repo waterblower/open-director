@@ -223,281 +223,7 @@ export default function Seedance() {
     const mentionActive = useSignal(0);
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
-    const results = useSignal<Task[]>([
-        {
-            id: "1",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{
-                type: "text",
-                text: "赛博朋克城市夜景，霓虹灯反射在雨后街道上",
-            }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/a1/640/360",
-            },
-        },
-        {
-            id: "2",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "水墨风格山水，云雾缭绕" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/b2/640/360",
-            },
-        },
-        {
-            id: "3",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "宇宙星云特写，粒子流动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/c3/640/360",
-            },
-        },
-        {
-            id: "4",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "森林晨雾，阳光透过树叶" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/d4/640/360",
-            },
-        },
-        {
-            id: "5",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "极光在夜空中舞动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/e5/640/360",
-            },
-        },
-        {
-            id: "6",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "深海水母漂浮，蓝色发光" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/f6/640/360",
-            },
-        },
-        {
-            id: "7",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "火山爆发，熔岩流入大海" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/g7/640/360",
-            },
-        },
-        {
-            id: "8",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "樱花飘落，微风轻拂" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/h8/640/360",
-            },
-        },
-        {
-            id: "1",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{
-                type: "text",
-                text: "赛博朋克城市夜景，霓虹灯反射在雨后街道上",
-            }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/a1/640/360",
-            },
-        },
-        {
-            id: "2",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "水墨风格山水，云雾缭绕" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/b2/640/360",
-            },
-        },
-        {
-            id: "3",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "宇宙星云特写，粒子流动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/c3/640/360",
-            },
-        },
-        {
-            id: "4",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "森林晨雾，阳光透过树叶" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/d4/640/360",
-            },
-        },
-        {
-            id: "5",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "极光在夜空中舞动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/e5/640/360",
-            },
-        },
-        {
-            id: "6",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "深海水母漂浮，蓝色发光" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/f6/640/360",
-            },
-        },
-        {
-            id: "7",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "火山爆发，熔岩流入大海" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/g7/640/360",
-            },
-        },
-        {
-            id: "8",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "樱花飘落，微风轻拂" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/h8/640/360",
-            },
-        },
-        {
-            id: "1",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{
-                type: "text",
-                text: "赛博朋克城市夜景，霓虹灯反射在雨后街道上",
-            }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/a1/640/360",
-            },
-        },
-        {
-            id: "2",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "水墨风格山水，云雾缭绕" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/b2/640/360",
-            },
-        },
-        {
-            id: "3",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "宇宙星云特写，粒子流动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/c3/640/360",
-            },
-        },
-        {
-            id: "4",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "森林晨雾，阳光透过树叶" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/d4/640/360",
-            },
-        },
-        {
-            id: "5",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "极光在夜空中舞动" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/e5/640/360",
-            },
-        },
-        {
-            id: "6",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "深海水母漂浮，蓝色发光" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/f6/640/360",
-            },
-        },
-        {
-            id: "7",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "火山爆发，熔岩流入大海" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/g7/640/360",
-            },
-        },
-        {
-            id: "8",
-            model: "doubao-seedance-2-0-260128",
-            status: "succeeded",
-            created_at: 0,
-            content: [{ type: "text", text: "樱花飘落，微风轻拂" }],
-            output: {
-                video_url: "",
-                cover_image_url: "https://picsum.photos/seed/h8/640/360",
-            },
-        },
-    ]);
+    const generated_videos = useSignal<Task[]>([]);
 
     const fileInput = useRef<HTMLInputElement>(null);
     const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -515,6 +241,16 @@ export default function Seedance() {
         const ro = new ResizeObserver(update);
         ro.observe(el);
         return () => ro.disconnect();
+    }, []);
+
+    // Fetch existing tasks on load
+    useEffect(() => {
+        client.listTasks()
+            .then((res) => {
+                console.log(res);
+                generated_videos.value = res.items;
+            })
+            .catch((err) => console.error("listTasks failed:", err));
     }, []);
 
     // Attachments with their display labels: 图片1, 图片2, 视频1, …
@@ -643,7 +379,7 @@ export default function Seedance() {
             {/* Background grid of generated videos */}
             <ResultsGrid
                 generating={generating}
-                results={results}
+                results={generated_videos}
                 bottomInset={composerInset}
             />
 
@@ -828,7 +564,7 @@ export default function Seedance() {
                             </button>
 
                             {popover.value === "mode" && (
-                                <div class="absolute left-0 top-11 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
+                                <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
                                     <div class="px-3 py-2 text-sm text-gray-400">
                                         选择模式
                                     </div>
@@ -894,7 +630,7 @@ export default function Seedance() {
                             </button>
 
                             {popover.value === "settings" && (
-                                <div class="absolute left-0 top-11 z-20 w-[560px] bg-white rounded-xl shadow-xl border border-gray-100 p-5">
+                                <div class="absolute left-0 bottom-full mb-2 z-20 w-[560px] bg-white rounded-xl shadow-xl border border-gray-100 p-5">
                                     <div class="text-sm text-gray-500 mb-2">
                                         视频比例
                                     </div>
@@ -1050,19 +786,24 @@ export default function Seedance() {
                             aria-label="生成"
                             onClick={async () => {
                                 genError.value = null;
-                                const err = await generate({
+                                const args = {
                                     prompt: prompt.value.trim(),
                                     attachments: attachments.value,
                                     ratio: ratio.value,
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,
-                                }, generating);
-                                if (err instanceof Error) {
-                                    console.error(err);
-                                    genError.value = err.message;
+                                };
+                                const task_p = generate(args, generating);
+                                console.log("generate", args);
+                                const task = await task_p;
+                                if (task instanceof Error) {
+                                    console.error(task);
+                                    genError.value = task.message;
                                 } else {
-                                    console.log(err);
+                                    console.log(task);
+                                    generated_videos.value = generated_videos
+                                        .value.concat([task]);
                                 }
                             }}
                         >

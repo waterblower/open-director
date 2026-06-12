@@ -1,5 +1,5 @@
 import type { Signal } from "@preact/signals";
-import type { Task, TextContent } from "../seedance.ts";
+import type { Task } from "../seedance.ts";
 
 function VideoIcon(props: { class?: string }) {
     return (
@@ -44,34 +44,38 @@ export function ResultsGrid(
                     </div>
                 )}
                 {results.value.map((task) => {
-                    const caption = (task.content.find((c): c is TextContent =>
-                        c.type === "text"
-                    ))?.text ?? task.id;
+                    const url = task.content?.video_url;
                     return (
                         <div
                             key={task.id}
                             class="relative group rounded-xl overflow-hidden bg-gray-900 cursor-pointer"
                         >
-                            <video
-                                src={task.output!.video_url}
-                                poster={task.output!.cover_image_url}
-                                playsInline
-                                preload="none"
-                                class="w-full aspect-video object-cover"
-                                onMouseEnter={(e) =>
-                                    (e.currentTarget as HTMLVideoElement)
-                                        .play()}
-                                onMouseLeave={(e) => {
-                                    const v = e
-                                        .currentTarget as HTMLVideoElement;
-                                    v.pause();
-                                    v.currentTime = 0;
-                                }}
-                            />
-                            <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5">
+                            {url
+                                ? (
+                                    <video
+                                        // #t=0.1 forces browsers to paint the first frame as a thumbnail
+                                        src={`${url}#t=0.1`}
+                                        preload="metadata"
+                                        playsInline
+                                        controls
+                                        class="w-full aspect-video object-cover"
+                                        onClick={(e) => {
+                                            const v = e
+                                                .currentTarget as HTMLVideoElement;
+                                            if (v.paused) v.play();
+                                            else v.pause();
+                                        }}
+                                    />
+                                )
+                                : (
+                                    <div class="w-full aspect-video flex items-center justify-center text-gray-600">
+                                        <VideoIcon class="size-8" />
+                                    </div>
+                                )}
+                            <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
                                 <VideoIcon class="size-3.5 text-white/60 shrink-0" />
                                 <span class="text-white/90 text-[11px] leading-tight truncate">
-                                    {caption}
+                                    {task.id}
                                 </span>
                             </div>
                         </div>
