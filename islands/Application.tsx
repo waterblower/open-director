@@ -9,6 +9,7 @@ import {
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
+import { seedance_client } from "../seedance_client.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
 const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -17,7 +18,7 @@ const DEFAULT_SIDEBAR_WIDTH = 240;
 // Island
 // ---------------------------------------------------------------------------
 
-export default function Seedance() {
+export default function Application() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
     const generated_videos = useSignal<Task[]>([]);
@@ -28,9 +29,20 @@ export default function Seedance() {
 
     // Load videos from the project's .project dir on mount
     useEffect(() => {
-        trpc.listProjectVideos.query()
-            .then((vids) => generated_videos.value = vids)
-            .catch((err) => console.error(err));
+        (async () => {
+            const vids = await trpc.listProjectVideos.query();
+            generated_videos.value = vids;
+
+            const tasks = await seedance_client.listTasks({
+                status: "running",
+            });
+            if (tasks instanceof Error) {
+                console.error(tasks);
+                return;
+            }
+            console.log(tasks.items);
+            generated_videos.value = tasks.items.concat(vids);
+        })();
     }, []);
 
     // Restore the saved sidebar width on mount.

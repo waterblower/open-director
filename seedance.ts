@@ -344,15 +344,6 @@ export class SeedanceClient {
     }
 
     // -------------------------------------------------------------------------
-    // Create a video generation task
-    // POST /contents/generations/tasks
-    // -------------------------------------------------------------------------
-
-    async createTask(request: CreateTaskRequest): Promise<Task | Error> {
-        return await this.post<Task>("/contents/generations/tasks", request);
-    }
-
-    // -------------------------------------------------------------------------
     // Query a single task by ID
     // GET /contents/generations/tasks/{id}
     // -------------------------------------------------------------------------
@@ -420,7 +411,7 @@ export class SeedanceClient {
     // -------------------------------------------------------------------------
 
     async generate(request: CreateTaskRequest): Promise<Task | Error> {
-        return await this.createTask(request);
+        return await this.post<Task>("/contents/generations/tasks", request);
     }
 
     // -------------------------------------------------------------------------

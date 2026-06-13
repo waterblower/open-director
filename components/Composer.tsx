@@ -1,7 +1,7 @@
 import { type Signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { client } from "../seedance_client.ts";
+import { seedance_client } from "../seedance_client.ts";
 import type {
     AspectRatio,
     ContentItem,
@@ -209,6 +209,11 @@ function MusicIcon(props: { class?: string }) {
 // Generate
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a Seedance request from the composer's inputs, submit it, and wait for
+ * the task to finish. Flips `generating` while in flight and returns the
+ * finished Task on success, or an Error (never throws) on any failure.
+ */
 const generate = async (
     args: {
         prompt: string;
@@ -222,6 +227,9 @@ const generate = async (
 ): Promise<Task | Error> => {
     generating.value = true;
 
+    // Assemble the multimodal content array: optional text prompt followed by
+    // each attachment as a reference. Attachments are blob: object URLs, which
+    // the API can't fetch, so inline their bytes as data URLs.
     const content: ContentItem[] = [];
     if (args.prompt) content.push({ type: "text", text: args.prompt });
     for (const att of args.attachments) {
@@ -251,15 +259,20 @@ const generate = async (
         content,
         generate_audio: args.audio,
         ratio: args.ratio,
+        // "smart" duration lets the model decide; only send a fixed duration
+        // when the user picked "seconds".
         ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
     };
 
-    const task = await client.generate(request);
+    // Creates the task and polls until it reaches a terminal state.
+    const task = await seedance_client.generate(request);
 
     generating.value = false;
 
+    // Transport/SDK failure (the client returns Errors instead of throwing).
     if (task instanceof Error) return task;
 
+    // Task ran but didn't succeed (failed/cancelled/expired) — surface why.
     if (task.status !== "succeeded") {
         return new Error(
             task.error

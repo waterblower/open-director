@@ -46,6 +46,8 @@ export function ResultsGrid(
                 )}
                 {results.value.map((task) => {
                     const url = task.content?.video_url;
+                    const isPending = task.status === "running" ||
+                        task.status === "queued";
                     // Project-relative path, e.g. ".project/vid1.mp4"
                     const rel = url
                         ? decodeURIComponent(
@@ -63,7 +65,13 @@ export function ResultsGrid(
                             }}
                             class="relative group rounded-xl overflow-hidden bg-gray-900 cursor-pointer"
                         >
-                            {url
+                            {isPending
+                                ? (
+                                    <div class="w-full aspect-video flex items-center justify-center">
+                                        <span class="size-7 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
+                                    </div>
+                                )
+                                : url
                                 ? (
                                     <video
                                         // #t=0.1 forces browsers to paint the first frame as a thumbnail
