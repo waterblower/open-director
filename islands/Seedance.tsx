@@ -10,6 +10,7 @@ import type {
     Task,
 } from "../seedance.ts";
 import { ResultsGrid } from "../components/ResultsGrid.tsx";
+import { DUMMY_ENTRIES, FileExplorer } from "../components/FileExplorer.tsx";
 const client = new SeedanceClient({
     apiKey: "ark-d923d38d-5530-46b9-9ce3-912dc4aea736-739de",
 });
@@ -229,6 +230,7 @@ export default function Seedance() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
     const generated_videos = useSignal<Task[]>([]);
+    const selectedFile = useSignal<string | null>(null);
 
     const fileInput = useRef<HTMLInputElement>(null);
     const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -382,6 +384,9 @@ export default function Seedance() {
 
     return (
         <div class="relative min-h-screen bg-[#f7f8fa]">
+            {/* File explorer sidebar */}
+            <FileExplorer entries={DUMMY_ENTRIES} selected={selectedFile} />
+
             {/* Background grid of generated videos */}
             <ResultsGrid
                 generating={generating}
@@ -389,10 +394,10 @@ export default function Seedance() {
                 bottomInset={composerInset}
             />
 
-            {/* Floating composer */}
+            {/* Floating composer — centered within the area right of the sidebar */}
             <div
                 ref={composerRef}
-                class="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 w-full max-w-3xl px-4"
+                class="fixed bottom-6 left-60 right-0 mx-auto z-20 w-full max-w-3xl px-4"
             >
                 {genError.value && (
                     <div class="mb-3 text-sm text-red-500 break-all bg-white/90 backdrop-blur rounded-lg px-3 py-2 shadow">
