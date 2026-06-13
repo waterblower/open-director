@@ -365,10 +365,29 @@ export function FileExplorer(props: {
                 style={{ width: `${width.value}px` }}
                 class="fixed left-0 top-0 bottom-0 z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200"
             >
-                <div class="px-4 h-12 flex items-center border-b border-gray-100 shrink-0">
+                <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
                     <span class="text-sm font-semibold text-gray-800">
                         项目文件
                     </span>
+                    <button
+                        type="button"
+                        title="打开项目根目录"
+                        aria-label="打开项目根目录"
+                        onClick={() => openInDefault("")}
+                        class="-mr-1 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                    >
+                        <svg
+                            class="size-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+                        </svg>
+                    </button>
                 </div>
                 <div class="flex-1 overflow-y-auto py-1.5">
                     {error.value
