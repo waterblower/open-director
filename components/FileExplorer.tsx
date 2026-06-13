@@ -365,30 +365,32 @@ export function FileExplorer(props: {
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
-        trpc.listProjectFiles.query()
-            .then((res) => root.value = res)
-            .catch((err) => {
-                console.error(err);
-                error.value = String(err);
-            });
+        listProjectFiles().then((res) => {
+            if (res instanceof Error) {
+                console.error(res);
+                error.value = String(res);
+                return;
+            }
+            root.value = res;
+        });
     }, []);
 
     const loadChildren = async (path: string): Promise<FileEntry[]> => {
         // Re-fetch even when cached so reopening shows the latest state — the
         // stale cache stays rendered until fresh data arrives.
         loading.value = new Set(loading.value).add(path);
-        try {
-            const res = await trpc.listProjectFiles.query(path);
-            childrenByPath.value = { ...childrenByPath.value, [path]: res };
-            return res;
-        } catch (err) {
-            console.error(err);
+
+        const next = new Set(loading.value);
+        next.delete(path);
+        loading.value = next;
+
+        const res = await listProjectFiles(path);
+        if (res instanceof Error) {
+            console.error(res);
             return childrenByPath.value[path] ?? [];
-        } finally {
-            const next = new Set(loading.value);
-            next.delete(path);
-            loading.value = next;
         }
+        childrenByPath.value = { ...childrenByPath.value, [path]: res };
+        return res;
     };
 
     const openInDefault = (path: string) => {
@@ -453,7 +455,10 @@ export function FileExplorer(props: {
                 const name = dest.split("/").pop() ?? "";
                 if (destDir === "") {
                     // Root listing is driven by `root`, not childrenByPath.
-                    const fresh = await trpc.listProjectFiles.query();
+                    const fresh = await listProjectFiles();
+                    if (fresh instanceof Error) {
+                        return console.error(fresh);
+                    }
                     // Guarantee the new file is visible even if the refresh
                     // didn't pick it up yet.
                     root.value = fresh.some((e) => e.name === name)
@@ -476,7 +481,11 @@ export function FileExplorer(props: {
     /** Refresh a directory's listing (root listing lives in `root`). */
     const refreshDir = async (dir: string) => {
         if (dir === "") {
-            root.value = await trpc.listProjectFiles.query();
+            const files = await listProjectFiles();
+            if (files instanceof Error) {
+                return console.error(files);
+            }
+            root.value = files;
         } else {
             await loadChildren(dir);
         }
@@ -674,4 +683,16 @@ export function FileExplorer(props: {
             )}
         </>
     );
+}
+
+async function listProjectFiles(path?: string) {
+    /** OS junk files that should never be shown in the explorer. */
+    const HIDDEN_NAMES = new Set([".DS_Store"]);
+
+    try {
+        const res = await trpc.listProjectFiles.query(path);
+        return res.filter((e) => !HIDDEN_NAMES.has(e.name));
+    } catch (err) {
+        return err as Error;
+    }
 }
