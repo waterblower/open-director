@@ -1,7 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { Task } from "../seedance.ts";
-import { client } from "../seedance_client.ts";
+import { trpc } from "../trpc/client.ts";
 import { ResultsGrid } from "../components/ResultsGrid.tsx";
 import { FileExplorer } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
@@ -18,15 +18,11 @@ export default function Seedance() {
     // Composer reports its measured height here to pad the results grid.
     const composerInset = useSignal(0);
 
-    // Fetch existing tasks on load
+    // Load videos from the project's .project dir on mount
     useEffect(() => {
-        client.listTasks().then((res) => {
-            if (res instanceof Error) {
-                console.error(res);
-                return;
-            }
-            generated_videos.value = res.items;
-        });
+        trpc.listProjectVideos.query()
+            .then((vids) => generated_videos.value = vids)
+            .catch((err) => console.error(err));
     }, []);
 
     return (

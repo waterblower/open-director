@@ -67,22 +67,28 @@ interface TreeState {
     loading: Signal<Set<string>>;
     selected?: Signal<string | null>;
     onSelect?: (entry: FileEntry, path: string) => void;
-    /** Lazily fetch + cache a directory's children. */
-    loadChildren: (path: string) => void;
+    /** Lazily fetch + cache a directory's children, returning the result. */
+    loadChildren: (path: string) => Promise<FileEntry[]>;
+    /** Open the right-click context menu for an entry at the cursor. */
+    openMenu: (path: string, x: number, y: number) => void;
 }
 
-function Node(props: { entry: FileEntry; path: string; depth: number; tree: TreeState }) {
+function Node(
+    props: { entry: FileEntry; path: string; depth: number; tree: TreeState },
+) {
     const { entry, path, depth, tree } = props;
     const isOpen = tree.expanded.value.has(path);
     const isActive = tree.selected?.value === path;
     const kids = tree.childrenByPath.value[path];
-    const isLoading = tree.loading.value.has(path);
 
     const onClick = () => {
         if (tree.selected) tree.selected.value = path;
         tree.onSelect?.(entry, path);
         if (!entry.isDirectory) return;
 
+        // Toggle the open state immediately (the chevron rotates either way).
+        // The children list only renders once loaded, so an empty dir simply
+        // shows nothing under it — no "loading" row that flashes in and out.
         const next = new Set(tree.expanded.value);
         if (next.has(path)) {
             next.delete(path);
@@ -98,6 +104,10 @@ function Node(props: { entry: FileEntry; path: string; depth: number; tree: Tree
             <button
                 type="button"
                 onClick={onClick}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    tree.openMenu(path, e.clientX, e.clientY);
+                }}
                 style={{ paddingLeft: `${depth * 14 + 12}px` }}
                 class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
                     isActive ? "bg-indigo-50 text-indigo-600" : "text-gray-700"
@@ -109,26 +119,16 @@ function Node(props: { entry: FileEntry; path: string; depth: number; tree: Tree
                 {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
                 <span class="truncate">{entry.name}</span>
             </button>
-            {entry.isDirectory && isOpen && (
-                isLoading && !kids
-                    ? (
-                        <div
-                            style={{ paddingLeft: `${(depth + 1) * 14 + 12}px` }}
-                            class="py-1.5 text-xs text-gray-400"
-                        >
-                            加载中…
-                        </div>
-                    )
-                    : kids?.map((child) => (
-                        <Node
-                            key={child.name}
-                            entry={child}
-                            path={`${path}/${child.name}`}
-                            depth={depth + 1}
-                            tree={tree}
-                        />
-                    ))
-            )}
+            {entry.isDirectory && isOpen &&
+                kids?.map((child) => (
+                    <Node
+                        key={child.name}
+                        entry={child}
+                        path={`${path}/${child.name}`}
+                        depth={depth + 1}
+                        tree={tree}
+                    />
+                ))}
         </>
     );
 }
@@ -142,6 +142,7 @@ export function FileExplorer(props: {
     const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
     const expanded = useSignal<Set<string>>(new Set());
     const loading = useSignal<Set<string>>(new Set());
+    const menu = useSignal<{ path: string; x: number; y: number } | null>(null);
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
@@ -153,22 +154,27 @@ export function FileExplorer(props: {
             });
     }, []);
 
-    const loadChildren = (path: string) => {
+    const loadChildren = async (path: string): Promise<FileEntry[]> => {
         // Re-fetch even when cached so reopening shows the latest state — the
-        // stale cache stays rendered until fresh data arrives. Only skip if a
-        // request for this path is already in flight.
-        if (loading.value.has(path)) return;
+        // stale cache stays rendered until fresh data arrives.
         loading.value = new Set(loading.value).add(path);
-        trpc.listProjectFiles.query(path)
-            .then((res) => {
-                childrenByPath.value = { ...childrenByPath.value, [path]: res };
-            })
-            .catch((err) => console.error(err))
-            .finally(() => {
-                const next = new Set(loading.value);
-                next.delete(path);
-                loading.value = next;
-            });
+        try {
+            const res = await trpc.listProjectFiles.query(path);
+            childrenByPath.value = { ...childrenByPath.value, [path]: res };
+            return res;
+        } catch (err) {
+            console.error(err);
+            return childrenByPath.value[path] ?? [];
+        } finally {
+            const next = new Set(loading.value);
+            next.delete(path);
+            loading.value = next;
+        }
+    };
+
+    const openInDefault = (path: string) => {
+        menu.value = null;
+        trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
     };
 
     const tree: TreeState = {
@@ -178,34 +184,76 @@ export function FileExplorer(props: {
         selected: props.selected,
         onSelect: props.onSelect,
         loadChildren,
+        openMenu: (path, x, y) => menu.value = { path, x, y },
     };
 
     return (
-        <aside class="fixed left-0 top-0 bottom-0 z-30 w-60 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200">
-            <div class="px-4 h-12 flex items-center border-b border-gray-100 shrink-0">
-                <span class="text-sm font-semibold text-gray-800">项目文件</span>
-            </div>
-            <div class="flex-1 overflow-y-auto py-1.5">
-                {error.value
-                    ? (
-                        <div class="px-4 py-3 text-xs text-red-500 break-all">
-                            加载失败：{error.value}
-                        </div>
-                    )
-                    : root.value === null
-                    ? <div class="px-4 py-3 text-xs text-gray-400">加载中…</div>
-                    : root.value.length === 0
-                    ? <div class="px-4 py-3 text-xs text-gray-400">暂无文件</div>
-                    : root.value.map((entry) => (
-                        <Node
-                            key={entry.name}
-                            entry={entry}
-                            path={entry.name}
-                            depth={0}
-                            tree={tree}
-                        />
-                    ))}
-            </div>
-        </aside>
+        <>
+            <aside class="fixed left-0 top-0 bottom-0 z-30 w-60 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200">
+                <div class="px-4 h-12 flex items-center border-b border-gray-100 shrink-0">
+                    <span class="text-sm font-semibold text-gray-800">
+                        项目文件
+                    </span>
+                </div>
+                <div class="flex-1 overflow-y-auto py-1.5">
+                    {error.value
+                        ? (
+                            <div class="px-4 py-3 text-xs text-red-500 break-all">
+                                加载失败：{error.value}
+                            </div>
+                        )
+                        : root.value === null
+                        ? (
+                            <div class="px-4 py-3 text-xs text-gray-400">
+                                加载中…
+                            </div>
+                        )
+                        : root.value.length === 0
+                        ? (
+                            <div class="px-4 py-3 text-xs text-gray-400">
+                                暂无文件
+                            </div>
+                        )
+                        : root.value.map((entry) => (
+                            <Node
+                                key={entry.name}
+                                entry={entry}
+                                path={entry.name}
+                                depth={0}
+                                tree={tree}
+                            />
+                        ))}
+                </div>
+            </aside>
+
+            {/* Right-click context menu */}
+            {menu.value && (
+                <>
+                    <div
+                        class="fixed inset-0 z-40"
+                        onClick={() => menu.value = null}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            menu.value = null;
+                        }}
+                    />
+                    <div
+                        class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
+                        style={{
+                            left: `${menu.value.x}px`,
+                            top: `${menu.value.y}px`,
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => openInDefault(menu.value!.path)}
+                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                        >
+                            用默认程序打开
+                        </button>
+                    </div>
+                </>
+            )}
+        </>
     );
 }
