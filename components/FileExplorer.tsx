@@ -108,7 +108,7 @@ function FileIcon() {
     );
 }
 
-// Shared per-explorer state, threaded down the tree.
+// Shared per-explorer reactive state, threaded down the tree.
 interface TreeState {
     /** Loaded children keyed by directory path (relative to project root). */
     childrenByPath: Signal<Record<string, FileEntry[]>>;
@@ -117,28 +117,96 @@ interface TreeState {
     /** Directory paths whose children are being fetched. */
     loading: Signal<Set<string>>;
     selected?: Signal<string | null>;
+    /** Directory path currently hovered during a drag (for highlight). */
+    dragOver: Signal<string | null>;
+    /** Path of the entry being renamed inline, or null. */
+    renaming: Signal<string | null>;
+}
+
+// Per-explorer callbacks, kept off the reactive `TreeState` data model and
+// threaded down the tree alongside it.
+interface TreeCallbacks {
     onSelect?: (entry: FileEntry, path: string) => void;
     /** Lazily fetch + cache a directory's children, returning the result. */
     loadChildren: (path: string) => Promise<FileEntry[]>;
     /** Open the right-click context menu for an entry at the cursor. */
     openMenu: (entry: FileEntry, path: string, x: number, y: number) => void;
-    /** Directory path currently hovered during a drag (for highlight). */
-    dragOver: Signal<string | null>;
     /** Copy a dragged project file into the given directory path. */
     dropFile: (src: string, destDir: string) => void;
+    /** Commit an inline rename; `name` is the new base name (no slashes). */
+    commitRename: (path: string, name: string) => void;
+}
+
+/**
+ * Inline rename input, shown in place of an entry's row. Focuses on mount and
+ * pre-selects the file stem (the name minus its extension) like VS Code does.
+ */
+function RenameInput(
+    props: {
+        entry: FileEntry;
+        depth: number;
+        onCommit: (name: string) => void;
+        onCancel: () => void;
+    },
+) {
+    const { entry, depth } = props;
+    return (
+        <div
+            style={{ paddingLeft: `${depth * 14 + 12}px` }}
+            class="w-full flex items-center gap-1.5 pr-3 py-1 text-sm"
+        >
+            <span class="w-3.5 shrink-0" />
+            {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
+            <input
+                type="text"
+                value={entry.name}
+                ref={(el) => {
+                    if (!el) return;
+                    el.focus();
+                    // Select the stem (before the last dot) for files; for a
+                    // dotfile or directory, select the whole name.
+                    const dot = entry.isFile ? entry.name.lastIndexOf(".") : -1;
+                    el.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        props.onCommit((e.currentTarget as HTMLInputElement)
+                            .value.trim());
+                    } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        props.onCancel();
+                    }
+                }}
+                onBlur={(e) =>
+                    props.onCommit(
+                        (e.currentTarget as HTMLInputElement).value.trim(),
+                    )}
+                class="flex-1 min-w-0 px-1 py-0 text-sm text-gray-800 bg-white border border-indigo-400 rounded outline-none focus:ring-1 focus:ring-indigo-300"
+            />
+        </div>
+    );
 }
 
 function Node(
-    props: { entry: FileEntry; path: string; depth: number; tree: TreeState },
+    props: {
+        entry: FileEntry;
+        path: string;
+        depth: number;
+        tree: TreeState;
+        callbacks: TreeCallbacks;
+    },
 ) {
-    const { entry, path, depth, tree } = props;
+    const { entry, path, depth, tree, callbacks } = props;
     const isOpen = tree.expanded.value.has(path);
     const isActive = tree.selected?.value === path;
+    const isRenaming = tree.renaming.value === path;
     const kids = tree.childrenByPath.value[path];
 
     const onClick = () => {
         if (tree.selected) tree.selected.value = path;
-        tree.onSelect?.(entry, path);
+        callbacks.onSelect?.(entry, path);
         if (!entry.isDirectory) return;
 
         // Toggle the open state immediately (the chevron rotates either way).
@@ -149,68 +217,88 @@ function Node(
             next.delete(path);
         } else {
             next.add(path);
-            tree.loadChildren(path);
+            callbacks.loadChildren(path);
         }
         tree.expanded.value = next;
     };
 
     return (
         <>
-            <button
-                type="button"
-                onClick={onClick}
-                onContextMenu={(e) => {
-                    e.preventDefault();
-                    tree.openMenu(entry, path, e.clientX, e.clientY);
-                }}
-                // Directories accept dropped videos from the results grid.
-                onDragOver={entry.isDirectory
-                    ? (e) => {
-                        if (
-                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
-                        ) {
-                            return;
-                        }
-                        e.preventDefault();
-                        e.stopPropagation(); // don't fall through to the root
-                        e.dataTransfer.dropEffect = "copy";
-                        if (tree.dragOver.value !== path) {
-                            tree.dragOver.value = path;
-                        }
-                    }
-                    : undefined}
-                onDragLeave={entry.isDirectory
-                    ? () => {
-                        if (tree.dragOver.value === path) {
-                            tree.dragOver.value = null;
-                        }
-                    }
-                    : undefined}
-                onDrop={entry.isDirectory
-                    ? (e) => {
-                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
-                        tree.dragOver.value = null;
-                        if (!src) return;
-                        e.preventDefault();
-                        e.stopPropagation(); // handled here, not by the root
-                        tree.dropFile(src, path);
-                    }
-                    : undefined}
-                style={{ paddingLeft: `${depth * 14 + 12}px` }}
-                class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
-                    tree.dragOver.value === path
-                        ? "bg-indigo-100 ring-1 ring-inset ring-indigo-300"
-                        : isActive
-                        ? "bg-indigo-50 text-indigo-600"
-                        : "text-gray-700"
-                }`}
-            >
-                {entry.isDirectory
-                    ? <ChevronIcon open={isOpen} />
-                    : <span class="w-3.5 shrink-0" />}
-                {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
-                <span class="truncate">{entry.name}</span>
-            </button>
+            {isRenaming
+                ? (
+                    <RenameInput
+                        entry={entry}
+                        depth={depth}
+                        onCommit={(name) => callbacks.commitRename(path, name)}
+                        onCancel={() => tree.renaming.value = null}
+                    />
+                )
+                : (
+                    <button
+                        type="button"
+                        onClick={onClick}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            callbacks.openMenu(
+                                entry,
+                                path,
+                                e.clientX,
+                                e.clientY,
+                            );
+                        }}
+                        // Directories accept dropped videos from the grid.
+                        onDragOver={entry.isDirectory
+                            ? (e) => {
+                                if (
+                                    !e.dataTransfer?.types.includes(
+                                        PROJECT_FILE_MIME,
+                                    )
+                                ) {
+                                    return;
+                                }
+                                e.preventDefault();
+                                e.stopPropagation(); // don't fall to the root
+                                e.dataTransfer.dropEffect = "copy";
+                                if (tree.dragOver.value !== path) {
+                                    tree.dragOver.value = path;
+                                }
+                            }
+                            : undefined}
+                        onDragLeave={entry.isDirectory
+                            ? () => {
+                                if (tree.dragOver.value === path) {
+                                    tree.dragOver.value = null;
+                                }
+                            }
+                            : undefined}
+                        onDrop={entry.isDirectory
+                            ? (e) => {
+                                const src = e.dataTransfer?.getData(
+                                    PROJECT_FILE_MIME,
+                                );
+                                tree.dragOver.value = null;
+                                if (!src) return;
+                                e.preventDefault();
+                                e.stopPropagation(); // handled here, not root
+                                callbacks.dropFile(src, path);
+                            }
+                            : undefined}
+                        style={{ paddingLeft: `${depth * 14 + 12}px` }}
+                        class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                            tree.dragOver.value === path
+                                ? "bg-indigo-100 ring-1 ring-inset ring-indigo-300"
+                                : isActive
+                                ? "bg-indigo-50 text-indigo-600"
+                                : "text-gray-700"
+                        }`}
+                    >
+                        {entry.isDirectory
+                            ? <ChevronIcon open={isOpen} />
+                            : <span class="w-3.5 shrink-0" />}
+                        {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
+                        <span class="truncate">{entry.name}</span>
+                    </button>
+                )}
             {entry.isDirectory && isOpen &&
                 kids?.map((child) => (
                     <Node
@@ -219,6 +307,7 @@ function Node(
                         path={`${path}/${child.name}`}
                         depth={depth + 1}
                         tree={tree}
+                        callbacks={callbacks}
                     />
                 ))}
         </>
@@ -228,6 +317,32 @@ function Node(
 /** Sidebar width bounds, in px. */
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
+
+/**
+ * Build the inline-rename commit handler, closing over the explorer's rename
+ * signal, selection signal, and directory-refresh callback.
+ */
+function commitRename(
+    renaming: Signal<string | null>,
+    selected: Signal<string | null> | undefined,
+    refreshDir: (dir: string) => Promise<void>,
+) {
+    return async (path: string, name: string) => {
+        renaming.value = null;
+        const oldName = path.split("/").pop() ?? "";
+        // No change (or cleared) — nothing to do.
+        if (!name || name === oldName) return;
+
+        const { path: dest } = await trpc.renameFile.mutate({ path, name });
+        const slash = path.lastIndexOf("/");
+        const parent = slash === -1 ? "" : path.slice(0, slash);
+        // Keep the selection on the renamed entry.
+        if (selected?.value === path) {
+            selected.value = dest;
+        }
+        await refreshDir(parent);
+    };
+}
 
 export function FileExplorer(props: {
     /** Sidebar width in px; mutated while dragging the divider. */
@@ -246,6 +361,7 @@ export function FileExplorer(props: {
     >(null);
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
+    const renaming = useSignal<string | null>(null);
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
@@ -357,16 +473,30 @@ export function FileExplorer(props: {
             .catch((err) => console.error(err));
     };
 
+    /** Refresh a directory's listing (root listing lives in `root`). */
+    const refreshDir = async (dir: string) => {
+        if (dir === "") {
+            root.value = await trpc.listProjectFiles.query();
+        } else {
+            await loadChildren(dir);
+        }
+    };
+
     const tree: TreeState = {
         childrenByPath,
         expanded,
         loading,
         selected: props.selected,
+        dragOver,
+        renaming,
+    };
+
+    const callbacks: TreeCallbacks = {
         onSelect: props.onSelect,
         loadChildren,
         openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
-        dragOver,
         dropFile,
+        commitRename: commitRename(renaming, props.selected, refreshDir),
     };
 
     // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
@@ -483,6 +613,7 @@ export function FileExplorer(props: {
                                 path={entry.name}
                                 depth={0}
                                 tree={tree}
+                                callbacks={callbacks}
                             />
                         ))}
                 </div>
@@ -528,6 +659,16 @@ export function FileExplorer(props: {
                                 复制
                             </button>
                         )}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                renaming.value = menu.value!.path;
+                                menu.value = null;
+                            }}
+                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                        >
+                            重命名
+                        </button>
                     </div>
                 </>
             )}

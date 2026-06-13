@@ -9,6 +9,14 @@ function handle(req: Request): Response | Promise<Response> {
         req,
         router: appRouter,
         createContext: () => ({}),
+        // Log every server-side procedure error centrally (the client only
+        // sees a sanitized message, so without this they're invisible).
+        onError: ({ error, type, path }) => {
+            console.error(
+                `[tRPC] ${type} ${path ?? "<no-path>"} failed:`,
+                error,
+            );
+        },
     });
 }
 

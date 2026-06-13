@@ -140,6 +140,33 @@ export const appRouter = router({
             await Deno.copyFile(srcAbs, `${destDirAbs}/${name}`);
             return { dest: `${destDir}/${name}` };
         }),
+
+    // Rename a project file/dir in place. `path` is the existing entry (relative
+    // to the project root); `name` is the new base name (no slashes).
+    renameFile: publicProcedure
+        .input(z.object({ path: z.string(), name: z.string() }))
+        .mutation(async (opts): Promise<{ path: string }> => {
+            const { path, name } = opts.input;
+            if (!name || name.includes("/") || name.includes("\\")) {
+                throw new Error("Invalid name");
+            }
+            const slash = path.lastIndexOf("/");
+            const dir = slash === -1 ? "" : path.slice(0, slash);
+            const dest = dir ? `${dir}/${name}` : name;
+            if (dest === path) return { path };
+
+            const srcAbs = await resolveInProject(path);
+            const destAbs = await resolveInProject(dest);
+            if (await exists(destAbs)) {
+                throw new Error(`已存在同名文件：${name}`);
+            }
+            try {
+                await Deno.rename(srcAbs, destAbs);
+            } catch (err) {
+                console.log(err);
+            }
+            return { path: dest };
+        }),
 });
 
 // Export type only — never import the router implementation into the client.
