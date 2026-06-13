@@ -655,7 +655,7 @@ export default function Seedance() {
                                             >
                                                 <span
                                                     class={`block rounded-[3px] border-[1.5px] border-current ${
-                                                        r.value === "智能"
+                                                        r.value === "adaptive"
                                                             ? "border-dashed"
                                                             : ""
                                                     }`}
