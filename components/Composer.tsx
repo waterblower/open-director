@@ -2,6 +2,7 @@ import { type Signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { seedance_client } from "../seedance_client.ts";
+import { PROJECT_FILE_MIME } from "./dnd.ts";
 import type {
     AspectRatio,
     ContentItem,
@@ -353,6 +354,22 @@ export function Composer(props: {
         attachments.value = [...attachments.value, ...added];
     };
 
+    // Attach an image dragged from the file explorer. The path is project-
+    // relative and served at /project-file/<path>; fetch its bytes into a blob:
+    // object URL so it behaves like a file attachment (revocable, and the bytes
+    // are held client-side for sending on to remote servers).
+    const addProjectImage = async (path: string) => {
+        const url = "/project-file/" +
+            path.split("/").map(encodeURIComponent).join("/");
+        const blob = await (await fetch(url)).blob();
+        attachments.value = [...attachments.value, {
+            id: nextId.current++,
+            kind: "image",
+            name: path.split("/").pop() ?? path,
+            url: URL.createObjectURL(blob),
+        }];
+    };
+
     // Accept pasted media (e.g. an image copied from the file explorer).
     const onPaste = (e: ClipboardEvent) => {
         const files = e.clipboardData?.files;
@@ -365,12 +382,16 @@ export function Composer(props: {
         addFiles(media);
     };
 
-    // Accept media files dragged in from the OS (e.g. an image from Finder).
+    // Accept media dragged from the OS (e.g. an image from Finder) or an image
+    // dragged from the project file explorer.
     const onDragOver = (e: DragEvent) => {
-        // Only react to external file drags, not internal element drags.
-        if (!e.dataTransfer?.types.includes("Files")) return;
+        const types = e.dataTransfer?.types;
+        if (!types) return;
+        if (!types.includes("Files") && !types.includes(PROJECT_FILE_MIME)) {
+            return; // ignore unrelated internal element drags
+        }
         e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
+        e.dataTransfer!.dropEffect = "copy";
         dropActive.value = true;
     };
 
@@ -381,6 +402,15 @@ export function Composer(props: {
 
     const onDrop = (e: DragEvent) => {
         dropActive.value = false;
+
+        // Image dragged from the file explorer (carries a project path).
+        const projectPath = e.dataTransfer?.getData(PROJECT_FILE_MIME);
+        if (projectPath) {
+            e.preventDefault();
+            addProjectImage(projectPath).catch((err) => console.error(err));
+            return;
+        }
+
         const files = e.dataTransfer?.files;
         if (!files || files.length === 0) return;
         const media = Array.from(files).filter((f) =>

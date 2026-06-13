@@ -246,6 +246,15 @@ function Node(
                                 e.clientY,
                             );
                         }}
+                        // Image files can be dragged into the composer as a
+                        // reference attachment (carries the project path).
+                        draggable={isImageFile(entry)}
+                        onDragStart={(e) => {
+                            e.dataTransfer?.setData(PROJECT_FILE_MIME, path);
+                            if (e.dataTransfer) {
+                                e.dataTransfer.effectAllowed = "copy";
+                            }
+                        }}
                         // Directories accept dropped videos from the grid.
                         onDragOver={entry.isDirectory
                             ? (e) => {
