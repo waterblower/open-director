@@ -1,12 +1,12 @@
 import { type Signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { trpc } from "../trpc/client.ts";
+import { seedance_client } from "../seedance_client.ts";
 import type {
     AspectRatio,
     ContentItem,
+    CreateTaskRequest,
     Task,
-    TaskStatus,
 } from "../seedance.ts";
 
 type AttachmentKind = "image" | "video" | "audio";
@@ -210,11 +210,10 @@ function MusicIcon(props: { class?: string }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the request from the composer's inputs and hand it to the backend
- * (`trpc.createTask`), which creates the Seedance task, persists it, and polls
- * + downloads the result server-side. Returns a *pending* Task for immediate
- * display, or an Error (never throws). The backend owns completion, so this
- * resolves as soon as the task is accepted.
+ * Build the request from the composer's inputs and create the Seedance task.
+ * Returns the freshly created (pending) Task for immediate display, or an Error
+ * (never throws). The backend `task_checker` loop polls + downloads the result,
+ * so completion is independent of this browser session.
  */
 const generate = async (
     args: {
@@ -257,29 +256,22 @@ const generate = async (
         }
     }
 
-    const res = await trpc.createTask.mutate({
+    const request: CreateTaskRequest = {
+        model: "doubao-seedance-2-0-260128",
         content,
         generate_audio: args.audio,
         ratio: args.ratio,
         // "smart" duration lets the model decide; only send a fixed duration
         // when the user picked "seconds".
         ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
-        prompt: args.prompt || undefined,
-    }).catch((err: unknown) =>
-        err instanceof Error ? err : new Error(String(err))
-    );
+    };
+
+    // Create the task; it returns pending (queued). The backend downloads it.
+    const task = await seedance_client.generate(request);
 
     generating.value = false;
 
-    if (res instanceof Error) return res;
-
-    // A freshly created task is pending; the backend will download it once done.
-    return {
-        id: res.id,
-        model: "",
-        status: res.status as TaskStatus,
-        created_at: Math.floor(Date.now() / 1000),
-    };
+    return task;
 };
 
 // ---------------------------------------------------------------------------
@@ -306,6 +298,7 @@ export function Composer(props: {
     const popover = useSignal<Popover>(null);
     const mention = useSignal<Mention | null>(null);
     const mentionActive = useSignal(0);
+    const dropActive = useSignal(false);
 
     const fileInput = useRef<HTMLInputElement>(null);
     const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -364,6 +357,32 @@ export function Composer(props: {
     const onPaste = (e: ClipboardEvent) => {
         const files = e.clipboardData?.files;
         if (!files || files.length === 0) return; // let text paste through
+        const media = Array.from(files).filter((f) =>
+            /^(image|video|audio)\//.test(f.type)
+        );
+        if (media.length === 0) return;
+        e.preventDefault();
+        addFiles(media);
+    };
+
+    // Accept media files dragged in from the OS (e.g. an image from Finder).
+    const onDragOver = (e: DragEvent) => {
+        // Only react to external file drags, not internal element drags.
+        if (!e.dataTransfer?.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        dropActive.value = true;
+    };
+
+    const onDragLeave = (e: DragEvent) => {
+        // Ignore leaves into descendants; only clear when exiting the card.
+        if (e.currentTarget === e.target) dropActive.value = false;
+    };
+
+    const onDrop = (e: DragEvent) => {
+        dropActive.value = false;
+        const files = e.dataTransfer?.files;
+        if (!files || files.length === 0) return;
         const media = Array.from(files).filter((f) =>
             /^(image|video|audio)\//.test(f.type)
         );
@@ -469,7 +488,16 @@ export function Composer(props: {
                         生成失败：{genError.value}
                     </div>
                 )}
-                <div class="w-full bg-white/95 backdrop-blur rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.16)] border border-gray-200 p-5">
+                <div
+                    onDragOver={onDragOver}
+                    onDragLeave={onDragLeave}
+                    onDrop={onDrop}
+                    class={`w-full bg-white/95 backdrop-blur rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.16)] border p-5 ${
+                        dropActive.value
+                            ? "border-indigo-400 ring-2 ring-indigo-300"
+                            : "border-gray-200"
+                    }`}
+                >
                     {/* Attachments */}
                     <div class="flex flex-wrap gap-3 mb-4">
                         <button
@@ -561,7 +589,8 @@ export function Composer(props: {
                             onBlur={() => mention.value = null}
                             placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
                             rows={1}
-                            class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block overflow-hidden"
+                            // Auto-grows up to 2/3 of the viewport, then scrolls.
+                            class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block max-h-[66vh] overflow-y-auto"
                         />
 
                         {/* Mention picker */}
@@ -799,7 +828,7 @@ export function Composer(props: {
                                             <input
                                                 type="range"
                                                 min={4}
-                                                max={12}
+                                                max={15}
                                                 step={1}
                                                 value={duration.value}
                                                 onInput={(e) =>
