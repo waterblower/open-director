@@ -173,10 +173,17 @@ function Node(
     );
 }
 
+/** Sidebar width bounds, in px. */
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 480;
+
 export function FileExplorer(props: {
+    /** Sidebar width in px; mutated while dragging the divider. */
+    width: Signal<number>;
     selected?: Signal<string | null>;
     onSelect?: (entry: FileEntry, path: string) => void;
 }) {
+    const { width } = props;
     const root = useSignal<FileEntry[] | null>(null);
     const error = useSignal<string | null>(null);
     const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
@@ -240,9 +247,33 @@ export function FileExplorer(props: {
         dropFile,
     };
 
+    // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
+    const onResizeStart = (e: PointerEvent) => {
+        e.preventDefault();
+        const onMove = (ev: PointerEvent) => {
+            width.value = Math.max(
+                SIDEBAR_MIN_WIDTH,
+                Math.min(ev.clientX, SIDEBAR_MAX_WIDTH),
+            );
+        };
+        const onUp = () => {
+            globalThis.removeEventListener("pointermove", onMove);
+            globalThis.removeEventListener("pointerup", onUp);
+            document.body.style.userSelect = "";
+            document.body.style.cursor = "";
+        };
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "col-resize";
+        globalThis.addEventListener("pointermove", onMove);
+        globalThis.addEventListener("pointerup", onUp);
+    };
+
     return (
         <>
-            <aside class="fixed left-0 top-0 bottom-0 z-30 w-60 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200">
+            <aside
+                style={{ width: `${width.value}px` }}
+                class="fixed left-0 top-0 bottom-0 z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200"
+            >
                 <div class="px-4 h-12 flex items-center border-b border-gray-100 shrink-0">
                     <span class="text-sm font-semibold text-gray-800">
                         项目文件
@@ -277,6 +308,12 @@ export function FileExplorer(props: {
                             />
                         ))}
                 </div>
+
+                {/* Resize divider */}
+                <div
+                    onPointerDown={onResizeStart}
+                    class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-indigo-300 active:bg-indigo-400"
+                />
             </aside>
 
             {/* Right-click context menu */}
