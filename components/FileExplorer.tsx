@@ -1,6 +1,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { trpc } from "../trpc/client.ts";
+import { PROJECT_FILE_MIME } from "./dnd.ts";
 
 /** Mirrors the `DirEntry` returned by the `listProjectFiles` tRPC query. */
 export interface FileEntry {
@@ -71,6 +72,10 @@ interface TreeState {
     loadChildren: (path: string) => Promise<FileEntry[]>;
     /** Open the right-click context menu for an entry at the cursor. */
     openMenu: (path: string, x: number, y: number) => void;
+    /** Directory path currently hovered during a drag (for highlight). */
+    dragOver: Signal<string | null>;
+    /** Copy a dragged project file into the given directory path. */
+    dropFile: (src: string, destDir: string) => void;
 }
 
 function Node(
@@ -108,9 +113,44 @@ function Node(
                     e.preventDefault();
                     tree.openMenu(path, e.clientX, e.clientY);
                 }}
+                // Directories accept dropped videos from the results grid.
+                onDragOver={entry.isDirectory
+                    ? (e) => {
+                        if (
+                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
+                        ) {
+                            return;
+                        }
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        if (tree.dragOver.value !== path) {
+                            tree.dragOver.value = path;
+                        }
+                    }
+                    : undefined}
+                onDragLeave={entry.isDirectory
+                    ? () => {
+                        if (tree.dragOver.value === path) {
+                            tree.dragOver.value = null;
+                        }
+                    }
+                    : undefined}
+                onDrop={entry.isDirectory
+                    ? (e) => {
+                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
+                        tree.dragOver.value = null;
+                        if (!src) return;
+                        e.preventDefault();
+                        tree.dropFile(src, path);
+                    }
+                    : undefined}
                 style={{ paddingLeft: `${depth * 14 + 12}px` }}
                 class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
-                    isActive ? "bg-indigo-50 text-indigo-600" : "text-gray-700"
+                    tree.dragOver.value === path
+                        ? "bg-indigo-100 ring-1 ring-inset ring-indigo-300"
+                        : isActive
+                        ? "bg-indigo-50 text-indigo-600"
+                        : "text-gray-700"
                 }`}
             >
                 {entry.isDirectory
@@ -143,6 +183,7 @@ export function FileExplorer(props: {
     const expanded = useSignal<Set<string>>(new Set());
     const loading = useSignal<Set<string>>(new Set());
     const menu = useSignal<{ path: string; x: number; y: number } | null>(null);
+    const dragOver = useSignal<string | null>(null);
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
@@ -177,6 +218,16 @@ export function FileExplorer(props: {
         trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
     };
 
+    const dropFile = (src: string, destDir: string) => {
+        trpc.copyIntoDir.mutate({ src, destDir })
+            .then(() => {
+                // Reveal the copy: expand the target dir and refresh its list.
+                expanded.value = new Set(expanded.value).add(destDir);
+                loadChildren(destDir);
+            })
+            .catch((err) => console.error(err));
+    };
+
     const tree: TreeState = {
         childrenByPath,
         expanded,
@@ -185,6 +236,8 @@ export function FileExplorer(props: {
         onSelect: props.onSelect,
         loadChildren,
         openMenu: (path, x, y) => menu.value = { path, x, y },
+        dragOver,
+        dropFile,
     };
 
     return (

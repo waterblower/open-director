@@ -13,6 +13,16 @@ import type { Task } from "../seedance.ts";
 const VIDEOS_DIR = ".project";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
+async function exists(path: string): Promise<boolean> {
+    try {
+        await Deno.lstat(path);
+        return true;
+    } catch (err) {
+        if (err instanceof Deno.errors.NotFound) return false;
+        throw err;
+    }
+}
+
 interface DirEntry {
     name: string;
     isDirectory: boolean;
@@ -102,6 +112,33 @@ export const appRouter = router({
                 );
             }
             return { ok: true };
+        }),
+
+    // Copy a project file into a project directory (both paths relative to the
+    // project root). Used when dragging a generated video onto a folder.
+    copyIntoDir: publicProcedure
+        .input(z.object({ src: z.string(), destDir: z.string() }))
+        .mutation(async (opts): Promise<{ dest: string }> => {
+            const { src, destDir } = opts.input;
+            const srcAbs = await resolveInProject(src);
+            const destDirAbs = await resolveInProject(destDir);
+
+            const base = src.split("/").pop();
+            if (!base) throw new Error("Invalid source path");
+
+            await Deno.mkdir(destDirAbs, { recursive: true });
+
+            // Don't clobber: if the name is taken, append " (n)" before the ext.
+            const dot = base.lastIndexOf(".");
+            const stem = dot > 0 ? base.slice(0, dot) : base;
+            const ext = dot > 0 ? base.slice(dot) : "";
+            let name = base;
+            for (let n = 1; await exists(`${destDirAbs}/${name}`); n++) {
+                name = `${stem} (${n})${ext}`;
+            }
+
+            await Deno.copyFile(srcAbs, `${destDirAbs}/${name}`);
+            return { dest: `${destDir}/${name}` };
         }),
 });
 

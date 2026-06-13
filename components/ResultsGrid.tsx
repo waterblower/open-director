@@ -1,5 +1,6 @@
 import type { Signal } from "@preact/signals";
 import type { Task } from "../seedance.ts";
+import { PROJECT_FILE_MIME } from "./dnd.ts";
 
 function VideoIcon(props: { class?: string }) {
     return (
@@ -45,9 +46,21 @@ export function ResultsGrid(
                 )}
                 {results.value.map((task) => {
                     const url = task.content?.video_url;
+                    // Project-relative path, e.g. ".project/vid1.mp4"
+                    const rel = url
+                        ? decodeURIComponent(
+                            url.replace(/^\/project-file\//, ""),
+                        )
+                        : "";
                     return (
                         <div
                             key={task.id}
+                            draggable={!!url}
+                            onDragStart={(e) => {
+                                if (!url || !e.dataTransfer) return;
+                                e.dataTransfer.setData(PROJECT_FILE_MIME, rel);
+                                e.dataTransfer.effectAllowed = "copy";
+                            }}
                             class="relative group rounded-xl overflow-hidden bg-gray-900 cursor-pointer"
                         >
                             {url
@@ -58,6 +71,8 @@ export function ResultsGrid(
                                         preload="metadata"
                                         playsInline
                                         controls
+                                        // Let the card own the drag, not the native video drag
+                                        draggable={false}
                                         class="w-full aspect-video object-cover"
                                         onClick={(e) => {
                                             const v = e
