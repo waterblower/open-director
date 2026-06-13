@@ -21,6 +21,7 @@ export async function check_and_download(): Promise<void | Error> {
             return seedance_task_list;
         }
         const seedance_tasks = seedance_task_list.items;
+        console.log("succeeded tasks:", seedance_tasks.length);
 
         // 2. List all videos already in the .project dir (by filename stem == id).
         const dirAbs = await resolveInProject(VIDEOS_DIR);
@@ -33,9 +34,16 @@ export async function check_and_download(): Promise<void | Error> {
         }
 
         // 3 + 4. Download any succeeded task that isn't on disk yet.
+        const nowSec = Date.now() / 1000;
         for (const task of seedance_tasks) {
             const url = task.content?.video_url;
-            if (task.status !== "succeeded" || !url) {
+
+            // Skip expired tasks — their download URL is no longer valid.
+            if (
+                task.execution_expires_after !== undefined &&
+                nowSec > task.created_at + task.execution_expires_after / 2 // 24h, not 48h like in the response data
+            ) {
+                console.log(task.id, "has expired");
                 continue;
             }
             if (existing.has(task.id)) {
@@ -50,14 +58,14 @@ export async function check_and_download(): Promise<void | Error> {
             }
         }
 
-        await delay(1000); // every 1s
+        await delay(3000); // every 3s
     }
 }
 
 /** Stream `url` to `dest`, overwriting any partial file. */
 async function downloadVideo(url: string, dest: string) {
     const res = await fetch(url);
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
         return new Error(`${await res.text()}`);
     }
     const file = await Deno.open(dest, {
