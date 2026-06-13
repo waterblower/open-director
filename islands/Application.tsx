@@ -40,7 +40,7 @@ export default function Application() {
                 console.error(tasks);
                 return;
             }
-            console.log(tasks.items);
+            console.log("running tasks", tasks.items);
             generated_videos.value = tasks.items.concat(vids);
         })();
     }, []);

@@ -1,5 +1,11 @@
 import { App, staticFiles } from "fresh";
 import { define, type State } from "./utils.ts";
+import { check_and_download } from "./task_checker.ts";
+
+// Resume polling/downloading any unfinished generation tasks at server boot.
+check_and_download().then((_) => {
+    console.error("should never reach here", _);
+});
 
 export const app = new App<State>();
 

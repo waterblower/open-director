@@ -1,12 +1,12 @@
 import { type Signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { seedance_client } from "../seedance_client.ts";
+import { trpc } from "../trpc/client.ts";
 import type {
     AspectRatio,
     ContentItem,
-    CreateTaskRequest,
     Task,
+    TaskStatus,
 } from "../seedance.ts";
 
 type AttachmentKind = "image" | "video" | "audio";
@@ -210,9 +210,11 @@ function MusicIcon(props: { class?: string }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a Seedance request from the composer's inputs, submit it, and wait for
- * the task to finish. Flips `generating` while in flight and returns the
- * finished Task on success, or an Error (never throws) on any failure.
+ * Build the request from the composer's inputs and hand it to the backend
+ * (`trpc.createTask`), which creates the Seedance task, persists it, and polls
+ * + downloads the result server-side. Returns a *pending* Task for immediate
+ * display, or an Error (never throws). The backend owns completion, so this
+ * resolves as soon as the task is accepted.
  */
 const generate = async (
     args: {
@@ -254,34 +256,30 @@ const generate = async (
             });
         }
     }
-    const request: CreateTaskRequest = {
-        model: "doubao-seedance-2-0-260128",
+
+    const res = await trpc.createTask.mutate({
         content,
         generate_audio: args.audio,
         ratio: args.ratio,
         // "smart" duration lets the model decide; only send a fixed duration
         // when the user picked "seconds".
         ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
-    };
-
-    // Creates the task and polls until it reaches a terminal state.
-    const task = await seedance_client.generate(request);
+        prompt: args.prompt || undefined,
+    }).catch((err: unknown) =>
+        err instanceof Error ? err : new Error(String(err))
+    );
 
     generating.value = false;
 
-    // Transport/SDK failure (the client returns Errors instead of throwing).
-    if (task instanceof Error) return task;
+    if (res instanceof Error) return res;
 
-    // Task ran but didn't succeed (failed/cancelled/expired) — surface why.
-    if (task.status !== "succeeded") {
-        return new Error(
-            task.error
-                ? `${task.error.code}: ${task.error.message}`
-                : `任务${task.status}`,
-        );
-    }
-
-    return task;
+    // A freshly created task is pending; the backend will download it once done.
+    return {
+        id: res.id,
+        model: "",
+        status: res.status as TaskStatus,
+        created_at: Math.floor(Date.now() / 1000),
+    };
 };
 
 // ---------------------------------------------------------------------------

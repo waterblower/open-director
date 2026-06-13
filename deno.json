@@ -17,6 +17,7 @@
     "exclude": ["**/_fresh/*"],
     "imports": {
         "@/": "./",
+        "@std/async": "jsr:@std/async@^1.4.0",
         "fresh": "jsr:@fresh/core@^2.3.3",
         "preact": "npm:preact@^10.29.1",
         "three": "npm:three@^0.170.0",
