@@ -62,6 +62,53 @@ export function ResultsGrid(
                                 if (!url || !e.dataTransfer) return;
                                 e.dataTransfer.setData(PROJECT_FILE_MIME, rel);
                                 e.dataTransfer.effectAllowed = "copy";
+
+                                // Use a small (~pointer-sized) drag image instead
+                                // of the browser's full-card snapshot.
+                                const SIZE = 40;
+                                const ghost = document.createElement("canvas");
+                                ghost.width = SIZE;
+                                ghost.height = SIZE;
+                                ghost.style.cssText =
+                                    `position:fixed;top:-9999px;left:-9999px;` +
+                                    `width:${SIZE}px;height:${SIZE}px;border-radius:8px`;
+                                const ctx = ghost.getContext("2d");
+                                const video = (e.currentTarget as HTMLElement)
+                                    .querySelector("video");
+                                if (ctx) {
+                                    ctx.fillStyle = "#111827";
+                                    ctx.fillRect(0, 0, SIZE, SIZE);
+                                    if (video && video.readyState >= 2) {
+                                        // Center-crop the frame into the square.
+                                        const s = Math.min(
+                                            video.videoWidth,
+                                            video.videoHeight,
+                                        );
+                                        try {
+                                            ctx.drawImage(
+                                                video,
+                                                (video.videoWidth - s) / 2,
+                                                (video.videoHeight - s) / 2,
+                                                s,
+                                                s,
+                                                0,
+                                                0,
+                                                SIZE,
+                                                SIZE,
+                                            );
+                                        } catch {
+                                            /* tainted/undecoded — keep bg */
+                                        }
+                                    }
+                                }
+                                document.body.appendChild(ghost);
+                                e.dataTransfer.setDragImage(
+                                    ghost,
+                                    SIZE / 2,
+                                    SIZE / 2,
+                                );
+                                // Remove once the browser has snapshotted it.
+                                setTimeout(() => ghost.remove(), 0);
                             }}
                             class="relative group rounded-xl overflow-hidden bg-gray-900 cursor-pointer"
                         >
