@@ -277,6 +277,45 @@ export function FileExplorer(props: {
         ]).catch((err) => console.error(err));
     };
 
+    /** Look up a loaded entry by its full path. */
+    const findEntry = (path: string): FileEntry | undefined => {
+        const slash = path.lastIndexOf("/");
+        const parent = slash === -1 ? "" : path.slice(0, slash);
+        const name = slash === -1 ? path : path.slice(slash + 1);
+        const list = parent === ""
+            ? root.value ?? []
+            : childrenByPath.value[parent] ?? [];
+        return list.find((e) => e.name === name);
+    };
+
+    // Cmd/Ctrl+C copies the selected image (unless the user is copying text).
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c") {
+                return;
+            }
+            const path = props.selected?.value;
+            if (!path) return;
+
+            // Don't hijack copying from inputs or a real text selection.
+            const ae = document.activeElement as HTMLElement | null;
+            if (
+                ae &&
+                (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
+                    ae.isContentEditable)
+            ) return;
+            const sel = globalThis.getSelection?.();
+            if (sel && !sel.isCollapsed && sel.toString()) return;
+
+            const entry = findEntry(path);
+            if (!entry || !isImageFile(entry)) return;
+            e.preventDefault();
+            copyImage(path);
+        };
+        globalThis.addEventListener("keydown", onKey);
+        return () => globalThis.removeEventListener("keydown", onKey);
+    }, []);
+
     const dropFile = (src: string, destDir: string) => {
         trpc.copyIntoDir.mutate({ src, destDir })
             .then(() => {
