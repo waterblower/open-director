@@ -135,6 +135,8 @@ interface TreeCallbacks {
     dropFile: (src: string, destDir: string) => void;
     /** Commit an inline rename; `name` is the new base name (no slashes). */
     commitRename: (path: string, name: string) => void;
+    /** Show (path set) or hide (path null) the image hover preview at x,y. */
+    previewImage: (path: string | null, x: number, y: number) => void;
 }
 
 /**
@@ -254,7 +256,20 @@ function Node(
                             if (e.dataTransfer) {
                                 e.dataTransfer.effectAllowed = "copy";
                             }
+                            callbacks.previewImage(null, 0, 0); // hide on drag
                         }}
+                        // Image files show a floating thumbnail near the cursor.
+                        onMouseMove={isImageFile(entry)
+                            ? (e) =>
+                                callbacks.previewImage(
+                                    path,
+                                    e.clientX,
+                                    e.clientY,
+                                )
+                            : undefined}
+                        onMouseLeave={isImageFile(entry)
+                            ? () => callbacks.previewImage(null, 0, 0)
+                            : undefined}
                         // Directories accept dropped videos from the grid.
                         onDragOver={entry.isDirectory
                             ? (e) => {
@@ -368,6 +383,9 @@ export function FileExplorer(props: {
     const menu = useSignal<
         { entry: FileEntry; path: string; x: number; y: number } | null
     >(null);
+    const preview = useSignal<{ path: string; x: number; y: number } | null>(
+        null,
+    );
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
@@ -515,6 +533,8 @@ export function FileExplorer(props: {
         openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
         dropFile,
         commitRename: commitRename(renaming, props.selected, refreshDir),
+        previewImage: (path, x, y) =>
+            preview.value = path ? { path, x, y } : null,
     };
 
     // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
@@ -642,6 +662,39 @@ export function FileExplorer(props: {
                     class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-indigo-300 active:bg-indigo-400"
                 />
             </aside>
+
+            {
+                /* Floating image hover preview, offset from the cursor and
+                clamped to stay within the viewport. */
+            }
+            {preview.value && (
+                <div
+                    class="fixed z-50 pointer-events-none rounded-lg shadow-xl border border-gray-200 bg-white p-1"
+                    style={{
+                        left: `${
+                            Math.min(
+                                preview.value.x + 16,
+                                globalThis.innerWidth - 208,
+                            )
+                        }px`,
+                        top: `${
+                            Math.max(
+                                8,
+                                Math.min(
+                                    preview.value.y + 16,
+                                    globalThis.innerHeight - 208,
+                                ),
+                            )
+                        }px`,
+                    }}
+                >
+                    <img
+                        src={projectFileUrl(preview.value.path)}
+                        alt=""
+                        class="block max-w-48 max-h-48 object-contain rounded"
+                    />
+                </div>
+            )}
 
             {/* Right-click context menu */}
             {menu.value && (
