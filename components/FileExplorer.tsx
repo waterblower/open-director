@@ -17,6 +17,17 @@ function isImageFile(entry: FileEntry): boolean {
     return entry.isFile && IMAGE_EXT.test(entry.name);
 }
 
+/** Order entries like the server does: directories first, then alphabetical. */
+function sortEntries(entries: FileEntry[]): FileEntry[] {
+    return [...entries].sort((a, b) =>
+        a.isDirectory === b.isDirectory
+            ? a.name.localeCompare(b.name)
+            : a.isDirectory
+            ? -1
+            : 1
+    );
+}
+
 /** Build the URL that serves a project-relative file. */
 function projectFileUrl(rel: string): string {
     return "/project-file/" + rel.split("/").map(encodeURIComponent).join("/");
@@ -161,6 +172,7 @@ function Node(
                             return;
                         }
                         e.preventDefault();
+                        e.stopPropagation(); // don't fall through to the root
                         e.dataTransfer.dropEffect = "copy";
                         if (tree.dragOver.value !== path) {
                             tree.dragOver.value = path;
@@ -180,6 +192,7 @@ function Node(
                         tree.dragOver.value = null;
                         if (!src) return;
                         e.preventDefault();
+                        e.stopPropagation(); // handled here, not by the root
                         tree.dropFile(src, path);
                     }
                     : undefined}
@@ -232,6 +245,7 @@ export function FileExplorer(props: {
         { entry: FileEntry; path: string; x: number; y: number } | null
     >(null);
     const dragOver = useSignal<string | null>(null);
+    const rootDragOver = useSignal(false);
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
@@ -318,7 +332,24 @@ export function FileExplorer(props: {
 
     const dropFile = (src: string, destDir: string) => {
         trpc.copyIntoDir.mutate({ src, destDir })
-            .then(() => {
+            .then(async ({ dest }) => {
+                // The actual (possibly de-duplicated) name the server wrote.
+                const name = dest.split("/").pop() ?? "";
+                if (destDir === "") {
+                    // Root listing is driven by `root`, not childrenByPath.
+                    const fresh = await trpc.listProjectFiles.query();
+                    // Guarantee the new file is visible even if the refresh
+                    // didn't pick it up yet.
+                    root.value = fresh.some((e) => e.name === name)
+                        ? fresh
+                        : sortEntries([...fresh, {
+                            name,
+                            isDirectory: false,
+                            isFile: true,
+                            isSymlink: false,
+                        }]);
+                    return;
+                }
                 // Reveal the copy: expand the target dir and refresh its list.
                 expanded.value = new Set(expanded.value).add(destDir);
                 loadChildren(destDir);
@@ -389,7 +420,44 @@ export function FileExplorer(props: {
                         </svg>
                     </button>
                 </div>
-                <div class="flex-1 overflow-y-auto py-1.5">
+                <div
+                    // Dropping on empty space copies into the project root.
+                    onDragOver={(e) => {
+                        if (
+                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
+                        ) {
+                            return;
+                        }
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        rootDragOver.value = true;
+                    }}
+                    onDragLeave={(e) => {
+                        // Clear only when the pointer actually leaves the
+                        // container — not when it moves onto a child row
+                        // (whose dragleave bubbles up here with the child as
+                        // the event target).
+                        const next = e.relatedTarget as Node | null;
+                        if (
+                            !next ||
+                            !(e.currentTarget as HTMLElement).contains(next)
+                        ) {
+                            rootDragOver.value = false;
+                        }
+                    }}
+                    onDrop={(e) => {
+                        rootDragOver.value = false;
+                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
+                        if (!src) return;
+                        e.preventDefault();
+                        dropFile(src, ""); // "" = project root
+                    }}
+                    class={`flex-1 overflow-y-auto py-1.5 ${
+                        rootDragOver.value
+                            ? "ring-1 ring-inset ring-indigo-300 bg-indigo-50/40"
+                            : ""
+                    }`}
+                >
                     {error.value
                         ? (
                             <div class="px-4 py-3 text-xs text-red-500 break-all">
