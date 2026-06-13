@@ -30,7 +30,7 @@ export function ResultsGrid(
 
     return (
         <div
-            class="fixed top-0 right-0 bottom-0 left-60 overflow-y-auto p-3"
+            class="absolute inset-0 overflow-y-auto p-3"
             style={{ paddingBottom: `${bottomInset.value}px` }}
         >
             {/* auto-fill keeps items ≥240px wide, collapsing to a single column on narrow screens */}
