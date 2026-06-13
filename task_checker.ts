@@ -14,7 +14,9 @@ const VIDEOS_DIR = ".project";
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
         // 1. List all tasks from the Seedance server.
-        const seedance_task_list = await seedance_client.listTasks();
+        const seedance_task_list = await seedance_client.listTasks({
+            status: "succeeded",
+        });
         if (seedance_task_list instanceof Error) {
             return seedance_task_list;
         }

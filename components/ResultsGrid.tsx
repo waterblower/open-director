@@ -81,7 +81,8 @@ export function ResultsGrid(
                                         controls
                                         // Let the card own the drag, not the native video drag
                                         draggable={false}
-                                        class="w-full aspect-video object-cover"
+                                        // cover fills the thumbnail; contain fits the whole frame in fullscreen
+                                        class="w-full aspect-video object-cover [&:fullscreen]:object-contain"
                                         onClick={(e) => {
                                             const v = e
                                                 .currentTarget as HTMLVideoElement;
