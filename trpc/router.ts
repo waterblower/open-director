@@ -10,7 +10,7 @@ import { projectDir, resolveInProject } from "../project.ts";
 import type { Task } from "../seedance.ts";
 
 /** Directory under the project root where generated videos are stored. */
-const VIDEOS_DIR = ".project";
+export const VIDEOS_DIR = ".project/generations";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
 async function exists(path: string): Promise<boolean> {
@@ -31,8 +31,8 @@ interface DirEntry {
 }
 
 export const appRouter = router({
-    // List generated videos in `<project>/.project` as Task-like objects.
-    // Creates the .project dir if it doesn't exist yet.
+    // List generated videos in `<project>/.project/generations` as Task-like
+    // objects. Creates the directory if it doesn't exist yet.
     listProjectVideos: publicProcedure.query(async (): Promise<Task[]> => {
         const root = await projectDir();
         const dir = `${root}/${VIDEOS_DIR}`;
@@ -52,9 +52,10 @@ export const appRouter = router({
                     status: "succeeded",
                     created_at: Math.floor((stat.mtime?.getTime() ?? 0) / 1000),
                     content: {
-                        video_url: `/project-file/${
-                            encodeURIComponent(VIDEOS_DIR)
-                        }/${encodeURIComponent(entry.name)}`,
+                        // Encode each path segment so the nested VIDEOS_DIR
+                        // slash stays a real path separator, not %2F.
+                        video_url: "/project-file/" +
+                            rel.split("/").map(encodeURIComponent).join("/"),
                     },
                 },
             });

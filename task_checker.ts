@@ -1,6 +1,7 @@
 /**
- * Reconciles the Seedance server's tasks with the local `<project>/.project`
- * dir: any succeeded task whose video isn't on disk yet gets downloaded.
+ * Reconciles the Seedance server's tasks with the local
+ * `<project>/.project/generations` dir: any succeeded task whose video isn't on
+ * disk yet gets downloaded.
  *
  * Video files are named `<task.id>.mp4`, so a task is considered "already
  * downloaded" when a file with a stem equal to its id exists.
@@ -8,8 +9,7 @@
 import { resolveInProject } from "./project.ts";
 import { seedance_client } from "./seedance_client.ts";
 import { delay } from "@std/async";
-
-const VIDEOS_DIR = ".project";
+import { VIDEOS_DIR } from "./trpc/router.ts";
 
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
@@ -23,7 +23,7 @@ export async function check_and_download(): Promise<void | Error> {
         const seedance_tasks = seedance_task_list.items;
         console.log("succeeded tasks:", seedance_tasks.length);
 
-        // 2. List all videos already in the .project dir (by filename stem == id).
+        // 2. List videos already in the generations dir (filename stem == id).
         const dirAbs = await resolveInProject(VIDEOS_DIR);
         await Deno.mkdir(dirAbs, { recursive: true });
         const existing = new Set<string>();
