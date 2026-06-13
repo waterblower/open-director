@@ -11,6 +11,45 @@ export interface FileEntry {
     isSymlink: boolean;
 }
 
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|avif)$/i;
+
+function isImageFile(entry: FileEntry): boolean {
+    return entry.isFile && IMAGE_EXT.test(entry.name);
+}
+
+/** Build the URL that serves a project-relative file. */
+function projectFileUrl(rel: string): string {
+    return "/project-file/" + rel.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Re-encode a blob as PNG (clipboard image writes are most portable as PNG). */
+function toPngBlob(blob: Blob): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("no 2d context"));
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob(
+                (b) => b ? resolve(b) : reject(new Error("toBlob failed")),
+                "image/png",
+            );
+            URL.revokeObjectURL(img.src);
+        };
+        img.onerror = () => reject(new Error("image load failed"));
+        img.src = URL.createObjectURL(blob);
+    });
+}
+
+/** Fetch an image and return it as a PNG blob, for clipboard writes. */
+async function fetchAsPng(url: string): Promise<Blob> {
+    const blob = await (await fetch(url)).blob();
+    return blob.type === "image/png" ? blob : await toPngBlob(blob);
+}
+
 function ChevronIcon(props: { open: boolean }) {
     return (
         <svg
@@ -71,7 +110,7 @@ interface TreeState {
     /** Lazily fetch + cache a directory's children, returning the result. */
     loadChildren: (path: string) => Promise<FileEntry[]>;
     /** Open the right-click context menu for an entry at the cursor. */
-    openMenu: (path: string, x: number, y: number) => void;
+    openMenu: (entry: FileEntry, path: string, x: number, y: number) => void;
     /** Directory path currently hovered during a drag (for highlight). */
     dragOver: Signal<string | null>;
     /** Copy a dragged project file into the given directory path. */
@@ -111,7 +150,7 @@ function Node(
                 onClick={onClick}
                 onContextMenu={(e) => {
                     e.preventDefault();
-                    tree.openMenu(path, e.clientX, e.clientY);
+                    tree.openMenu(entry, path, e.clientX, e.clientY);
                 }}
                 // Directories accept dropped videos from the results grid.
                 onDragOver={entry.isDirectory
@@ -189,7 +228,9 @@ export function FileExplorer(props: {
     const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
     const expanded = useSignal<Set<string>>(new Set());
     const loading = useSignal<Set<string>>(new Set());
-    const menu = useSignal<{ path: string; x: number; y: number } | null>(null);
+    const menu = useSignal<
+        { entry: FileEntry; path: string; x: number; y: number } | null
+    >(null);
     const dragOver = useSignal<string | null>(null);
 
     // Fetch the first level when the explorer loads.
@@ -225,6 +266,17 @@ export function FileExplorer(props: {
         trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
     };
 
+    const copyImage = (path: string) => {
+        menu.value = null;
+        // Write synchronously within the click gesture (Safari requires this);
+        // ClipboardItem accepts a Promise<Blob> so the fetch can resolve later.
+        navigator.clipboard.write([
+            new ClipboardItem({
+                "image/png": fetchAsPng(projectFileUrl(path)),
+            }),
+        ]).catch((err) => console.error(err));
+    };
+
     const dropFile = (src: string, destDir: string) => {
         trpc.copyIntoDir.mutate({ src, destDir })
             .then(() => {
@@ -242,7 +294,7 @@ export function FileExplorer(props: {
         selected: props.selected,
         onSelect: props.onSelect,
         loadChildren,
-        openMenu: (path, x, y) => menu.value = { path, x, y },
+        openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
         dragOver,
         dropFile,
     };
@@ -341,6 +393,15 @@ export function FileExplorer(props: {
                         >
                             用默认程序打开
                         </button>
+                        {isImageFile(menu.value.entry) && (
+                            <button
+                                type="button"
+                                onClick={() => copyImage(menu.value!.path)}
+                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                            >
+                                复制
+                            </button>
+                        )}
                     </div>
                 </>
             )}

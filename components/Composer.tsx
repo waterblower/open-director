@@ -338,7 +338,7 @@ export function Composer(props: {
         popover.value = popover.value === which ? null : which;
     };
 
-    const addFiles = (files: FileList | null) => {
+    const addFiles = (files: FileList | File[] | null) => {
         if (!files) return;
         const added = Array.from(files).map((file) => ({
             id: nextId.current++,
@@ -347,6 +347,18 @@ export function Composer(props: {
             url: URL.createObjectURL(file),
         }));
         attachments.value = [...attachments.value, ...added];
+    };
+
+    // Accept pasted media (e.g. an image copied from the file explorer).
+    const onPaste = (e: ClipboardEvent) => {
+        const files = e.clipboardData?.files;
+        if (!files || files.length === 0) return; // let text paste through
+        const media = Array.from(files).filter((f) =>
+            /^(image|video|audio)\//.test(f.type)
+        );
+        if (media.length === 0) return;
+        e.preventDefault();
+        addFiles(media);
     };
 
     const removeAttachment = (id: number) => {
@@ -534,6 +546,7 @@ export function Composer(props: {
                             value={prompt.value}
                             onInput={(e) => onPromptInput(e.currentTarget)}
                             onKeyDown={onPromptKeyDown}
+                            onPaste={onPaste}
                             onBlur={() => mention.value = null}
                             placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
                             rows={1}
