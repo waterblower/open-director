@@ -3,7 +3,12 @@ import type { Signal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { SeedanceClient } from "../seedance.ts";
-import type { ContentItem, CreateTaskRequest, Task } from "../seedance.ts";
+import type {
+    AspectRatio,
+    ContentItem,
+    CreateTaskRequest,
+    Task,
+} from "../seedance.ts";
 import { ResultsGrid } from "../components/ResultsGrid.tsx";
 const client = new SeedanceClient({
     apiKey: "ark-d923d38d-5530-46b9-9ce3-912dc4aea736-739de",
@@ -30,7 +35,7 @@ const RATIOS = [
     { value: "1:1", w: 11, h: 11 },
     { value: "3:4", w: 10, h: 13 },
     { value: "9:16", w: 9, h: 16 },
-    { value: "智能", w: 13, h: 10 },
+    { value: "adaptive", w: 13, h: 10 },
 ] as const;
 
 const RESOLUTIONS: Resolution[] = ["480p", "720p", "1080p"];
@@ -213,7 +218,7 @@ export default function Seedance() {
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
     const mode = useSignal<Mode>("reference");
-    const ratio = useSignal<string>("21:9");
+    const ratio = useSignal<AspectRatio>("21:9");
     const resolution = useSignal<Resolution>("480p");
     const durationMode = useSignal<DurationMode>("seconds");
     const duration = useSignal(4);
@@ -245,12 +250,13 @@ export default function Seedance() {
 
     // Fetch existing tasks on load
     useEffect(() => {
-        client.listTasks()
-            .then((res) => {
-                console.log(res);
-                generated_videos.value = res.items;
-            })
-            .catch((err) => console.error("listTasks failed:", err));
+        client.listTasks().then((res) => {
+            if (res instanceof Error) {
+                console.error(res);
+                return;
+            }
+            generated_videos.value = res.items;
+        });
     }, []);
 
     // Attachments with their display labels: 图片1, 图片2, 视频1, …
@@ -832,7 +838,7 @@ const generate = async (
     args: {
         prompt: string;
         attachments: Attachment[];
-        ratio: string;
+        ratio: AspectRatio;
         durationMode: DurationMode;
         duration: number;
         audio: boolean;
@@ -869,13 +875,15 @@ const generate = async (
         model: "doubao-seedance-2-0-260128",
         content,
         generate_audio: args.audio,
-        ratio: args.ratio === "智能" ? "adaptive" : args.ratio,
+        ratio: args.ratio,
         ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
     };
 
-    const task = await client.generate(request, { timeoutMs: 600_000 });
+    const task = await client.generate(request);
 
     generating.value = false;
+
+    if (task instanceof Error) return task;
 
     if (task.status !== "succeeded") {
         return new Error(

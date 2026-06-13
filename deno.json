@@ -10,7 +10,8 @@
     "fmt": { "indentWidth": 4 },
     "lint": {
         "rules": {
-            "tags": ["fresh", "recommended"]
+            "tags": ["fresh", "recommended"],
+            "exclude": ["no-unused-vars"]
         }
     },
     "exclude": ["**/_fresh/*"],

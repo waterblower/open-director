@@ -47,8 +47,7 @@ export type AspectRatio =
     | "4:3"
     | "3:4"
     | "21:9"
-    | "adaptive"
-    | (string & {});
+    | "adaptive";
 
 export type Resolution = "480p" | "720p" | "1080p";
 
@@ -64,7 +63,7 @@ export interface SeedanceTool {
 
 export interface CreateTaskRequest {
     /** Model ID, or an inference endpoint ID (ep-...) configured with a video model */
-    model: SeedanceModel | (string & {});
+    model: SeedanceModel;
     /**
      * Multimodal prompt — text, images, video reference, audio reference,
      * or a draft task ID. Supported combinations: text alone, or optional
@@ -349,8 +348,8 @@ export class SeedanceClient {
     // POST /contents/generations/tasks
     // -------------------------------------------------------------------------
 
-    async createTask(request: CreateTaskRequest): Promise<Task> {
-        return this.post<Task>("/contents/generations/tasks", request);
+    async createTask(request: CreateTaskRequest): Promise<Task | Error> {
+        return await this.post<Task>("/contents/generations/tasks", request);
     }
 
     // -------------------------------------------------------------------------
@@ -358,8 +357,8 @@ export class SeedanceClient {
     // GET /contents/generations/tasks/{id}
     // -------------------------------------------------------------------------
 
-    async getTask(taskId: string): Promise<Task> {
-        return this.get<Task>(
+    async getTask(taskId: string): Promise<Task | Error> {
+        return await this.get<Task>(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
     }
@@ -382,7 +381,7 @@ export class SeedanceClient {
         model?: string;
         /** Filter by service tier */
         service_tier?: ServiceTier;
-    }): Promise<ListTasksResponse> {
+    }): Promise<ListTasksResponse | Error> {
         const query = new URLSearchParams();
         if (params?.page_num !== undefined) {
             query.set("page_num", String(params.page_num));
@@ -410,74 +409,38 @@ export class SeedanceClient {
     // DELETE /contents/generations/tasks/{id}
     // -------------------------------------------------------------------------
 
-    async cancelTask(taskId: string): Promise<CancelTaskResponse> {
-        return this.delete<CancelTaskResponse>(
+    async cancelTask(taskId: string): Promise<CancelTaskResponse | Error> {
+        return await this.delete<CancelTaskResponse>(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
-    }
-
-    // -------------------------------------------------------------------------
-    // Poll until a task reaches a terminal state
-    // -------------------------------------------------------------------------
-
-    async waitForCompletion(
-        taskId: string,
-        options?: PollOptions,
-    ): Promise<Task> {
-        const intervalMs = options?.intervalMs ?? 3_000;
-        const timeoutMs = options?.timeoutMs ?? 300_000;
-        const deadline = Date.now() + timeoutMs;
-
-        while (true) {
-            const task = await this.getTask(taskId);
-
-            if (
-                task.status === "succeeded" || task.status === "failed" ||
-                task.status === "cancelled" || task.status === "expired"
-            ) {
-                return task;
-            }
-
-            if (Date.now() + intervalMs > deadline) {
-                throw new SeedanceError(
-                    408,
-                    "timeout",
-                    `Task ${taskId} did not complete within ${timeoutMs}ms`,
-                );
-            }
-
-            await delay(intervalMs);
-        }
     }
 
     // -------------------------------------------------------------------------
     // Convenience: create task and wait for completion
     // -------------------------------------------------------------------------
 
-    async generate(
-        request: CreateTaskRequest,
-        pollOptions?: PollOptions,
-    ): Promise<Task> {
-        const task = await this.createTask(request);
-        return this.waitForCompletion(task.id, pollOptions);
+    async generate(request: CreateTaskRequest): Promise<Task | Error> {
+        return await this.createTask(request);
     }
 
     // -------------------------------------------------------------------------
     // File API
     // -------------------------------------------------------------------------
 
-    async uploadFile(request: UploadFileRequest): Promise<ArkFile> {
+    async uploadFile(request: UploadFileRequest): Promise<ArkFile | Error> {
         const form = new FormData();
         form.append("file", request.file);
         form.append("purpose", request.purpose);
-        return this.postForm<ArkFile>("/files", form);
+        return await this.postForm<ArkFile>("/files", form);
     }
 
-    async getFile(fileId: string): Promise<ArkFile> {
-        return this.get<ArkFile>(`/files/${encodeURIComponent(fileId)}`);
+    async getFile(fileId: string): Promise<ArkFile | Error> {
+        return await this.get<ArkFile>(`/files/${encodeURIComponent(fileId)}`);
     }
 
-    async listFiles(params?: ListFilesRequest): Promise<ListFilesResponse> {
+    async listFiles(
+        params?: ListFilesRequest,
+    ): Promise<ListFilesResponse | Error> {
         const query = new URLSearchParams();
         if (params?.purpose) query.set("purpose", params.purpose);
         if (params?.limit !== undefined) {
@@ -486,11 +449,11 @@ export class SeedanceClient {
         if (params?.after) query.set("after", params.after);
         if (params?.order) query.set("order", params.order);
         const qs = query.toString();
-        return this.get<ListFilesResponse>(`/files${qs ? `?${qs}` : ""}`);
+        return await this.get<ListFilesResponse>(`/files${qs ? `?${qs}` : ""}`);
     }
 
-    async deleteFile(fileId: string): Promise<DeleteFileResponse> {
-        return this.delete<DeleteFileResponse>(
+    async deleteFile(fileId: string): Promise<DeleteFileResponse | Error> {
+        return await this.delete<DeleteFileResponse>(
             `/files/${encodeURIComponent(fileId)}`,
         );
     }
@@ -499,13 +462,13 @@ export class SeedanceClient {
     // Internal HTTP helpers
     // -------------------------------------------------------------------------
 
-    async postForm<T>(path: string, form: FormData): Promise<T> {
+    async postForm<T>(path: string, form: FormData) {
         // Do NOT set Content-Type — the browser/runtime must set it with the boundary
         const res = await this.fetchRaw(path, { method: "POST", body: form });
         return this.parseResponse<T>(res);
     }
 
-    async post<T>(path: string, body: unknown): Promise<T> {
+    async post<T>(path: string, body: unknown) {
         const res = await this.fetchRaw(path, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -514,12 +477,12 @@ export class SeedanceClient {
         return this.parseResponse<T>(res);
     }
 
-    async get<T>(path: string): Promise<T> {
+    async get<T>(path: string) {
         const res = await this.fetchRaw(path, { method: "GET" });
         return this.parseResponse<T>(res);
     }
 
-    async delete<T>(path: string): Promise<T> {
+    async delete<T>(path: string) {
         const res = await this.fetchRaw(path, { method: "DELETE" });
         return this.parseResponse<T>(res);
     }
@@ -543,15 +506,15 @@ export class SeedanceClient {
         }
     }
 
-    async parseResponse<T>(res: Response): Promise<T> {
+    async parseResponse<T>(res: Response) {
         const requestId = res.headers.get("x-request-id") ?? undefined;
-        const body = await res.json().catch(() => ({}));
+        const body = await res.json();
 
         if (!res.ok) {
             const code = body?.error?.code ?? body?.code ?? String(res.status);
             const message = body?.error?.message ?? body?.message ??
                 res.statusText;
-            throw new SeedanceError(res.status, code, message, requestId);
+            return new SeedanceError(res.status, code, message, requestId);
         }
 
         return body as T;
