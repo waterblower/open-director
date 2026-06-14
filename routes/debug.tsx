@@ -54,7 +54,10 @@ const STATUS_ORDER: (TaskStatus | "unknown")[] = [
 
 function fmtTime(unixSec: number): string {
     if (!unixSec) return "—";
-    return new Date(unixSec * 1000).toISOString().replace("T", " ").slice(0, 19);
+    return new Date(unixSec * 1000).toISOString().replace("T", " ").slice(
+        0,
+        19,
+    );
 }
 
 export default define.page(async function Debug() {
@@ -163,7 +166,10 @@ function TaskGroups(
                                         <td class="url">
                                             {t.content?.video_url
                                                 ? (
-                                                    <a href={t.content.video_url}>
+                                                    <a
+                                                        href={t.content
+                                                            .video_url}
+                                                    >
                                                         {t.content.video_url}
                                                     </a>
                                                 )

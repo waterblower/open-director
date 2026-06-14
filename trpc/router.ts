@@ -7,7 +7,13 @@
 import { z } from "zod";
 import { publicProcedure, router } from "./init.ts";
 import { projectDir, resolveInProject } from "../project.ts";
-import { db, getGeneration, listGenerations, recordGeneration } from "../db.ts";
+import {
+    createGeneration,
+    db,
+    getGeneration,
+    listGenerations,
+    recordGeneration,
+} from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
 import type {
     ContentItem,
@@ -289,15 +295,21 @@ export const appRouter = router({
                 ...(durationMode === "seconds" ? { duration } : {}),
             };
 
+            createGeneration(db, request);
+
             const created = await seedance_client.generate(request);
             if (created instanceof Error) {
                 throw created;
             }
 
+            console.log("task created", created);
+
             const task = await seedance_client.getTask(created.id);
             if (task instanceof Error) {
                 throw task;
             }
+
+            console.log("task", task);
 
             // Logging failure shouldn't fail the request — the task is created.
             const recordErr = recordGeneration(db, {

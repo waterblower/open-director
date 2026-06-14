@@ -239,14 +239,13 @@ function MusicIcon(props: { class?: string }) {
 // ---------------------------------------------------------------------------
 
 export function Composer(props: {
-    generating: Signal<boolean>;
     genError: Signal<string | null>;
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
     /** A past generation's request to load in; consumed (cleared) when applied. */
     reusePrompt: Signal<CreateTaskRequest | null>;
 }) {
-    const { generating, genError, composerInset, reusePrompt } = props;
+    const { genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
@@ -991,46 +990,36 @@ export function Composer(props: {
                         {/* Submit */}
                         <button
                             type="button"
-                            disabled={!canSubmit.value || generating.value}
+                            disabled={!canSubmit.value}
                             class="size-9 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white flex items-center justify-center ml-1"
                             aria-label="生成"
                             onClick={async () => {
                                 genError.value = null;
-                                generating.value = true;
-                                try {
-                                    // The server can't read blob: URLs, so
-                                    // inline each attachment's bytes as a data
-                                    // URL before sending.
-                                    const atts = await Promise.all(
-                                        attachments.value.map(async (a) => ({
-                                            kind: a.kind,
-                                            dataUrl: await toDataUrl(a.url),
-                                        })),
-                                    );
-                                    const task = await trpc.generate.mutate({
-                                        prompt: prompt.value.trim(),
-                                        attachments: atts,
-                                        ratio: ratio.value,
-                                        resolution: resolution.value,
-                                        durationMode: durationMode.value,
-                                        duration: duration.value,
-                                        audio: audio.value,
-                                    });
-                                } catch (err) {
-                                    console.error(err);
-                                    genError.value = err instanceof Error
-                                        ? err.message
-                                        : String(err);
-                                } finally {
-                                    generating.value = false;
-                                }
+
+                                // The server can't read blob: URLs, so
+                                // inline each attachment's bytes as a data
+                                // URL before sending.
+                                const atts = await Promise.all(
+                                    attachments.value.map(async (a) => ({
+                                        kind: a.kind,
+                                        dataUrl: await toDataUrl(a.url),
+                                    })),
+                                );
+                                const task_p = trpc.generate.mutate({
+                                    prompt: prompt.value.trim(),
+                                    attachments: atts,
+                                    ratio: ratio.value,
+                                    resolution: resolution.value,
+                                    durationMode: durationMode.value,
+                                    duration: duration.value,
+                                    audio: audio.value,
+                                });
+                                clearAll();
+                                const task = await task_p;
+                                console.log("generating", task);
                             }}
                         >
-                            {generating.value
-                                ? (
-                                    <span class="size-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                                )
-                                : <ArrowUpIcon />}
+                            <ArrowUpIcon />
                         </button>
                     </div>
                 </div>

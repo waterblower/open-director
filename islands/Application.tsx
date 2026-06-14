@@ -74,7 +74,6 @@ export default function Application() {
 
                 {/* Floating composer */}
                 <Composer
-                    generating={generating}
                     genError={genError}
                     composerInset={composerInset}
                     reusePrompt={reusePrompt}
