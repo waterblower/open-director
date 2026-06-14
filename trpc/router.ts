@@ -42,7 +42,7 @@ interface DirEntry {
 export const appRouter = router({
     // List generated videos in `<project>/.project/generations` as Task-like
     // objects. Creates the directory if it doesn't exist yet.
-    listGeneratedVideos: publicProcedure.query(async (): Promise<Task[]> => {
+    listGeneratedVideos: publicProcedure.query(async () => {
         const root = await projectDir();
         const dir = `${root}/${VIDEOS_DIR}`;
         // Creates the dir if missing; a no-op (no throw) when it already exists.
@@ -55,24 +55,6 @@ export const appRouter = router({
         const rowById = new Map(rows.map((r) => [r.task_id, r]));
         const onDisk = new Set<string>();
 
-        const decodeTask = (json: string | null | undefined): Partial<Task> => {
-            if (!json) return {};
-            try {
-                return JSON.parse(json) as Task;
-            } catch {
-                return {};
-            }
-        };
-        const decodeRequest = (
-            json: string | null | undefined,
-        ): Partial<CreateTaskRequest> => {
-            if (!json) return {};
-            try {
-                return JSON.parse(json) as CreateTaskRequest;
-            } catch {
-                return {};
-            }
-        };
         // RFC 3339 string → Unix seconds (undefined when absent/unparseable).
         const toUnix = (rfc: string | null | undefined): number | undefined => {
             if (!rfc) return undefined;
@@ -92,14 +74,15 @@ export const appRouter = router({
             const rel = `${VIDEOS_DIR}/${entry.name}`;
             const stat = await Deno.stat(`${root}/${rel}`);
             const mtime = stat.mtime?.getTime() ?? 0;
+
             // Encode each path segment so the nested VIDEOS_DIR slash stays a
             // real path separator, not %2F.
             const localUrl = "/project-file/" +
                 rel.split("/").map(encodeURIComponent).join("/");
 
             const row = rowById.get(taskId);
-            const base = decodeTask(row?.task_json);
-            const req = decodeRequest(row?.request_json);
+            const base: Partial<Task> = row?.task_json ?? {};
+            const req: Partial<CreateTaskRequest> = row?.request_json ?? {};
 
             videos.push({
                 mtime,
@@ -127,8 +110,8 @@ export const appRouter = router({
         //    whatever status we last recorded.
         for (const row of rows) {
             if (onDisk.has(row.task_id)) continue;
-            const base = decodeTask(row.task_json);
-            const req = decodeRequest(row.request_json);
+            const base: Partial<Task> = row.task_json ?? {};
+            const req: Partial<CreateTaskRequest> = row.request_json ?? {};
             const createdAt = base.created_at ?? toUnix(row.created_at) ?? 0;
             videos.push({
                 mtime: createdAt * 1000,

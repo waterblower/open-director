@@ -216,6 +216,112 @@ export interface Task {
 }
 
 // ---------------------------------------------------------------------------
+// Runtime schemas (zod)
+//
+// Validate stored or inbound JSON against the types above. Each is pinned to
+// its interface with `satisfies z.ZodType<…>` so the schema can't silently
+// drift from the type.
+// ---------------------------------------------------------------------------
+
+const AspectRatioSchema = z.enum([
+    "16:9",
+    "9:16",
+    "1:1",
+    "4:3",
+    "3:4",
+    "21:9",
+    "adaptive",
+]) satisfies z.ZodType<AspectRatio>;
+const ResolutionSchema = z.enum(["480p", "720p", "1080p"]) satisfies z.ZodType<
+    Resolution
+>;
+const ServiceTierSchema = z.enum(["default", "flex"]) satisfies z.ZodType<
+    ServiceTier
+>;
+const SeedanceModelSchema = z.enum([
+    "doubao-seedance-2-0-260128",
+]) satisfies z.ZodType<SeedanceModel>;
+const TaskStatusSchema = z.enum([
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "expired",
+]) satisfies z.ZodType<TaskStatus>;
+
+export const ContentItemSchema = z.union([
+    z.object({ type: z.literal("text"), text: z.string() }),
+    z.object({
+        type: z.literal("image_url"),
+        image_url: z.object({ url: z.string() }),
+        role: z.literal("reference_image").optional(),
+    }),
+    z.object({
+        type: z.literal("video_url"),
+        video_url: z.object({ url: z.string() }),
+        role: z.literal("reference_video").optional(),
+    }),
+    z.object({
+        type: z.literal("audio_url"),
+        audio_url: z.object({ url: z.string() }),
+        role: z.literal("reference_audio").optional(),
+    }),
+]) satisfies z.ZodType<ContentItem>;
+
+export const CreateTaskRequestSchema = z.object({
+    model: SeedanceModelSchema,
+    content: z.array(ContentItemSchema),
+    callback_url: z.string().optional(),
+    return_last_frame: z.boolean().optional(),
+    generate_audio: z.boolean().optional(),
+    draft: z.boolean().optional(),
+    // SeedanceTool: an open-ended `{ type, ...rest }`.
+    tools: z.array(z.object({ type: z.string() }).catchall(z.unknown()))
+        .optional(),
+    safety_identifier: z.string().optional(),
+    service_tier: ServiceTierSchema.optional(),
+    execution_expires_after: z.number().optional(),
+    resolution: ResolutionSchema.optional(),
+    ratio: AspectRatioSchema.optional(),
+    duration: z.number().optional(),
+    frames: z.number().optional(),
+    seed: z.number().optional(),
+    camera_fixed: z.boolean().optional(),
+    watermark: z.boolean().optional(),
+}) satisfies z.ZodType<CreateTaskRequest>;
+
+export const TaskSchema = z.object({
+    id: z.string(),
+    model: z.string(),
+    status: TaskStatusSchema.optional(),
+    content: z.object({
+        video_url: z.string().optional(),
+        last_frame_url: z.string().optional(),
+    }).optional(),
+    usage: z.object({
+        completion_tokens: z.number().optional(),
+        total_tokens: z.number().optional(),
+    }).optional(),
+    created_at: z.number(),
+    updated_at: z.number().optional(),
+    seed: z.number().optional(),
+    resolution: ResolutionSchema.optional(),
+    ratio: AspectRatioSchema.optional(),
+    duration: z.number().optional(),
+    framespersecond: z.number().optional(),
+    service_tier: ServiceTierSchema.optional(),
+    execution_expires_after: z.number().optional(),
+    generate_audio: z.boolean().optional(),
+    draft: z.boolean().optional(),
+    priority: z.number().optional(),
+    error: z.object({
+        code: z.string(),
+        message: z.string(),
+    }).optional(),
+}) satisfies z.ZodType<Task>;
+
+// ---------------------------------------------------------------------------
 // List endpoint types
 // ---------------------------------------------------------------------------
 

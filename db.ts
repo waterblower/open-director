@@ -9,7 +9,26 @@
  */
 // @ts-types="./node_sqlite.d.ts"
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
+import { CreateTaskRequestSchema, TaskSchema } from "./seedance.ts";
 import { projectDir } from "./project.ts";
+
+/**
+ * A TEXT column holding JSON serialized from `schema`. Parses and validates it
+ * to the typed value, yielding null when the column is null, the JSON is
+ * malformed, or it no longer matches the schema — tolerant so one stale row
+ * can't break a whole listing.
+ */
+function jsonColumn<T>(schema: z.ZodType<T>) {
+    return z.string().nullable().transform((s): T | null => {
+        if (s === null) return null;
+        try {
+            return schema.parse(JSON.parse(s));
+        } catch {
+            return null;
+        }
+    });
+}
 
 export const db = getDatabase(await projectDir());
 
@@ -30,16 +49,21 @@ function getDatabase(projectDir: string) {
     return db;
 }
 
-export interface GenerationRow {
-    task_id: string;
-    status: string | null;
-    request_json: string | null;
-    task_json: string | null;
+/** A row of the `Generations` table. */
+export const GenerationRowSchema = z.object({
+    task_id: z.string(),
+    status: z.string().nullable(),
+    /** The create request, parsed from its stored JSON. */
+    request_json: jsonColumn(CreateTaskRequestSchema),
+    /** The last polled task, parsed from its stored JSON. */
+    task_json: jsonColumn(TaskSchema),
     /** RFC 3339 timestamp. */
-    created_at: string | null;
+    created_at: z.string().nullable(),
     /** RFC 3339 timestamp. */
-    downloaded_at: string | null;
-}
+    downloaded_at: z.string().nullable(),
+});
+
+export type GenerationRow = z.infer<typeof GenerationRowSchema>;
 
 /**
  * Record a freshly created generation (the full request + prompt, known only
@@ -108,9 +132,9 @@ export function getGeneration(
 }
 
 /** All generations, newest created first. */
-export function listGenerations(
-    db: DatabaseSync,
-) {
-    return db.prepare("SELECT * FROM Generations ORDER BY created_at DESC")
-        .all() as unknown as GenerationRow[];
+export function listGenerations(db: DatabaseSync): GenerationRow[] {
+    const rows = db.prepare(
+        "SELECT * FROM Generations ORDER BY created_at DESC",
+    ).all();
+    return z.array(GenerationRowSchema).parse(rows);
 }
