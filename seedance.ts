@@ -2,6 +2,7 @@
  * Seedance 2.0 SDK — Volcano Engine Ark
  * https://www.volcengine.com/docs/82379/1520757
  */
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Content item types
@@ -188,7 +189,7 @@ export interface Task {
     /** Model used for this task */
     model: string;
     /** Current task status */
-    status: TaskStatus;
+    status?: TaskStatus;
     /** Generated output. `video_url` is present once status is "succeeded". */
     content?: TaskContent;
     usage?: TaskUsage;
@@ -410,8 +411,18 @@ export class SeedanceClient {
     // Convenience: create task and wait for completion
     // -------------------------------------------------------------------------
 
-    async generate(request: CreateTaskRequest): Promise<Task | Error> {
-        return await this.post<Task>("/contents/generations/tasks", request);
+    async generate(
+        request: CreateTaskRequest,
+    ): Promise<{ id: string } | Error> {
+        const res = await this.post<unknown>(
+            "/contents/generations/tasks",
+            request,
+        );
+        if (res instanceof Error) return res;
+        // The create endpoint returns only the task id; validate strictly so
+        // any unexpected shape surfaces as an Error instead of silently passing.
+        const parsed = z.object({ id: z.string() }).strict().safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     // -------------------------------------------------------------------------
