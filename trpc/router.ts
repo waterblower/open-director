@@ -9,7 +9,12 @@ import { publicProcedure, router } from "./init.ts";
 import { projectDir, resolveInProject } from "../project.ts";
 import { db, getGeneration, listGenerations, recordGeneration } from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
-import type { ContentItem, CreateTaskRequest, Task } from "../seedance.ts";
+import type {
+    ContentItem,
+    CreateTaskRequest,
+    Task,
+    TaskStatus,
+} from "../seedance.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".project/generations";
@@ -37,33 +42,112 @@ interface DirEntry {
 export const appRouter = router({
     // List generated videos in `<project>/.project/generations` as Task-like
     // objects. Creates the directory if it doesn't exist yet.
-    listProjectVideos: publicProcedure.query(async (): Promise<Task[]> => {
+    listGeneratedVideos: publicProcedure.query(async (): Promise<Task[]> => {
         const root = await projectDir();
         const dir = `${root}/${VIDEOS_DIR}`;
         // Creates the dir if missing; a no-op (no throw) when it already exists.
         await Deno.mkdir(dir, { recursive: true });
 
+        // Index the SQLite log by task id (= the video filename stem) so each
+        // file on disk can be enriched with the request/task metadata we stored
+        // when it was generated.
+        const rows = listGenerations(db);
+        const rowById = new Map(rows.map((r) => [r.task_id, r]));
+        const onDisk = new Set<string>();
+
+        const decodeTask = (json: string | null | undefined): Partial<Task> => {
+            if (!json) return {};
+            try {
+                return JSON.parse(json) as Task;
+            } catch {
+                return {};
+            }
+        };
+        const decodeRequest = (
+            json: string | null | undefined,
+        ): Partial<CreateTaskRequest> => {
+            if (!json) return {};
+            try {
+                return JSON.parse(json) as CreateTaskRequest;
+            } catch {
+                return {};
+            }
+        };
+        // RFC 3339 string → Unix seconds (undefined when absent/unparseable).
+        const toUnix = (rfc: string | null | undefined): number | undefined => {
+            if (!rfc) return undefined;
+            const ms = new Date(rfc).getTime();
+            return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+        };
+
         const videos: { task: Task; mtime: number }[] = [];
+
+        // 1. Video files on disk — these are the succeeded, downloaded outputs.
+        //    Merge in any matching log row; if there's none, fall back to the
+        //    file alone.
         for await (const entry of Deno.readDir(dir)) {
             if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
+            const taskId = entry.name.replace(VIDEO_EXT, "");
+            onDisk.add(taskId);
             const rel = `${VIDEOS_DIR}/${entry.name}`;
             const stat = await Deno.stat(`${root}/${rel}`);
+            const mtime = stat.mtime?.getTime() ?? 0;
+            // Encode each path segment so the nested VIDEOS_DIR slash stays a
+            // real path separator, not %2F.
+            const localUrl = "/project-file/" +
+                rel.split("/").map(encodeURIComponent).join("/");
+
+            const row = rowById.get(taskId);
+            const base = decodeTask(row?.task_json);
+            const req = decodeRequest(row?.request_json);
+
             videos.push({
-                mtime: stat.mtime?.getTime() ?? 0,
+                mtime,
                 task: {
-                    id: entry.name,
-                    model: "",
+                    ...base,
+                    id: taskId,
+                    model: base.model ?? req.model ?? "",
                     status: "succeeded",
-                    created_at: Math.floor((stat.mtime?.getTime() ?? 0) / 1000),
+                    ratio: base.ratio ?? req.ratio,
+                    duration: base.duration ?? req.duration,
+                    created_at: base.created_at ?? toUnix(row?.created_at) ??
+                        Math.floor(mtime / 1000),
                     content: {
-                        // Encode each path segment so the nested VIDEOS_DIR
-                        // slash stays a real path separator, not %2F.
-                        video_url: "/project-file/" +
-                            rel.split("/").map(encodeURIComponent).join("/"),
+                        ...base.content,
+                        // Prefer the persistent local copy; the remote
+                        // video_url expires ~24h after generation.
+                        video_url: localUrl,
                     },
                 },
             });
         }
+
+        // 2. Log rows with no file on disk — the video either failed or is
+        //    still queued/running on the seedance server. Surface them with
+        //    whatever status we last recorded.
+        for (const row of rows) {
+            if (onDisk.has(row.task_id)) continue;
+            const base = decodeTask(row.task_json);
+            const req = decodeRequest(row.request_json);
+            const createdAt = base.created_at ?? toUnix(row.created_at) ?? 0;
+            videos.push({
+                mtime: createdAt * 1000,
+                task: {
+                    ...base,
+                    id: row.task_id,
+                    model: base.model ?? req.model ?? "",
+                    // The polled task_json status is the most accurate; fall
+                    // back to the status column, then to "running" if we've
+                    // never managed to poll it.
+                    status: base.status ?? (row.status as TaskStatus) ??
+                        "running",
+                    ratio: base.ratio ?? req.ratio,
+                    duration: base.duration ?? req.duration,
+                    created_at: createdAt,
+                },
+            });
+        }
+
         // Newest first
         videos.sort((a, b) => b.mtime - a.mtime);
         return videos.map((v) => v.task);

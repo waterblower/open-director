@@ -30,7 +30,7 @@ export default function Application() {
     // Load videos from the project's .project dir on mount
     useEffect(() => {
         (async () => {
-            const vids = await trpc.listProjectVideos.query();
+            const vids = await trpc.listGeneratedVideos.query();
             generated_videos.value = vids;
             console.log("generated_videos", vids);
         })();
