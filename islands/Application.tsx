@@ -21,7 +21,9 @@ const DEFAULT_SIDEBAR_WIDTH = 240;
 export default function Application() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
-    const generated_videos = useSignal<Task[]>([]);
+    const generated_videos = useSignal<
+        Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
+    >([]);
     const selectedFile = useSignal<string | null>(null);
     // Composer reports its measured height here to pad the results grid.
     const composerInset = useSignal(0);
@@ -70,7 +72,6 @@ export default function Application() {
                 <Composer
                     generating={generating}
                     genError={genError}
-                    generatedVideos={generated_videos}
                     composerInset={composerInset}
                 />
             </div>

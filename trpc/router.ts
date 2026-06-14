@@ -55,14 +55,13 @@ export const appRouter = router({
         const rowById = new Map(rows.map((r) => [r.task_id, r]));
         const onDisk = new Set<string>();
 
-        // RFC 3339 string → Unix seconds (undefined when absent/unparseable).
-        const toUnix = (rfc: string | null | undefined): number | undefined => {
-            if (!rfc) return undefined;
-            const ms = new Date(rfc).getTime();
-            return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
-        };
-
-        const videos: { task: Task; mtime: number }[] = [];
+        const videos: {
+            id: string;
+            url?: string;
+            createdAt: string;
+            status: TaskStatus;
+            prompts: ContentItem[];
+        }[] = [];
 
         // 1. Video files on disk — these are the succeeded, downloaded outputs.
         //    Merge in any matching log row; if there's none, fall back to the
@@ -73,7 +72,6 @@ export const appRouter = router({
             onDisk.add(taskId);
             const rel = `${VIDEOS_DIR}/${entry.name}`;
             const stat = await Deno.stat(`${root}/${rel}`);
-            const mtime = stat.mtime?.getTime() ?? 0;
 
             // Encode each path segment so the nested VIDEOS_DIR slash stays a
             // real path separator, not %2F.
@@ -81,28 +79,23 @@ export const appRouter = router({
                 rel.split("/").map(encodeURIComponent).join("/");
 
             const row = rowById.get(taskId);
-            const base: Partial<Task> = row?.task_json ?? {};
-            const req: Partial<CreateTaskRequest> = row?.request_json ?? {};
-
-            videos.push({
-                mtime,
-                task: {
-                    ...base,
-                    id: taskId,
-                    model: base.model ?? req.model ?? "",
+            if (!row) {
+                videos.push({
                     status: "succeeded",
-                    ratio: base.ratio ?? req.ratio,
-                    duration: base.duration ?? req.duration,
-                    created_at: base.created_at ?? toUnix(row?.created_at) ??
-                        Math.floor(mtime / 1000),
-                    content: {
-                        ...base.content,
-                        // Prefer the persistent local copy; the remote
-                        // video_url expires ~24h after generation.
-                        video_url: localUrl,
-                    },
-                },
-            });
+                    id: taskId,
+                    url: localUrl,
+                    createdAt: stat.ctime?.toISOString() || "unknown",
+                    prompts: [],
+                });
+            } else {
+                videos.push({
+                    status: "succeeded",
+                    id: taskId,
+                    url: localUrl,
+                    createdAt: row.created_at,
+                    prompts: row.request_json?.content ?? [],
+                });
+            }
         }
 
         // 2. Log rows with no file on disk — the video either failed or is
@@ -110,30 +103,16 @@ export const appRouter = router({
         //    whatever status we last recorded.
         for (const row of rows) {
             if (onDisk.has(row.task_id)) continue;
-            const base: Partial<Task> = row.task_json ?? {};
-            const req: Partial<CreateTaskRequest> = row.request_json ?? {};
-            const createdAt = base.created_at ?? toUnix(row.created_at) ?? 0;
+            const req = row.request_json;
             videos.push({
-                mtime: createdAt * 1000,
-                task: {
-                    ...base,
-                    id: row.task_id,
-                    model: base.model ?? req.model ?? "",
-                    // The polled task_json status is the most accurate; fall
-                    // back to the status column, then to "running" if we've
-                    // never managed to poll it.
-                    status: base.status ?? (row.status as TaskStatus) ??
-                        "running",
-                    ratio: base.ratio ?? req.ratio,
-                    duration: base.duration ?? req.duration,
-                    created_at: createdAt,
-                },
+                status: row.status,
+                id: row.task_id,
+                createdAt: row.created_at,
+                prompts: row.request_json?.content ?? [],
             });
         }
 
-        // Newest first
-        videos.sort((a, b) => b.mtime - a.mtime);
-        return videos.map((v) => v.task);
+        return videos;
     }),
 
     // List the first-layer files/dirs of `<project>/<path>` (path relative to

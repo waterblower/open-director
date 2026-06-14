@@ -1,6 +1,7 @@
 import type { Signal } from "@preact/signals";
 import type { Task } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { trpc } from "../trpc/client.ts";
 
 function VideoIcon(props: { class?: string }) {
     return (
@@ -22,7 +23,9 @@ function VideoIcon(props: { class?: string }) {
 export function GenerationsGrid(
     props: {
         generating: Signal<boolean>;
-        results: Signal<Task[]>;
+        results: Signal<
+            Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
+        >;
         bottomInset: Signal<number>;
     },
 ) {
@@ -44,10 +47,10 @@ export function GenerationsGrid(
                         </div>
                     </div>
                 )}
-                {results.value.map((task) => {
-                    const url = task.content?.video_url;
-                    const isPending = task.status === "running" ||
-                        task.status === "queued";
+                {results.value.map((video) => {
+                    const url = video.url;
+                    const isPending = video.status === "running" ||
+                        video.status === "queued";
                     // Project-relative path, e.g. ".project/vid1.mp4"
                     const rel = url
                         ? decodeURIComponent(
@@ -56,7 +59,7 @@ export function GenerationsGrid(
                         : "";
                     return (
                         <div
-                            key={task.id}
+                            key={video.id}
                             draggable={!!url}
                             onDragStart={(e) => {
                                 if (!url || !e.dataTransfer) return;
@@ -146,7 +149,7 @@ export function GenerationsGrid(
                             <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
                                 <VideoIcon class="size-3.5 text-white/60 shrink-0" />
                                 <span class="text-white/90 text-[11px] leading-tight truncate">
-                                    {task.id}
+                                    {video.id}
                                 </span>
                             </div>
                         </div>

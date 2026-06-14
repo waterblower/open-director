@@ -7,7 +7,6 @@
  * Uses Deno's built-in `node:sqlite`, which is part of the runtime — so it
  * compiles into a `deno compile` binary with no external native library.
  */
-// @ts-types="./node_sqlite.d.ts"
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { CreateTaskRequestSchema, TaskSchema } from "./seedance.ts";
@@ -20,13 +19,8 @@ import { projectDir } from "./project.ts";
  * can't break a whole listing.
  */
 function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().nullable().transform((s): T | null => {
-        if (s === null) return null;
-        try {
-            return schema.parse(JSON.parse(s));
-        } catch {
-            return null;
-        }
+    return z.string().transform((s): T | null => {
+        return schema.parse(JSON.parse(s));
     });
 }
 
@@ -52,15 +46,11 @@ function getDatabase(projectDir: string) {
 /** A row of the `Generations` table. */
 export const GenerationRowSchema = z.object({
     task_id: z.string(),
-    status: z.string().nullable(),
-    /** The create request, parsed from its stored JSON. */
+    status: z.enum(["running", "succeeded", "failed", "queued"]),
     request_json: jsonColumn(CreateTaskRequestSchema),
-    /** The last polled task, parsed from its stored JSON. */
     task_json: jsonColumn(TaskSchema),
-    /** RFC 3339 timestamp. */
-    created_at: z.string().nullable(),
-    /** RFC 3339 timestamp. */
-    downloaded_at: z.string().nullable(),
+    created_at: z.iso.datetime(),
+    downloaded_at: z.iso.datetime(),
 });
 
 export type GenerationRow = z.infer<typeof GenerationRowSchema>;

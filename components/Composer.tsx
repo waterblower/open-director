@@ -249,11 +249,10 @@ function MusicIcon(props: { class?: string }) {
 export function Composer(props: {
     generating: Signal<boolean>;
     genError: Signal<string | null>;
-    generatedVideos: Signal<Task[]>;
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
 }) {
-    const { generating, genError, generatedVideos, composerInset } = props;
+    const { generating, genError, composerInset } = props;
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
@@ -956,8 +955,6 @@ export function Composer(props: {
                                         duration: duration.value,
                                         audio: audio.value,
                                     });
-                                    generatedVideos.value = generatedVideos
-                                        .value.concat([task]);
                                 } catch (err) {
                                     console.error(err);
                                     genError.value = err instanceof Error

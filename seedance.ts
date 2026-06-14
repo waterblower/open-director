@@ -276,7 +276,6 @@ export const CreateTaskRequestSchema = z.object({
     return_last_frame: z.boolean().optional(),
     generate_audio: z.boolean().optional(),
     draft: z.boolean().optional(),
-    // SeedanceTool: an open-ended `{ type, ...rest }`.
     tools: z.array(z.object({ type: z.string() }).catchall(z.unknown()))
         .optional(),
     safety_identifier: z.string().optional(),
