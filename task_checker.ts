@@ -10,6 +10,7 @@ import { resolveInProject } from "./project.ts";
 import { seedance_client } from "./seedance_client.ts";
 import { delay } from "@std/async";
 import { VIDEOS_DIR } from "./trpc/router.ts";
+import { db, markDownloaded } from "./db.ts";
 
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
@@ -37,6 +38,7 @@ export async function check_and_download(): Promise<void | Error> {
         const nowSec = Date.now() / 1000;
         for (const task of seedance_tasks) {
             const url = task.content?.video_url;
+            if (!url) continue; // no video to download (shouldn't happen)
 
             // Skip expired tasks — their download URL is no longer valid.
             if (
@@ -55,6 +57,15 @@ export async function check_and_download(): Promise<void | Error> {
                 console.error(`download ${task.id} failed:`, err);
             } else {
                 console.log(`downloaded ${task.id}.mp4`);
+                // Log the download + full task into the generations DB. Upserts,
+                // so tasks created in a previous session still get recorded.
+
+                markDownloaded(db, {
+                    taskId: task.id,
+                    status: task.status,
+                    taskJson: JSON.stringify(task),
+                    downloadedAt: new Date().toISOString(),
+                });
             }
         }
 

@@ -7,10 +7,14 @@
 import { z } from "zod";
 import { publicProcedure, router } from "./init.ts";
 import { projectDir, resolveInProject } from "../project.ts";
-import type { Task } from "../seedance.ts";
+import { db, getGeneration, listGenerations, recordGeneration } from "../db.ts";
+import { seedance_client } from "../seedance_client.ts";
+import type { ContentItem, CreateTaskRequest, Task } from "../seedance.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".project/generations";
+/** Directory under the project root where uploaded attachments are stored. */
+const UPLOADS_DIR = ".project/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
 async function exists(path: string): Promise<boolean> {
@@ -168,6 +172,103 @@ export const appRouter = router({
             }
             return { path: dest };
         }),
+
+    // Create a Seedance generation task and log it — the single round trip the
+    // composer makes. Attachments arrive as data URLs (the browser inlines its
+    // blob: bytes); the API call + key live server-side. task_checker later
+    // polls + downloads the result, keyed by the same task id.
+    generate: publicProcedure
+        .input(z.object({
+            prompt: z.string(),
+            attachments: z.array(z.object({
+                kind: z.enum(["image", "video", "audio"]),
+                dataUrl: z.string(),
+            })),
+            ratio: z.enum([
+                "16:9",
+                "9:16",
+                "1:1",
+                "4:3",
+                "3:4",
+                "21:9",
+                "adaptive",
+            ]),
+            durationMode: z.enum(["seconds", "smart"]),
+            duration: z.number(),
+            audio: z.boolean(),
+        }))
+        .mutation(async (opts): Promise<Task> => {
+            const {
+                prompt,
+                attachments,
+                ratio,
+                durationMode,
+                duration,
+                audio,
+            } = opts.input;
+
+            // Assemble the multimodal content: optional text, then each
+            // attachment as a typed reference.
+            const content: ContentItem[] = [];
+            if (prompt) content.push({ type: "text", text: prompt });
+            for (const att of attachments) {
+                if (att.kind === "image") {
+                    content.push({
+                        type: "image_url",
+                        image_url: { url: att.dataUrl },
+                        role: "reference_image",
+                    });
+                } else if (att.kind === "video") {
+                    content.push({
+                        type: "video_url",
+                        video_url: { url: att.dataUrl },
+                        role: "reference_video",
+                    });
+                } else {
+                    content.push({
+                        type: "audio_url",
+                        audio_url: { url: att.dataUrl },
+                        role: "reference_audio",
+                    });
+                }
+            }
+
+            const request: CreateTaskRequest = {
+                model: "doubao-seedance-2-0-260128",
+                content,
+                generate_audio: audio,
+                ratio,
+                ...(durationMode === "seconds" ? { duration } : {}),
+            };
+
+            const created = await seedance_client.generate(request);
+            if (created instanceof Error) {
+                throw created;
+            }
+
+            const task = await seedance_client.getTask(created.id);
+            if (task instanceof Error) {
+                throw task;
+            }
+
+            // Logging failure shouldn't fail the request — the task is created.
+            const recordErr = recordGeneration(db, {
+                taskId: created.id,
+                requestJson: JSON.stringify(request),
+                createdAt: new Date().toISOString(),
+            });
+            if (recordErr) {
+                console.error(recordErr);
+            }
+            return task;
+        }),
+
+    // Read the generation log (e.g. to show a video's prompt/metadata).
+    getGeneration: publicProcedure
+        .input(z.string())
+        .query((opts) => getGeneration(db, opts.input)),
+
+    listGenerations: publicProcedure.query(() => listGenerations(db)),
 });
 
 // Export type only — never import the router implementation into the client.

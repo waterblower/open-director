@@ -1,4 +1,9 @@
-import { type Signal, useComputed, useSignal } from "@preact/signals";
+import {
+    type Signal,
+    useComputed,
+    useSignal,
+    useSignalEffect,
+} from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { seedance_client } from "../seedance_client.ts";
@@ -9,6 +14,7 @@ import type {
     CreateTaskRequest,
     Task,
 } from "../seedance.ts";
+import { trpc } from "../trpc/client.ts";
 
 type AttachmentKind = "image" | "video" | "audio";
 
@@ -48,6 +54,36 @@ type Mention = {
     x: number;
     y: number;
 };
+
+/** localStorage key for the composer's prompt + generation settings. */
+const COMPOSER_STATE_KEY = "composer.state.v1";
+
+/** Persisted composer fields (attachments are intentionally excluded). */
+interface ComposerState {
+    prompt: string;
+    mode: Mode;
+    ratio: AspectRatio;
+    resolution: Resolution;
+    durationMode: DurationMode;
+    duration: number;
+    audio: boolean;
+}
+
+/** Read persisted composer state (client only); null if absent/unreadable. */
+function loadComposerState(): Partial<ComposerState> | null {
+    try {
+        const raw = localStorage.getItem(COMPOSER_STATE_KEY);
+        return raw ? JSON.parse(raw) as Partial<ComposerState> : null;
+    } catch {
+        return null;
+    }
+}
+
+function saveComposerState(state: ComposerState): void {
+    try {
+        localStorage.setItem(COMPOSER_STATE_KEY, JSON.stringify(state));
+    } catch { /* storage unavailable or full — non-fatal */ }
+}
 
 function kindOf(file: File): AttachmentKind {
     if (file.type.startsWith("video/")) return "video";
@@ -207,75 +243,6 @@ function MusicIcon(props: { class?: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Generate
-// ---------------------------------------------------------------------------
-
-/**
- * Build the request from the composer's inputs and create the Seedance task.
- * Returns the freshly created (pending) Task for immediate display, or an Error
- * (never throws). The backend `task_checker` loop polls + downloads the result,
- * so completion is independent of this browser session.
- */
-const generate = async (
-    args: {
-        prompt: string;
-        attachments: Attachment[];
-        ratio: AspectRatio;
-        durationMode: DurationMode;
-        duration: number;
-        audio: boolean;
-    },
-    generating: Signal<boolean>,
-): Promise<Task | Error> => {
-    generating.value = true;
-
-    // Assemble the multimodal content array: optional text prompt followed by
-    // each attachment as a reference. Attachments are blob: object URLs, which
-    // the API can't fetch, so inline their bytes as data URLs.
-    const content: ContentItem[] = [];
-    if (args.prompt) content.push({ type: "text", text: args.prompt });
-    for (const att of args.attachments) {
-        const url = await toDataUrl(att.url);
-        if (att.kind === "image") {
-            content.push({
-                type: "image_url",
-                image_url: { url },
-                role: "reference_image",
-            });
-        } else if (att.kind === "video") {
-            content.push({
-                type: "video_url",
-                video_url: { url },
-                role: "reference_video",
-            });
-        } else {
-            content.push({
-                type: "audio_url",
-                audio_url: { url },
-                role: "reference_audio",
-            });
-        }
-    }
-
-    const request: CreateTaskRequest = {
-        model: "doubao-seedance-2-0-260128",
-        content,
-        generate_audio: args.audio,
-        ratio: args.ratio,
-        // "smart" duration lets the model decide; only send a fixed duration
-        // when the user picked "seconds".
-        ...(args.durationMode === "seconds" ? { duration: args.duration } : {}),
-    };
-
-    // Create the task; it returns pending (queued). The backend downloads it.
-    const task = await seedance_client.generate(request);
-
-    generating.value = false;
-
-    return task;
-};
-
-// ---------------------------------------------------------------------------
 // Composer
 // ---------------------------------------------------------------------------
 
@@ -317,6 +284,39 @@ export function Composer(props: {
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
+
+    // Restore the prompt + settings saved from a previous session. Guard the
+    // save effect with `hydrated` so the initial render doesn't clobber storage
+    // with defaults before this restore runs.
+    const hydrated = useRef(false);
+    useEffect(() => {
+        const saved = loadComposerState();
+        if (saved) {
+            if (typeof saved.prompt === "string") prompt.value = saved.prompt;
+            if (saved.mode) mode.value = saved.mode;
+            if (saved.ratio) ratio.value = saved.ratio;
+            if (saved.resolution) resolution.value = saved.resolution;
+            if (saved.durationMode) durationMode.value = saved.durationMode;
+            if (typeof saved.duration === "number") {
+                duration.value = saved.duration;
+            }
+            if (typeof saved.audio === "boolean") audio.value = saved.audio;
+        }
+        hydrated.current = true;
+    }, []);
+
+    useSignalEffect(() => {
+        const state: ComposerState = {
+            prompt: prompt.value,
+            mode: mode.value,
+            ratio: ratio.value,
+            resolution: resolution.value,
+            durationMode: durationMode.value,
+            duration: duration.value,
+            audio: audio.value,
+        };
+        if (hydrated.current) saveComposerState(state);
+    });
 
     // Attachments with their display labels: 图片1, 图片2, 视频1, …
     const labeled = useComputed(() => {
@@ -922,24 +922,34 @@ export function Composer(props: {
                             aria-label="生成"
                             onClick={async () => {
                                 genError.value = null;
-                                const args = {
-                                    prompt: prompt.value.trim(),
-                                    attachments: attachments.value,
-                                    ratio: ratio.value,
-                                    durationMode: durationMode.value,
-                                    duration: duration.value,
-                                    audio: audio.value,
-                                };
-                                const task_p = generate(args, generating);
-                                console.log("generate", args);
-                                const task = await task_p;
-                                if (task instanceof Error) {
-                                    console.error(task);
-                                    genError.value = task.message;
-                                } else {
-                                    console.log(task);
+                                generating.value = true;
+                                try {
+                                    // The server can't read blob: URLs, so
+                                    // inline each attachment's bytes as a data
+                                    // URL before sending.
+                                    const atts = await Promise.all(
+                                        attachments.value.map(async (a) => ({
+                                            kind: a.kind,
+                                            dataUrl: await toDataUrl(a.url),
+                                        })),
+                                    );
+                                    const task = await trpc.generate.mutate({
+                                        prompt: prompt.value.trim(),
+                                        attachments: atts,
+                                        ratio: ratio.value,
+                                        durationMode: durationMode.value,
+                                        duration: duration.value,
+                                        audio: audio.value,
+                                    });
                                     generatedVideos.value = generatedVideos
                                         .value.concat([task]);
+                                } catch (err) {
+                                    console.error(err);
+                                    genError.value = err instanceof Error
+                                        ? err.message
+                                        : String(err);
+                                } finally {
+                                    generating.value = false;
                                 }
                             }}
                         >
