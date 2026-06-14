@@ -62,6 +62,7 @@ export const GenerationRowSchema = z.object({
     task_id: z.string().nullable().optional(),
     task_json: jsonColumn(TaskSchema).nullable().optional(),
     downloaded_at: z.iso.datetime().nullable().optional(),
+    failed_reason: z.string().nullable().optional(),
 });
 
 export type Generation = z.infer<typeof GenerationRowSchema>;
@@ -246,18 +247,22 @@ export function recordTaskStatus(db: DatabaseSync, row: {
     taskId: string;
     status: string;
     taskJson: string;
+    failedReason?: string;
 }) {
     db.prepare(
-        `INSERT INTO Generations (id, task_id, status, task_json)
-         VALUES (:id, :task_id, :status, :task_json)
+        `INSERT INTO Generations
+             (id, task_id, status, task_json, failed_reason)
+         VALUES (:id, :task_id, :status, :task_json, :failed_reason)
          ON CONFLICT(task_id) DO UPDATE SET
              status = excluded.status,
-             task_json = excluded.task_json`,
+             task_json = excluded.task_json,
+             failed_reason = excluded.failed_reason`,
     ).run({
         id: ulid(),
         task_id: row.taskId,
         status: row.status,
         task_json: row.taskJson ?? null,
+        failed_reason: row.failedReason ?? null,
     });
 }
 

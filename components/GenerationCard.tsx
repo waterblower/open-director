@@ -18,6 +18,7 @@ export function GenerationCard(
     const { video, reusePrompt } = props;
     const url = video.url;
     const isPending = video.status === "running" || video.status === "queued";
+    const isFailed = video.status === "failed";
     // Project-relative path, e.g. ".project/vid1.mp4"
     const rel = url
         ? decodeURIComponent(url.replace(/^\/project-file\//, ""))
@@ -84,6 +85,20 @@ export function GenerationCard(
                 ? (
                     <div class="w-full aspect-video flex items-center justify-center">
                         <span class="size-7 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
+                    </div>
+                )
+                : isFailed
+                ? (
+                    // Scrollable so the whole reason is readable; pb clears the
+                    // bottom id caption. break-anywhere wraps long error codes /
+                    // request ids instead of clipping them.
+                    <div class="w-full aspect-video overflow-y-auto p-3 pb-7 text-center [overflow-wrap:anywhere]">
+                        <div class="text-red-400 text-[11px] font-medium mb-1">
+                            生成失败
+                        </div>
+                        <div class="text-gray-400 text-[11px] leading-snug">
+                            {video.failedReason || "未知原因"}
+                        </div>
                     </div>
                 )
                 : url

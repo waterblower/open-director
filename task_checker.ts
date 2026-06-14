@@ -34,14 +34,18 @@ export async function check_and_download(): Promise<void | Error> {
                 continue;
             }
 
-            // Record terminal failures so they drop out of `pending` and we
-            // stop polling them.
+            // Record terminal failures (with the reason) so they drop out of
+            // `pending` and we stop polling them.
             if (task.status === "failed") {
-                console.log(taskId, "failed");
+                const reason = task.error
+                    ? `${task.error.code}: ${task.error.message}`
+                    : undefined;
+                console.log(taskId, "failed", reason ?? "");
                 recordTaskStatus(db, {
                     taskId,
                     status: task.status,
                     taskJson: JSON.stringify(task),
+                    failedReason: reason,
                 });
                 continue;
             }

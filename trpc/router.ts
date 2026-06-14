@@ -69,6 +69,8 @@ export const appRouter = router({
             status: TaskStatus;
             /** The original create request (prompt + settings), when logged. */
             request?: CreateTaskRequest;
+            /** Why the generation failed, when status is "failed". */
+            failedReason?: string;
         }[] = [];
 
         // 1. Video files on disk — these are the succeeded, downloaded outputs.
@@ -117,6 +119,7 @@ export const appRouter = router({
                 id: row.task_id ?? row.id,
                 createdAt: row.created_at,
                 request: row.request_json ?? undefined,
+                failedReason: row.failed_reason ?? undefined,
             });
         }
 
