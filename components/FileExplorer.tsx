@@ -1,5 +1,5 @@
-import { type Signal, useSignal } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
+import { useEffect, useRef } from "preact/hooks";
 import { trpc } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 
@@ -31,6 +31,30 @@ function sortEntries(entries: FileEntry[]): FileEntry[] {
 /** Build the URL that serves a project-relative file. */
 function projectFileUrl(rel: string): string {
     return "/project-file/" + rel.split("/").map(encodeURIComponent).join("/");
+}
+
+/** localStorage key for the explorer's expanded folders + selection. */
+const EXPLORER_STATE_KEY = "fileExplorer.state.v1";
+
+interface ExplorerState {
+    expanded: string[];
+    selected: string | null;
+}
+
+/** Read persisted explorer state (client only); null if absent/unreadable. */
+function loadExplorerState(): ExplorerState | null {
+    try {
+        const raw = localStorage.getItem(EXPLORER_STATE_KEY);
+        return raw ? JSON.parse(raw) as ExplorerState : null;
+    } catch {
+        return null;
+    }
+}
+
+function saveExplorerState(state: ExplorerState): void {
+    try {
+        localStorage.setItem(EXPLORER_STATE_KEY, JSON.stringify(state));
+    } catch { /* storage unavailable or full — non-fatal */ }
 }
 
 /** Re-encode a blob as PNG (clipboard image writes are most portable as PNG). */
@@ -419,6 +443,33 @@ export function FileExplorer(props: {
         childrenByPath.value = { ...childrenByPath.value, [path]: res };
         return res;
     };
+
+    // Restore the expanded folders + selection saved last session, then start
+    // persisting changes. The `hydrated` gate stops the persist effect from
+    // overwriting storage with empty state before the restore runs.
+    const hydrated = useRef(false);
+    useEffect(() => {
+        const saved = loadExplorerState();
+        if (saved) {
+            if (Array.isArray(saved.expanded)) {
+                expanded.value = new Set(saved.expanded);
+                // Load each open dir's children so the tree renders expanded.
+                for (const p of saved.expanded) loadChildren(p);
+            }
+            if (saved.selected && props.selected) {
+                props.selected.value = saved.selected;
+            }
+        }
+        hydrated.current = true;
+    }, []);
+
+    useSignalEffect(() => {
+        const state: ExplorerState = {
+            expanded: [...expanded.value],
+            selected: props.selected?.value ?? null,
+        };
+        if (hydrated.current) saveExplorerState(state);
+    });
 
     const openInDefault = (path: string) => {
         menu.value = null;
