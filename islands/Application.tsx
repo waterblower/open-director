@@ -9,7 +9,7 @@ import {
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { seedance_client } from "../seedance_client.ts";
+import { delay } from "@std/async";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
 const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -35,9 +35,12 @@ export default function Application() {
     // Load videos from the project's .project dir on mount
     useEffect(() => {
         (async () => {
-            const vids = await trpc.listGeneratedVideos.query();
-            generated_videos.value = vids;
-            console.log("generated_videos", vids);
+            for (;;) {
+                const vids = await trpc.listGeneratedVideos.query();
+                generated_videos.value = vids;
+                console.log("generated_videos", vids);
+                await delay(3000);
+            }
         })();
     }, []);
 
