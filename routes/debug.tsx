@@ -1,7 +1,29 @@
 import { Head } from "fresh/runtime";
 import { define } from "../utils.ts";
 import { seedance_client } from "../seedance_client.ts";
+import { resolveInProject } from "../project.ts";
+import { VIDEOS_DIR } from "../trpc/router.ts";
 import type { Task, TaskStatus } from "../seedance.ts";
+
+const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
+
+/**
+ * Task ids that already have a downloaded video file in the generations folder
+ * (filename stem == task id). Checks the filesystem only — not the DB.
+ */
+async function listDownloadedIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    try {
+        const dir = await resolveInProject(VIDEOS_DIR);
+        for await (const entry of Deno.readDir(dir)) {
+            if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
+            ids.add(entry.name.replace(VIDEO_EXT, ""));
+        }
+    } catch (err) {
+        if (!(err instanceof Deno.errors.NotFound)) throw err;
+    }
+    return ids;
+}
 
 /** Fetch every task from Seedance, following pagination. */
 async function fetchAllTasks(): Promise<Task[] | Error> {
@@ -36,7 +58,10 @@ function fmtTime(unixSec: number): string {
 }
 
 export default define.page(async function Debug() {
-    const result = await fetchAllTasks();
+    const [result, downloaded] = await Promise.all([
+        fetchAllTasks(),
+        listDownloadedIds(),
+    ]);
 
     return (
         <>
@@ -62,12 +87,14 @@ export default define.page(async function Debug() {
 
             {result instanceof Error
                 ? <p class="err">Failed to list tasks: {result.message}</p>
-                : <TaskGroups tasks={result} />}
+                : <TaskGroups tasks={result} downloaded={downloaded} />}
         </>
     );
 });
 
-function TaskGroups({ tasks }: { tasks: Task[] }) {
+function TaskGroups(
+    { tasks, downloaded }: { tasks: Task[]; downloaded: Set<string> },
+) {
     // Group by status.
     const groups = new Map<string, Task[]>();
     for (const t of tasks) {
@@ -114,6 +141,7 @@ function TaskGroups({ tasks }: { tasks: Task[] }) {
                                     <th>dur</th>
                                     <th>ratio</th>
                                     <th>res</th>
+                                    <th>downloaded</th>
                                     <th>video_url</th>
                                     <th>error</th>
                                 </tr>
@@ -127,6 +155,11 @@ function TaskGroups({ tasks }: { tasks: Task[] }) {
                                         <td>{t.duration ?? "—"}</td>
                                         <td>{t.ratio ?? "—"}</td>
                                         <td>{t.resolution ?? "—"}</td>
+                                        <td>
+                                            {downloaded.has(t.id)
+                                                ? "yes"
+                                                : <span class="muted">no</span>}
+                                        </td>
                                         <td class="url">
                                             {t.content?.video_url
                                                 ? (
