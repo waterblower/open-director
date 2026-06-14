@@ -292,7 +292,17 @@ export function Composer(props: {
     useEffect(() => {
         const saved = loadComposerState();
         if (saved) {
-            if (typeof saved.prompt === "string") prompt.value = saved.prompt;
+            if (typeof saved.prompt === "string") {
+                prompt.value = saved.prompt;
+                // Grow the textarea to fit the restored (possibly multi-line)
+                // text; onInput won't fire for a programmatic value. Set the
+                // DOM value imperatively so scrollHeight reflects it now.
+                const ta = promptRef.current;
+                if (ta) {
+                    ta.value = saved.prompt;
+                    autoGrow(ta);
+                }
+            }
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
             if (saved.resolution) resolution.value = saved.resolution;
@@ -461,10 +471,15 @@ export function Composer(props: {
         });
     };
 
-    const onPromptInput = (ta: HTMLTextAreaElement) => {
-        prompt.value = ta.value;
+    // Resize the textarea to fit its content (auto-grow up to the CSS max).
+    const autoGrow = (ta: HTMLTextAreaElement) => {
         ta.style.height = "auto";
         ta.style.height = `${ta.scrollHeight}px`;
+    };
+
+    const onPromptInput = (ta: HTMLTextAreaElement) => {
+        prompt.value = ta.value;
+        autoGrow(ta);
         const caret = ta.selectionStart ?? 0;
         if (caret > 0 && ta.value[caret - 1] === "@") {
             openMention(ta, caret - 1);
