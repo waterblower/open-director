@@ -190,14 +190,6 @@ function ChevronIcon(props: { up: boolean }) {
     );
 }
 
-function SlidersIcon() {
-    return (
-        <IconBase>
-            <path d="M9 4v16M15 4v16M4 9h10M10 15h10" />
-        </IconBase>
-    );
-}
-
 function SpeakerIcon() {
     return (
         <IconBase>
@@ -251,8 +243,8 @@ export function Composer(props: {
     genError: Signal<string | null>;
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
-    /** A past generation's prompt to load in; consumed (cleared) when applied. */
-    reusePrompt: Signal<ContentItem[] | null>;
+    /** A past generation's request to load in; consumed (cleared) when applied. */
+    reusePrompt: Signal<CreateTaskRequest | null>;
 }) {
     const { generating, genError, composerInset, reusePrompt } = props;
 
@@ -329,9 +321,11 @@ export function Composer(props: {
         if (hydrated.current) saveComposerState(state);
     });
 
-    // Replace the composer's content (text + reference media) with a past
-    // generation's prompt, as requested by the results grid's reuse button.
-    const applyReuse = async (content: ContentItem[]) => {
+    // Replace the composer's content (prompt text + reference media) and
+    // generation settings with a past generation's request, as requested by
+    // the results grid's reuse button.
+    const applyReuse = async (req: CreateTaskRequest) => {
+        const content = req.content;
         const text = content
             .filter((c): c is Extract<ContentItem, { type: "text" }> =>
                 c.type === "text"
@@ -343,6 +337,20 @@ export function Composer(props: {
         if (ta) {
             ta.value = text;
             autoGrow(ta);
+        }
+
+        // Settings — mirror how the request was assembled on submit: `duration`
+        // is only present in "seconds" mode, omitted in "smart" mode.
+        if (req.ratio) ratio.value = req.ratio;
+        if (req.resolution) resolution.value = req.resolution;
+        if (typeof req.duration === "number") {
+            durationMode.value = "seconds";
+            duration.value = req.duration;
+        } else {
+            durationMode.value = "smart";
+        }
+        if (typeof req.generate_audio === "boolean") {
+            audio.value = req.generate_audio;
         }
 
         // Reference media is stored as data URLs; rebuild each into a revocable
@@ -374,10 +382,10 @@ export function Composer(props: {
     };
 
     useSignalEffect(() => {
-        const content = reusePrompt.value;
-        if (!content) return;
+        const req = reusePrompt.value;
+        if (!req) return;
         reusePrompt.value = null; // consume once
-        applyReuse(content).catch((err) => console.error(err));
+        applyReuse(req).catch((err) => console.error(err));
     });
 
     // Attachments with their display labels: 图片1, 图片2, 视频1, …
@@ -823,7 +831,6 @@ export function Composer(props: {
                                 class="flex items-center h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 divide-x divide-gray-200"
                             >
                                 <span class="px-2.5 flex items-center gap-1.5">
-                                    <SlidersIcon />
                                     {ratio.value}
                                 </span>
                                 <span class="px-2.5">{resolution.value}</span>

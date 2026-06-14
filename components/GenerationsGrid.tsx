@@ -1,5 +1,5 @@
 import type { Signal } from "@preact/signals";
-import type { ContentItem } from "../seedance.ts";
+import type { CreateTaskRequest } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
 
@@ -44,8 +44,8 @@ export function GenerationsGrid(
             Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
         >;
         bottomInset: Signal<number>;
-        /** Set to a generation's prompt when its reuse button is clicked. */
-        reusePrompt: Signal<ContentItem[] | null>;
+        /** Set to a generation's request when its reuse button is clicked. */
+        reusePrompt: Signal<CreateTaskRequest | null>;
     },
 ) {
     const { generating, results, bottomInset, reusePrompt } = props;
@@ -165,11 +165,13 @@ export function GenerationsGrid(
                                         <VideoIcon class="size-8" />
                                     </div>
                                 )}
-                            {/* Reuse prompt — only when this generation has a
-                                prompt attached. Custom tooltip (vs native
-                                `title`) so it appears without the browser's
-                                ~1s hover delay. */}
-                            {video.prompts.length > 0 && (
+                            {
+                                /* Reuse prompt — only when this generation has a
+                                request (prompt + settings) attached. Custom
+                                tooltip (vs native `title`) so it appears without
+                                the browser's ~1s hover delay. */
+                            }
+                            {video.request && (
                                 <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button
                                         type="button"
@@ -177,7 +179,8 @@ export function GenerationsGrid(
                                         draggable={false}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            reusePrompt.value = video.prompts;
+                                            reusePrompt.value = video.request ??
+                                                null;
                                         }}
                                         class="peer size-8 rounded-full bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm"
                                     >

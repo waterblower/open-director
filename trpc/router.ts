@@ -60,7 +60,8 @@ export const appRouter = router({
             url?: string;
             createdAt: string;
             status: TaskStatus;
-            prompts: ContentItem[];
+            /** The original create request (prompt + settings), when logged. */
+            request?: CreateTaskRequest;
         }[] = [];
 
         // 1. Video files on disk — these are the succeeded, downloaded outputs.
@@ -85,7 +86,6 @@ export const appRouter = router({
                     id: taskId,
                     url: localUrl,
                     createdAt: stat.ctime?.toISOString() || "unknown",
-                    prompts: [],
                 });
             } else {
                 videos.push({
@@ -93,7 +93,7 @@ export const appRouter = router({
                     id: taskId,
                     url: localUrl,
                     createdAt: row.created_at,
-                    prompts: row.request_json?.content ?? [],
+                    request: row.request_json ?? undefined,
                 });
             }
         }
@@ -103,12 +103,11 @@ export const appRouter = router({
         //    whatever status we last recorded.
         for (const row of rows) {
             if (onDisk.has(row.task_id)) continue;
-            const req = row.request_json;
             videos.push({
                 status: row.status,
                 id: row.task_id,
                 createdAt: row.created_at,
-                prompts: row.request_json?.content ?? [],
+                request: row.request_json ?? undefined,
             });
         }
 
