@@ -251,8 +251,10 @@ export function Composer(props: {
     genError: Signal<string | null>;
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
+    /** A past generation's prompt to load in; consumed (cleared) when applied. */
+    reusePrompt: Signal<ContentItem[] | null>;
 }) {
-    const { generating, genError, composerInset } = props;
+    const { generating, genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
@@ -325,6 +327,57 @@ export function Composer(props: {
             audio: audio.value,
         };
         if (hydrated.current) saveComposerState(state);
+    });
+
+    // Replace the composer's content (text + reference media) with a past
+    // generation's prompt, as requested by the results grid's reuse button.
+    const applyReuse = async (content: ContentItem[]) => {
+        const text = content
+            .filter((c): c is Extract<ContentItem, { type: "text" }> =>
+                c.type === "text"
+            )
+            .map((c) => c.text)
+            .join("\n");
+        prompt.value = text;
+        const ta = promptRef.current;
+        if (ta) {
+            ta.value = text;
+            autoGrow(ta);
+        }
+
+        // Reference media is stored as data URLs; rebuild each into a revocable
+        // object URL so it behaves like a normally-attached file.
+        const media = content
+            .map((c) => {
+                if (c.type === "image_url") {
+                    return { kind: "image" as const, url: c.image_url.url };
+                }
+                if (c.type === "video_url") {
+                    return { kind: "video" as const, url: c.video_url.url };
+                }
+                if (c.type === "audio_url") {
+                    return { kind: "audio" as const, url: c.audio_url.url };
+                }
+                return null;
+            })
+            .filter((m): m is { kind: AttachmentKind; url: string } =>
+                m !== null
+            );
+
+        attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
+        attachments.value = await Promise.all(media.map(async (m) => ({
+            id: nextId.current++,
+            kind: m.kind,
+            name: KIND_LABEL[m.kind],
+            url: URL.createObjectURL(await (await fetch(m.url)).blob()),
+        })));
+    };
+
+    useSignalEffect(() => {
+        const content = reusePrompt.value;
+        if (!content) return;
+        reusePrompt.value = null; // consume once
+        applyReuse(content).catch((err) => console.error(err));
     });
 
     // Attachments with their display labels: 图片1, 图片2, 视频1, …

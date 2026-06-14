@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
-import type { Task } from "../seedance.ts";
+import type { ContentItem, Task } from "../seedance.ts";
 import { trpc } from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import {
@@ -25,6 +25,9 @@ export default function Application() {
         Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
     >([]);
     const selectedFile = useSignal<string | null>(null);
+    // A past generation's prompt the grid asks the composer to reuse. The
+    // composer consumes (and clears) it.
+    const reusePrompt = useSignal<ContentItem[] | null>(null);
     // Composer reports its measured height here to pad the results grid.
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
@@ -66,6 +69,7 @@ export default function Application() {
                     generating={generating}
                     results={generated_videos}
                     bottomInset={composerInset}
+                    reusePrompt={reusePrompt}
                 />
 
                 {/* Floating composer */}
@@ -73,6 +77,7 @@ export default function Application() {
                     generating={generating}
                     genError={genError}
                     composerInset={composerInset}
+                    reusePrompt={reusePrompt}
                 />
             </div>
         </div>

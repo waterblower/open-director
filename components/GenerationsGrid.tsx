@@ -1,5 +1,5 @@
 import type { Signal } from "@preact/signals";
-import type { Task } from "../seedance.ts";
+import type { ContentItem } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
 
@@ -20,6 +20,23 @@ function VideoIcon(props: { class?: string }) {
     );
 }
 
+function ReuseIcon(props: { class?: string }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <path d="M9 14 4 9l5-5" />
+            <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+        </svg>
+    );
+}
+
 export function GenerationsGrid(
     props: {
         generating: Signal<boolean>;
@@ -27,9 +44,11 @@ export function GenerationsGrid(
             Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
         >;
         bottomInset: Signal<number>;
+        /** Set to a generation's prompt when its reuse button is clicked. */
+        reusePrompt: Signal<ContentItem[] | null>;
     },
 ) {
-    const { generating, results, bottomInset } = props;
+    const { generating, results, bottomInset, reusePrompt } = props;
     if (!generating.value && results.value.length === 0) return null;
 
     return (
@@ -146,6 +165,29 @@ export function GenerationsGrid(
                                         <VideoIcon class="size-8" />
                                     </div>
                                 )}
+                            {/* Reuse prompt — only when this generation has a
+                                prompt attached. Custom tooltip (vs native
+                                `title`) so it appears without the browser's
+                                ~1s hover delay. */}
+                            {video.prompts.length > 0 && (
+                                <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        type="button"
+                                        aria-label="复用提示词"
+                                        draggable={false}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            reusePrompt.value = video.prompts;
+                                        }}
+                                        class="peer size-8 rounded-full bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm"
+                                    >
+                                        <ReuseIcon class="size-4" />
+                                    </button>
+                                    <span class="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
+                                        复用提示词
+                                    </span>
+                                </div>
+                            )}
                             <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
                                 <VideoIcon class="size-3.5 text-white/60 shrink-0" />
                                 <span class="text-white/90 text-[11px] leading-tight truncate">
