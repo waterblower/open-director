@@ -9,7 +9,12 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { CreateTaskRequestSchema, TaskSchema } from "./seedance.ts";
+import {
+    CreateTaskRequestSchema,
+    Task,
+    TaskSchema,
+    TaskStatus,
+} from "./seedance.ts";
 import { projectDir } from "./project.ts";
 
 /**
@@ -46,11 +51,11 @@ function getDatabase(projectDir: string) {
 /** A row of the `Generations` table. */
 export const GenerationRowSchema = z.object({
     task_id: z.string(),
-    status: z.enum(["running", "succeeded", "failed", "queued"]),
+    status: z.enum(["running", "succeeded", "failed", "queued"]).nullable(),
     request_json: jsonColumn(CreateTaskRequestSchema),
     task_json: jsonColumn(TaskSchema),
     created_at: z.iso.datetime(),
-    downloaded_at: z.iso.datetime(),
+    downloaded_at: z.iso.datetime().nullable(),
 });
 
 export type GenerationRow = z.infer<typeof GenerationRowSchema>;
@@ -61,21 +66,28 @@ export type GenerationRow = z.infer<typeof GenerationRowSchema>;
  */
 export function recordGeneration(db: DatabaseSync, row: {
     taskId: string;
-    requestJson: string;
     createdAt: string;
+    requestJson: string;
+    status?: TaskStatus;
+    task: Task;
 }): void | Error {
     try {
         db.prepare(
-            `INSERT INTO Generations (task_id, request_json, created_at)
-             VALUES (:task_id, :request_json, :created_at)
+            `INSERT INTO Generations
+                 (task_id, status, request_json, task_json, created_at)
+             VALUES (:task_id, :status, :request_json, :task_json, :created_at)
              ON CONFLICT(task_id) DO UPDATE SET
+                 status = excluded.status,
                  request_json = excluded.request_json,
+                 task_json = excluded.task_json,
                  created_at = COALESCE(Generations.created_at, excluded.created_at)`,
         ).run({
             // Coerce undefined → null; node:sqlite rejects undefined binds.
             task_id: row.taskId,
-            request_json: row.requestJson ?? null,
-            created_at: row.createdAt ?? null,
+            status: row.status ?? null,
+            request_json: row.requestJson,
+            task_json: JSON.stringify(row.task),
+            created_at: row.createdAt,
         });
     } catch (err) {
         return err as Error;
@@ -109,6 +121,43 @@ export function markDownloaded(
         status: row.status ?? null,
         task_json: row.taskJson ?? null,
         downloaded_at: row.downloadedAt ?? null,
+    });
+}
+
+/**
+ * Task ids of generations still worth polling: logged, not yet downloaded, and
+ * not already known to have failed.
+ */
+export function listPendingGenerations(db: DatabaseSync): string[] {
+    const rows = db.prepare(
+        `SELECT task_id FROM Generations
+         WHERE downloaded_at IS NULL
+           AND (status IS NULL OR status != 'failed')`,
+    ).all();
+    return z.array(z.object({ task_id: z.string() }))
+        .parse(rows)
+        .map((r) => r.task_id);
+}
+
+/**
+ * Record a generation's polled status (and task snapshot) without marking it
+ * downloaded — e.g. to persist a terminal "failed" so it stops being polled.
+ */
+export function recordTaskStatus(db: DatabaseSync, row: {
+    taskId: string;
+    status: string;
+    taskJson: string;
+}) {
+    db.prepare(
+        `INSERT INTO Generations (task_id, status, task_json)
+         VALUES (:task_id, :status, :task_json)
+         ON CONFLICT(task_id) DO UPDATE SET
+             status = excluded.status,
+             task_json = excluded.task_json`,
+    ).run({
+        task_id: row.taskId,
+        status: row.status,
+        task_json: row.taskJson ?? null,
     });
 }
 

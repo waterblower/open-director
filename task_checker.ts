@@ -10,66 +10,66 @@ import { resolveInProject } from "./project.ts";
 import { seedance_client } from "./seedance_client.ts";
 import { delay } from "@std/async";
 import { VIDEOS_DIR } from "./trpc/router.ts";
-import { db, markDownloaded } from "./db.ts";
+import {
+    db,
+    listPendingGenerations,
+    markDownloaded,
+    recordTaskStatus,
+} from "./db.ts";
 
 export async function check_and_download(): Promise<void | Error> {
+    const dirAbs = await resolveInProject(VIDEOS_DIR);
+    await Deno.mkdir(dirAbs, { recursive: true });
+
     for (;;) {
-        // 1. List all tasks from the Seedance server.
-        const seedance_task_list = await seedance_client.listTasks({
-            status: "succeeded",
-        });
-        if (seedance_task_list instanceof Error) {
-            return seedance_task_list;
-        }
-        const seedance_tasks = seedance_task_list.items;
-        console.log("succeeded tasks:", seedance_tasks.length);
+        // 1. Generations still worth polling: logged locally, not yet
+        //    downloaded, and not already known to have failed.
+        const pending = listPendingGenerations(db);
 
-        // 2. List videos already in the generations dir (filename stem == id).
-        const dirAbs = await resolveInProject(VIDEOS_DIR);
-        await Deno.mkdir(dirAbs, { recursive: true });
-        const existing = new Set<string>();
-        for await (const entry of Deno.readDir(dirAbs)) {
-            if (!entry.isFile) continue;
-            const dot = entry.name.lastIndexOf(".");
-            existing.add(dot > 0 ? entry.name.slice(0, dot) : entry.name);
-        }
-
-        // 3 + 4. Download any succeeded task that isn't on disk yet.
-        const nowSec = Date.now() / 1000;
-        for (const task of seedance_tasks) {
-            const url = task.content?.video_url;
-            if (!url) continue; // no video to download (shouldn't happen)
-
-            // Skip expired tasks — their download URL is no longer valid.
-            if (
-                task.execution_expires_after !== undefined &&
-                nowSec > task.created_at + task.execution_expires_after / 2 // 24h, not 48h like in the response data
-            ) {
-                console.log(task.id, "has expired");
-                continue;
-            }
-            if (existing.has(task.id)) {
+        // 2. Poll each from Seedance; download the ones that have succeeded.
+        for (const taskId of pending) {
+            const task = await seedance_client.getTask(taskId);
+            if (task instanceof Error) {
+                console.error(`get task ${taskId} failed:`, task);
                 continue;
             }
 
-            const err = await downloadVideo(url, `${dirAbs}/${task.id}.mp4`);
-            if (err instanceof Error) {
-                console.error(`download ${task.id} failed:`, err);
-            } else {
-                console.log(`downloaded ${task.id}.mp4`);
-                // Log the download + full task into the generations DB. Upserts,
-                // so tasks created in a previous session still get recorded.
-
-                markDownloaded(db, {
-                    taskId: task.id,
+            // Record terminal failures so they drop out of `pending` and we
+            // stop polling them.
+            if (task.status === "failed") {
+                console.log(taskId, "failed");
+                recordTaskStatus(db, {
+                    taskId,
                     status: task.status,
                     taskJson: JSON.stringify(task),
-                    downloadedAt: new Date().toISOString(),
                 });
+                continue;
             }
+
+            // Not ready yet (queued/running/…) — try again next pass.
+            if (task.status !== "succeeded") continue;
+
+            const url = task.content?.video_url;
+            if (!url) continue; // succeeded but no video (shouldn't happen)
+
+            const err = await downloadVideo(url, `${dirAbs}/${taskId}.mp4`);
+            if (err instanceof Error) {
+                console.error(`download ${taskId} failed:`, err);
+                continue;
+            }
+            console.log(`downloaded ${taskId}.mp4`);
+            // Record the download + full task; this sets downloaded_at, so the
+            // task drops out of `pending`.
+            markDownloaded(db, {
+                taskId,
+                status: task.status,
+                taskJson: JSON.stringify(task),
+                downloadedAt: new Date().toISOString(),
+            });
         }
 
-        await delay(3000); // every 3s
+        // 3. Re-run the loop every 5 seconds.
+        await delay(5000);
     }
 }
 
@@ -84,5 +84,9 @@ async function downloadVideo(url: string, dest: string) {
         create: true,
         truncate: true,
     });
-    await res.body.pipeTo(file.writable);
+    try {
+        await res.body.pipeTo(file.writable);
+    } catch (err) {
+        return err as Error;
+    }
 }

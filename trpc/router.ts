@@ -301,6 +301,8 @@ export const appRouter = router({
                 taskId: created.id,
                 requestJson: JSON.stringify(request),
                 createdAt: new Date().toISOString(),
+                status: task.status,
+                task,
             });
             if (recordErr) {
                 console.error(recordErr);
