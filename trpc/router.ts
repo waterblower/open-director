@@ -238,6 +238,7 @@ export const appRouter = router({
                 "21:9",
                 "adaptive",
             ]),
+            resolution: z.enum(["1080p", "720p", "480p"]),
             durationMode: z.enum(["seconds", "smart"]),
             duration: z.number(),
             audio: z.boolean(),
@@ -250,6 +251,7 @@ export const appRouter = router({
                 durationMode,
                 duration,
                 audio,
+                resolution,
             } = opts.input;
 
             // Assemble the multimodal content: optional text, then each
@@ -282,6 +284,7 @@ export const appRouter = router({
                 model: "doubao-seedance-2-0-260128",
                 content,
                 generate_audio: audio,
+                resolution,
                 ratio,
                 ...(durationMode === "seconds" ? { duration } : {}),
             };

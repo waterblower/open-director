@@ -1011,6 +1011,7 @@ export function Composer(props: {
                                         prompt: prompt.value.trim(),
                                         attachments: atts,
                                         ratio: ratio.value,
+                                        resolution: resolution.value,
                                         durationMode: durationMode.value,
                                         duration: duration.value,
                                         audio: audio.value,
