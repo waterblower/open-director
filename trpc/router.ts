@@ -13,6 +13,7 @@ import {
     getGeneration,
     listGenerations,
     recordGeneration,
+    updateGeneration,
 } from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
 import type {
@@ -108,10 +109,12 @@ export const appRouter = router({
         //    still queued/running on the seedance server. Surface them with
         //    whatever status we last recorded.
         for (const row of rows) {
-            if (onDisk.has(row.task_id)) continue;
+            if (row.task_id && onDisk.has(row.task_id)) continue;
             videos.push({
                 status: row.status,
-                id: row.task_id,
+                // Not-yet-submitted generations have no task_id; key on the
+                // local ULID id instead.
+                id: row.task_id ?? row.id,
                 createdAt: row.created_at,
                 request: row.request_json ?? undefined,
             });
@@ -295,18 +298,44 @@ export const appRouter = router({
                 ...(durationMode === "seconds" ? { duration } : {}),
             };
 
-            createGeneration(db, request);
+            const generation = createGeneration(db, request);
+            if (generation instanceof Error) {
+                throw generation;
+            }
 
             const created = await seedance_client.generate(request);
             if (created instanceof Error) {
+                console.log("seedance_client.generate", created);
+                const err = updateGeneration(db, {
+                    id: generation.id,
+                    failed_reason: created.message,
+                    status: "failed",
+                });
+                if (err instanceof Error) {
+                    throw err;
+                }
                 throw created;
             }
 
             console.log("task created", created);
+            const err = updateGeneration(db, {
+                id: generation.id,
+                task_id: created.id,
+            });
+            if (err instanceof Error) {
+                throw err;
+            }
 
             const task = await seedance_client.getTask(created.id);
             if (task instanceof Error) {
                 throw task;
+            }
+            const err2 = updateGeneration(db, {
+                id: generation.id,
+                task_json: task,
+            });
+            if (err2 instanceof Error) {
+                throw err2;
             }
 
             console.log("task", task);

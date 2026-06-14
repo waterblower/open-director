@@ -8,8 +8,10 @@
  * compiles into a `deno compile` binary with no external native library.
  */
 import { DatabaseSync } from "node:sqlite";
+import { ulid } from "@std/ulid";
 import { z } from "zod";
 import {
+    CreateTaskRequest,
     CreateTaskRequestSchema,
     Task,
     TaskSchema,
@@ -24,7 +26,8 @@ import { projectDir } from "./project.ts";
  * can't break a whole listing.
  */
 function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().transform((s): T | null => {
+    return z.string().nullable().transform((s): T | null => {
+        if (s === null) return null;
         return schema.parse(JSON.parse(s));
     });
 }
@@ -37,12 +40,14 @@ function getDatabase(projectDir: string) {
     const db = new DatabaseSync(path);
     db.exec(`
         CREATE TABLE IF NOT EXISTS Generations (
-            task_id       TEXT PRIMARY KEY,
+            id            TEXT PRIMARY KEY,
+            task_id       TEXT UNIQUE,
             status        TEXT,
             request_json  TEXT,
             task_json     TEXT,
             created_at    TEXT,
-            downloaded_at TEXT
+            downloaded_at TEXT,
+            failed_reason TEXT
         );
     `);
     return db;
@@ -50,15 +55,106 @@ function getDatabase(projectDir: string) {
 
 /** A row of the `Generations` table. */
 export const GenerationRowSchema = z.object({
-    task_id: z.string(),
-    status: z.enum(["running", "succeeded", "failed", "queued"]).nullable(),
-    request_json: jsonColumn(CreateTaskRequestSchema),
-    task_json: jsonColumn(TaskSchema),
+    id: z.ulid(),
     created_at: z.iso.datetime(),
-    downloaded_at: z.iso.datetime().nullable(),
+    status: z.enum(["running", "succeeded", "failed", "queued"]),
+    request_json: jsonColumn(CreateTaskRequestSchema),
+    task_id: z.string().nullable().optional(),
+    task_json: jsonColumn(TaskSchema).nullable().optional(),
+    downloaded_at: z.iso.datetime().nullable().optional(),
 });
 
-export type GenerationRow = z.infer<typeof GenerationRowSchema>;
+export type Generation = z.infer<typeof GenerationRowSchema>;
+
+/**
+ * Create a brand-new generation in the "queued" state, before it's been
+ * submitted to Seedance — so it has no `task_id` yet. Returns the generated
+ * ULID `id` (the row's primary key) for the caller to reference later.
+ */
+export function createGeneration(
+    db: DatabaseSync,
+    request: CreateTaskRequest,
+) {
+    try {
+        const id = ulid();
+        const gen = {
+            id,
+            status: "queued",
+            request_json: JSON.stringify(request),
+            created_at: new Date().toISOString(),
+        };
+        db.prepare(
+            `INSERT INTO Generations (id, status, request_json, created_at)
+             VALUES (:id, :status, :request_json, :created_at)`,
+        ).run(gen);
+        return gen;
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+export const UpdateGenerationSchema = z.object({
+    id: z.ulid(),
+    status: z.enum(["running", "succeeded", "failed", "queued"]).optional(),
+    request_json: jsonColumn(CreateTaskRequestSchema).optional(),
+    task_id: z.string().optional(),
+    task_json: jsonColumn(TaskSchema).optional(),
+    downloaded_at: z.iso.datetime().optional(),
+    failed_reason: z.string().optional(),
+});
+export type UpdateGeneration = z.infer<typeof UpdateGenerationSchema>;
+
+/**
+ * Patch an existing generation by its ULID `id`. Only the fields present on
+ * `gen` are written — an absent (`undefined`) field is left unchanged, while an
+ * explicit `null` clears the column. `request_json` / `task_json` are
+ * re-serialized from their parsed form back to JSON text.
+ */
+export function updateGeneration(
+    db: DatabaseSync,
+    gen: UpdateGeneration,
+): void | Error {
+    const sets: string[] = [];
+    const binds: Record<string, string | null> = { id: gen.id };
+    const set = (col: string, value: string | null) => {
+        sets.push(`${col} = :${col}`);
+        binds[col] = value;
+    };
+
+    if (gen.status !== undefined) set("status", gen.status);
+    if (gen.task_id !== undefined) set("task_id", gen.task_id);
+    if (gen.request_json !== undefined) {
+        set(
+            "request_json",
+            gen.request_json === null ? null : JSON.stringify(gen.request_json),
+        );
+    }
+    if (gen.task_json !== undefined) {
+        set(
+            "task_json",
+            gen.task_json === null ? null : JSON.stringify(gen.task_json),
+        );
+    }
+    if (gen.downloaded_at !== undefined) {
+        set("downloaded_at", gen.downloaded_at);
+    }
+    if (gen.failed_reason !== undefined) {
+        set("failed_reason", gen.failed_reason);
+    }
+
+    if (sets.length === 0) return; // nothing to change
+
+    try {
+        const result = db.prepare(
+            `UPDATE Generations SET ${sets.join(", ")} WHERE id = :id`,
+        ).run(binds);
+        if (result.changes === 0) {
+            return new Error(`No generation with id ${gen.id}`);
+        }
+    } catch (err) {
+        return err as Error;
+    }
+}
 
 /**
  * Record a freshly created generation (the full request + prompt, known only
@@ -74,8 +170,8 @@ export function recordGeneration(db: DatabaseSync, row: {
     try {
         db.prepare(
             `INSERT INTO Generations
-                 (task_id, status, request_json, task_json, created_at)
-             VALUES (:task_id, :status, :request_json, :task_json, :created_at)
+                 (id, task_id, status, request_json, task_json, created_at)
+             VALUES (:id, :task_id, :status, :request_json, :task_json, :created_at)
              ON CONFLICT(task_id) DO UPDATE SET
                  status = excluded.status,
                  request_json = excluded.request_json,
@@ -83,6 +179,7 @@ export function recordGeneration(db: DatabaseSync, row: {
                  created_at = COALESCE(Generations.created_at, excluded.created_at)`,
         ).run({
             // Coerce undefined → null; node:sqlite rejects undefined binds.
+            id: ulid(),
             task_id: row.taskId,
             status: row.status ?? null,
             request_json: row.requestJson,
@@ -109,14 +206,15 @@ export function markDownloaded(
 ) {
     db.prepare(
         `INSERT INTO Generations
-             (task_id, status, task_json, downloaded_at)
-         VALUES (:task_id, :status, :task_json, :downloaded_at)
+             (id, task_id, status, task_json, downloaded_at)
+         VALUES (:id, :task_id, :status, :task_json, :downloaded_at)
          ON CONFLICT(task_id) DO UPDATE SET
              status = excluded.status,
              task_json = excluded.task_json,
              downloaded_at = excluded.downloaded_at`,
     ).run({
         // Coerce undefined → null; node:sqlite rejects undefined binds.
+        id: ulid(),
         task_id: row.taskId,
         status: row.status ?? null,
         task_json: row.taskJson ?? null,
@@ -131,7 +229,8 @@ export function markDownloaded(
 export function listPendingGenerations(db: DatabaseSync): string[] {
     const rows = db.prepare(
         `SELECT task_id FROM Generations
-         WHERE downloaded_at IS NULL
+         WHERE task_id IS NOT NULL
+           AND downloaded_at IS NULL
            AND (status IS NULL OR status != 'failed')`,
     ).all();
     return z.array(z.object({ task_id: z.string() }))
@@ -149,12 +248,13 @@ export function recordTaskStatus(db: DatabaseSync, row: {
     taskJson: string;
 }) {
     db.prepare(
-        `INSERT INTO Generations (task_id, status, task_json)
-         VALUES (:task_id, :status, :task_json)
+        `INSERT INTO Generations (id, task_id, status, task_json)
+         VALUES (:id, :task_id, :status, :task_json)
          ON CONFLICT(task_id) DO UPDATE SET
              status = excluded.status,
              task_json = excluded.task_json`,
     ).run({
+        id: ulid(),
         task_id: row.taskId,
         status: row.status,
         task_json: row.taskJson ?? null,
@@ -171,7 +271,7 @@ export function getGeneration(
 }
 
 /** All generations, newest created first. */
-export function listGenerations(db: DatabaseSync): GenerationRow[] {
+export function listGenerations(db: DatabaseSync): Generation[] {
     const rows = db.prepare(
         "SELECT * FROM Generations ORDER BY created_at DESC",
     ).all();
