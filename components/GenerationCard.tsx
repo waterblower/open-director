@@ -104,8 +104,7 @@ export function GenerationCard(
                 : url
                 ? (
                     <video
-                        // #t=0.1 forces browsers to paint the first frame as a thumbnail
-                        src={`${url}#t=0.1`}
+                        src={url}
                         preload="metadata"
                         playsInline
                         controls
