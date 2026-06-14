@@ -19,7 +19,7 @@ function VideoIcon(props: { class?: string }) {
     );
 }
 
-export function ResultsGrid(
+export function GenerationsGrid(
     props: {
         generating: Signal<boolean>;
         results: Signal<Task[]>;

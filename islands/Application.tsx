@@ -2,7 +2,7 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { Task } from "../seedance.ts";
 import { trpc } from "../trpc/client.ts";
-import { ResultsGrid } from "../components/ResultsGrid.tsx";
+import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import {
     FileExplorer,
     SIDEBAR_MAX_WIDTH,
@@ -32,16 +32,7 @@ export default function Application() {
         (async () => {
             const vids = await trpc.listProjectVideos.query();
             generated_videos.value = vids;
-
-            const tasks = await seedance_client.listTasks({
-                status: "running",
-            });
-            if (tasks instanceof Error) {
-                console.error(tasks);
-                return;
-            }
-            console.log("running tasks", tasks.items);
-            generated_videos.value = tasks.items.concat(vids);
+            console.log("generated_videos", vids);
         })();
     }, []);
 
@@ -69,7 +60,7 @@ export default function Application() {
                 style={{ left: `${sidebarWidth.value}px` }}
             >
                 {/* Background grid of generated videos */}
-                <ResultsGrid
+                <GenerationsGrid
                     generating={generating}
                     results={generated_videos}
                     bottomInset={composerInset}
