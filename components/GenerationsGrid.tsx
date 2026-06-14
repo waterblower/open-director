@@ -1,7 +1,9 @@
-import type { Signal } from "@preact/signals";
+import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance.ts";
 import { trpc } from "../trpc/client.ts";
 import { GenerationCard } from "./GenerationCard.tsx";
+
+type SortOrder = "newest" | "oldest";
 
 export function GenerationsGrid(
     props: {
@@ -15,13 +17,41 @@ export function GenerationsGrid(
     },
 ) {
     const { generating, results, bottomInset, reusePrompt } = props;
-    if (!generating.value && results.value.length === 0) return null;
+    const order = useSignal<SortOrder>("newest");
+    if (results.value.length === 0) return null;
+
+    // createdAt is an ISO-8601 UTC string, so it sorts lexicographically.
+    // `dir` flips ascending (oldest first) ↔ descending (newest first).
+    const dir = order.value === "newest" ? -1 : 1;
+    const generations = results.value.toSorted((a, b) =>
+        dir * a.createdAt.localeCompare(b.createdAt)
+    );
 
     return (
         <div
             class="absolute inset-0 overflow-y-auto p-3"
             style={{ paddingBottom: `${bottomInset.value}px` }}
         >
+            <div class="sticky top-0 z-10 flex justify-end pb-2">
+                <div class="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
+                    {([["newest", "最新在前"], ["oldest", "最早在前"]] as const)
+                        .map(([value, label]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => order.value = value}
+                                class={`px-3 py-1.5 ${
+                                    order.value === value
+                                        ? "bg-indigo-500 text-white"
+                                        : "text-gray-600 hover:bg-gray-50"
+                                }`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                </div>
+            </div>
+
             {/* auto-fill keeps items ≥240px wide, collapsing to a single column on narrow screens */}
             <div class="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-1.5">
                 {generating.value && (
@@ -32,7 +62,7 @@ export function GenerationsGrid(
                         </div>
                     </div>
                 )}
-                {results.value.map((video) => (
+                {generations.map((video) => (
                     <GenerationCard
                         key={video.id}
                         video={video}
