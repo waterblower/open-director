@@ -3,6 +3,7 @@ import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest, Task } from "../seedance.ts";
 import { listProjectFiles, trpc } from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
+import type { GeneratedVideo } from "../components/GenerationCard.tsx";
 import {
     FileEntry,
     FileExplorer,
@@ -24,16 +25,7 @@ const DEFAULT_SIDEBAR_WIDTH = 240;
 export default function Application() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
-    const generated_videos = useSignal<
-        {
-            id: string;
-            status: string;
-            createdAt: string;
-            request?: CreateTaskRequest;
-            url?: string;
-            failedReason?: string;
-        }[]
-    >([]);
+    const generated_videos = useSignal<Map<string, GeneratedVideo>>(new Map());
     const selectedFile = useSignal<string | null>(null);
     // A past generation's request (prompt + settings) the grid asks the
     // composer to reuse. The composer consumes (and clears) it.
@@ -54,27 +46,25 @@ export default function Application() {
                 console.log("tick", n);
                 if (n.type == "video_generated") {
                     const { gen } = n;
-                    generated_videos.value = [
-                        {
-                            id: gen.id,
-                            status: gen.status,
-                            createdAt: gen.created_at,
-                            url: get_video_url(gen.task_id!),
-                            request: gen.request_json,
-                        },
-                        ...generated_videos.value,
-                    ];
+                    const next = new Map(generated_videos.value);
+                    next.set(gen.id, {
+                        id: gen.id,
+                        status: gen.status,
+                        createdAt: gen.created_at,
+                        url: get_video_url(gen.task_id!),
+                        request: gen.request_json,
+                    });
+                    generated_videos.value = next;
                 } else if (n.type == "generation_created") {
                     const { gen } = n;
-                    generated_videos.value = [
-                        {
-                            id: gen.id,
-                            status: "running",
-                            createdAt: gen.created_at,
-                            request: gen.request_json,
-                        },
-                        ...generated_videos.value,
-                    ];
+                    const next = new Map(generated_videos.value);
+                    next.set(gen.id, {
+                        id: gen.id,
+                        status: "running",
+                        createdAt: gen.created_at,
+                        request: gen.request_json,
+                    });
+                    generated_videos.value = next;
                 } else if (n.type == "fs_changed") {
                     const res = await listProjectFiles();
                     if (res instanceof Error) {
@@ -102,7 +92,7 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             const vids = await trpc.listGeneratedVideos.query();
-            generated_videos.value = vids;
+            generated_videos.value = new Map(vids.map((v) => [v.id, v]));
             console.log("generated_videos", vids);
         })();
     }, []);

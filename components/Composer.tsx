@@ -1005,7 +1005,7 @@ export function Composer(props: {
                                         dataUrl: await toDataUrl(a.url),
                                     })),
                                 );
-                                const task_p = trpc.generate.mutate({
+                                const gen_p = trpc.generate.mutate({
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
@@ -1015,8 +1015,8 @@ export function Composer(props: {
                                     audio: audio.value,
                                 });
                                 clearAll();
-                                const task = await task_p;
-                                console.log("generating", task);
+                                const gen = await gen_p;
+                                console.log("generating", gen);
                             }}
                         >
                             <ArrowUpIcon />

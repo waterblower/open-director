@@ -329,6 +329,11 @@ export interface ListTasksResponse {
     total: number;
 }
 
+const ListTasksResponseSchema = z.object({
+    items: z.array(TaskSchema),
+    total: z.number(),
+}) satisfies z.ZodType<ListTasksResponse>;
+
 // ---------------------------------------------------------------------------
 // Cancel / delete response
 // ---------------------------------------------------------------------------
@@ -337,6 +342,11 @@ export interface CancelTaskResponse {
     id: string;
     status: TaskStatus;
 }
+
+const CancelTaskResponseSchema = z.object({
+    id: z.string(),
+    status: TaskStatusSchema,
+}) satisfies z.ZodType<CancelTaskResponse>;
 
 // ---------------------------------------------------------------------------
 // File API types
@@ -389,6 +399,42 @@ export interface DeleteFileResponse {
     object: "file";
     deleted: boolean;
 }
+
+const FilePurposeSchema = z.enum(["user_data", "agent"]) satisfies z.ZodType<
+    FilePurpose
+>;
+const FileStatusSchema = z.enum([
+    "uploaded",
+    "processed",
+    "error",
+]) satisfies z.ZodType<FileStatus>;
+
+const ArkFileSchema = z.object({
+    id: z.string(),
+    object: z.literal("file"),
+    bytes: z.number(),
+    created_at: z.number(),
+    expire_at: z.number().optional(),
+    filename: z.string(),
+    mime_type: z.string().optional(),
+    purpose: FilePurposeSchema,
+    status: FileStatusSchema,
+    status_details: z.string().optional(),
+}) satisfies z.ZodType<ArkFile>;
+
+const ListFilesResponseSchema = z.object({
+    object: z.literal("list"),
+    data: z.array(ArkFileSchema),
+    has_more: z.boolean(),
+    first_id: z.string().optional(),
+    last_id: z.string().optional(),
+}) satisfies z.ZodType<ListFilesResponse>;
+
+const DeleteFileResponseSchema = z.object({
+    id: z.string(),
+    object: z.literal("file"),
+    deleted: z.boolean(),
+}) satisfies z.ZodType<DeleteFileResponse>;
 
 export interface UploadFileRequest {
     /** The file content — a Blob, File, or any BodyInit-compatible value */
@@ -455,9 +501,12 @@ export class SeedanceClient {
     // -------------------------------------------------------------------------
 
     async getTask(taskId: string): Promise<Task | Error> {
-        return await this.get<Task>(
+        const res = await this.get(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
+        if (res instanceof Error) return res;
+        const parsed = TaskSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     // -------------------------------------------------------------------------
@@ -496,9 +545,12 @@ export class SeedanceClient {
             query.set("filter.service_tier", params.service_tier);
         }
         const qs = query.toString();
-        return await this.get<ListTasksResponse>(
+        const res = await this.get(
             `/contents/generations/tasks${qs ? `?${qs}` : ""}`,
         );
+        if (res instanceof Error) return res;
+        const parsed = ListTasksResponseSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     // -------------------------------------------------------------------------
@@ -507,9 +559,12 @@ export class SeedanceClient {
     // -------------------------------------------------------------------------
 
     async cancelTask(taskId: string): Promise<CancelTaskResponse | Error> {
-        return await this.delete<CancelTaskResponse>(
+        const res = await this.delete(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
+        if (res instanceof Error) return res;
+        const parsed = CancelTaskResponseSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     // -------------------------------------------------------------------------
@@ -519,7 +574,7 @@ export class SeedanceClient {
     async generate(
         request: CreateTaskRequest,
     ): Promise<{ id: string } | Error> {
-        const res = await this.post<unknown>(
+        const res = await this.post(
             "/contents/generations/tasks",
             request,
         );
@@ -538,11 +593,17 @@ export class SeedanceClient {
         const form = new FormData();
         form.append("file", request.file);
         form.append("purpose", request.purpose);
-        return await this.postForm<ArkFile>("/files", form);
+        const res = await this.postForm("/files", form);
+        if (res instanceof Error) return res;
+        const parsed = ArkFileSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     async getFile(fileId: string): Promise<ArkFile | Error> {
-        return await this.get<ArkFile>(`/files/${encodeURIComponent(fileId)}`);
+        const res = await this.get(`/files/${encodeURIComponent(fileId)}`);
+        if (res instanceof Error) return res;
+        const parsed = ArkFileSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     async listFiles(
@@ -556,13 +617,19 @@ export class SeedanceClient {
         if (params?.after) query.set("after", params.after);
         if (params?.order) query.set("order", params.order);
         const qs = query.toString();
-        return await this.get<ListFilesResponse>(`/files${qs ? `?${qs}` : ""}`);
+        const res = await this.get(`/files${qs ? `?${qs}` : ""}`);
+        if (res instanceof Error) return res;
+        const parsed = ListFilesResponseSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     async deleteFile(fileId: string): Promise<DeleteFileResponse | Error> {
-        return await this.delete<DeleteFileResponse>(
+        const res = await this.delete(
             `/files/${encodeURIComponent(fileId)}`,
         );
+        if (res instanceof Error) return res;
+        const parsed = DeleteFileResponseSchema.safeParse(res);
+        return parsed.success ? parsed.data : parsed.error;
     }
 
     // -------------------------------------------------------------------------
@@ -572,26 +639,26 @@ export class SeedanceClient {
     async postForm<T>(path: string, form: FormData) {
         // Do NOT set Content-Type — the browser/runtime must set it with the boundary
         const res = await this.fetchRaw(path, { method: "POST", body: form });
-        return this.parseResponse<T>(res);
+        return this.parseResponse(res);
     }
 
-    async post<T>(path: string, body: unknown) {
+    async post(path: string, body: unknown) {
         const res = await this.fetchRaw(path, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
-        return this.parseResponse<T>(res);
+        return this.parseResponse(res);
     }
 
-    async get<T>(path: string) {
+    async get(path: string) {
         const res = await this.fetchRaw(path, { method: "GET" });
-        return this.parseResponse<T>(res);
+        return this.parseResponse(res);
     }
 
     async delete<T>(path: string) {
         const res = await this.fetchRaw(path, { method: "DELETE" });
-        return this.parseResponse<T>(res);
+        return this.parseResponse(res);
     }
 
     async fetchRaw(path: string, init: RequestInit): Promise<Response> {
@@ -613,7 +680,7 @@ export class SeedanceClient {
         }
     }
 
-    async parseResponse<T>(res: Response) {
+    async parseResponse(res: Response): Promise<unknown | Error> {
         const requestId = res.headers.get("x-request-id") ?? undefined;
         const body = await res.json();
 
@@ -624,7 +691,7 @@ export class SeedanceClient {
             return new SeedanceError(res.status, code, message, requestId);
         }
 
-        return body as T;
+        return body as unknown;
     }
 }
 

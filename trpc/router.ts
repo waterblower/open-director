@@ -278,7 +278,7 @@ export const appRouter = router({
             duration: z.number(),
             audio: z.boolean(),
         }))
-        .mutation(async (opts): Promise<Task> => {
+        .mutation(async (opts) => {
             const {
                 prompt,
                 attachments,
@@ -336,7 +336,7 @@ export const appRouter = router({
 
             const created = await seedance_client.generate(request);
             if (created instanceof Error) {
-                console.log("seedance_client.generate", created);
+                console.error(created);
                 const err = updateGeneration(db, {
                     id: generation.id,
                     failed_reason: created.message,
@@ -345,7 +345,11 @@ export const appRouter = router({
                 if (err instanceof Error) {
                     throw err;
                 }
-                throw created;
+                const gen = getGenerationById(db, generation.id);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                return gen;
             }
 
             console.log("task created", created);
@@ -382,7 +386,11 @@ export const appRouter = router({
             if (recordErr) {
                 console.error(recordErr);
             }
-            return task;
+            const gen = getGenerationById(db, generation.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            return gen;
         }),
 
     // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).

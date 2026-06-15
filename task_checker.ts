@@ -123,7 +123,7 @@ async function downloadVideo(url: string, dest: string) {
         const relevant = event.paths.some((p) => !p.includes(projectMeta));
         if (!relevant) continue;
 
-        global_event_bus.put({ type: "fs_changed" });
+        await global_event_bus.put({ type: "fs_changed" });
         await delay(200);
     }
 })();

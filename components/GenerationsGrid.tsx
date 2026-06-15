@@ -1,20 +1,13 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance.ts";
-import { GenerationCard } from "./GenerationCard.tsx";
+import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
 
 type SortOrder = "newest" | "oldest";
 
 export function GenerationsGrid(
     props: {
         generating: Signal<boolean>;
-        results: Signal<{
-            id: string;
-            status: string;
-            createdAt: string;
-            request?: CreateTaskRequest;
-            url?: string;
-            failedReason?: string;
-        }[]>;
+        results: Signal<Map<string, GeneratedVideo>>;
         bottomInset: Signal<number>;
         /** Set to a generation's request when its reuse button is clicked. */
         reusePrompt: Signal<CreateTaskRequest | null>;
@@ -22,12 +15,12 @@ export function GenerationsGrid(
 ) {
     const { generating, results, bottomInset, reusePrompt } = props;
     const order = useSignal<SortOrder>("newest");
-    if (results.value.length === 0) return null;
+    if (results.value.size === 0) return null;
 
     // createdAt is an ISO-8601 UTC string, so it sorts lexicographically.
     // `dir` flips ascending (oldest first) ↔ descending (newest first).
     const dir = order.value === "newest" ? -1 : 1;
-    const generations = results.value.toSorted((a, b) =>
+    const generations = [...results.value.values()].toSorted((a, b) =>
         dir * a.createdAt.localeCompare(b.createdAt)
     );
 

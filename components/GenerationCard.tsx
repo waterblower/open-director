@@ -1,18 +1,19 @@
 import type { Signal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
-import { trpc } from "../trpc/client.ts";
+
+export type GeneratedVideo = {
+    id: string;
+    status: string;
+    createdAt: string;
+    request?: CreateTaskRequest;
+    url?: string;
+    failedReason?: string;
+};
 
 export function GenerationCard(
     props: {
-        generation: {
-            id: string;
-            status: string;
-            createdAt: string;
-            request?: CreateTaskRequest;
-            url?: string;
-            failedReason?: string;
-        };
+        generation: GeneratedVideo;
         /** Set to this generation's request when its reuse button is clicked. */
         reusePrompt: Signal<CreateTaskRequest | null>;
     },
