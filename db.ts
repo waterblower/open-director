@@ -19,6 +19,7 @@ import {
     TaskStatus,
 } from "./seedance.ts";
 import { projectDir } from "./project.ts";
+import { parse } from "node:path";
 
 /**
  * A TEXT column holding JSON serialized from `schema`. Parses and validates it
@@ -299,6 +300,31 @@ export function getGenerationByTaskId(
     return parseRow(
         db.prepare("SELECT * FROM Generations WHERE task_id = ?").get(taskId),
     );
+}
+
+/**
+ * The create request for a generation, looked up by either its ULID `id` or its
+ * Seedance `task_id` (a grid card may key on either). Returns null when there's
+ * no stored request or it can't be parsed. Loaded on demand so the list payload
+ * doesn't have to carry every request's (potentially large) base64 attachments.
+ */
+export function getGenerationRequest(
+    db: DatabaseSync,
+    idOrTaskId: string,
+): CreateTaskRequest | null | Error {
+    const row = db.prepare(
+        "SELECT request_json FROM Generations WHERE id = ? OR task_id = ? LIMIT 1",
+    ).get(idOrTaskId, idOrTaskId) as
+        | { request_json: string | null }
+        | undefined;
+    if (!row?.request_json) return null;
+    const parsed = CreateTaskRequestSchema.safeParse(
+        JSON.parse(row.request_json),
+    );
+    if (parsed.error) {
+        return parsed.error;
+    }
+    return parsed.data;
 }
 
 /** All generations, newest created first. */

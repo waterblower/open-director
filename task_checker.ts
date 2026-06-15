@@ -82,7 +82,7 @@ export async function check_and_download(): Promise<void | Error> {
             }
             console.log("global_event_bus");
             await global_event_bus.put({
-                type: "video_generated",
+                type: "generation_finished",
                 gen: generation,
             });
             console.log("global_event_bus done");

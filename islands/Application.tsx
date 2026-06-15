@@ -8,12 +8,12 @@ import type { GeneratedVideo } from "../components/GenerationCard.tsx";
 import {
     FileEntry,
     FileExplorer,
-    makeLoadChildren,
     SIDEBAR_MAX_WIDTH,
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
-import { delay } from "@std/async";
+
+import { makeLoadChildren } from "../components/FileExplorer.tsx";
 import { get_video_url } from "../utils.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
@@ -45,7 +45,7 @@ export default function Application() {
         const sub = trpc.backend_events.subscribe(undefined, {
             onData: async (n) => {
                 console.log("tick", n);
-                if (n.type == "video_generated") {
+                if (n.type == "generation_finished") {
                     const { gen } = n;
                     const next = new Map(generated_videos.value);
                     next.set(gen.id, {
@@ -53,7 +53,7 @@ export default function Application() {
                         status: gen.status,
                         createdAt: gen.created_at,
                         url: get_video_url(gen.task_id!),
-                        request: gen.request_json,
+                        hasRequest: gen.request_json != null,
                     });
                     generated_videos.value = next;
                 } else if (n.type == "generation_created") {
@@ -63,7 +63,7 @@ export default function Application() {
                         id: gen.id,
                         status: "running",
                         createdAt: gen.created_at,
-                        request: gen.request_json,
+                        hasRequest: gen.request_json != null,
                     });
                     generated_videos.value = next;
                 } else if (n.type == "fs_changed") {

@@ -23,6 +23,7 @@
         "@std/dotenv": "jsr:@std/dotenv@^0.225.7",
         "@std/path": "jsr:@std/path@^1.0.9",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
+        "@types/node": "npm:@types/node@^25.9.3",
         "fresh": "jsr:@fresh/core@^2.3.3",
         "preact": "npm:preact@^10.29.1",
         "@preact/signals": "npm:@preact/signals@^2.9.0",

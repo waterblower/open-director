@@ -1,12 +1,15 @@
 import type { Signal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { trpc } from "../trpc/client.ts";
 
 export type GeneratedVideo = {
     id: string;
     status: string;
     createdAt: string;
-    request?: CreateTaskRequest;
+    /** Whether a reusable create request is stored for this generation. The
+     * request itself is fetched on demand when reuse is clicked. */
+    hasRequest: boolean;
     url?: string;
     failedReason?: string;
 };
@@ -134,15 +137,25 @@ export function GenerationCard(
                 tooltip (vs native `title`) so it appears without
                 the browser's ~1s hover delay. */
             }
-            {video.request && (
+            {video.hasRequest && (
                 <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         type="button"
                         aria-label="复用提示词"
                         draggable={false}
-                        onClick={(e) => {
+                        onClick={async (e) => {
                             e.stopPropagation();
-                            reusePrompt.value = video.request ?? null;
+                            // Fetch the (potentially large) request only now,
+                            // not when the grid loads.
+                            try {
+                                const req = await trpc.getGenerationRequest
+                                    .query(video.id);
+                                if (req) {
+                                    reusePrompt.value = req;
+                                }
+                            } catch (err) {
+                                console.error(err);
+                            }
                         }}
                         class="peer size-8 rounded-full bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm"
                     >

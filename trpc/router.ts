@@ -14,6 +14,7 @@ import {
     Generation,
     getGenerationById,
     getGenerationByTaskId,
+    getGenerationRequest,
     listGenerations,
     recordGeneration,
     updateGeneration,
@@ -39,7 +40,7 @@ export const global_event_bus = chan<
         n: number;
     }
     | {
-        type: "video_generated";
+        type: "generation_finished";
         gen: Generation;
     }
     | {
@@ -95,7 +96,9 @@ export const appRouter = router({
             id: string;
             createdAt: string;
             status: TaskStatus;
-            request?: CreateTaskRequest;
+            /** Whether a create request is stored (drives the reuse button);
+             * the request itself is fetched on demand via getGenerationRequest. */
+            hasRequest: boolean;
             url?: string;
             failedReason?: string;
         }[] = [];
@@ -118,6 +121,7 @@ export const appRouter = router({
                     id: taskId,
                     url: localUrl,
                     createdAt: "",
+                    hasRequest: false,
                 });
             } else {
                 videos.push({
@@ -125,7 +129,7 @@ export const appRouter = router({
                     id: taskId,
                     url: localUrl,
                     createdAt: row.created_at,
-                    request: row.request_json ?? undefined,
+                    hasRequest: row.request_json != null,
                 });
             }
         }
@@ -141,7 +145,7 @@ export const appRouter = router({
                 // local ULID id instead.
                 id: row.task_id ?? row.id,
                 createdAt: row.created_at,
-                request: row.request_json ?? undefined,
+                hasRequest: row.request_json != null,
                 failedReason: row.failed_reason ?? undefined,
             });
         }
@@ -404,8 +408,20 @@ export const appRouter = router({
         .input(z.string())
         .query((opts) => getGenerationByTaskId(db, opts.input)),
 
+    // The create request for a generation (by ULID id or task id), fetched on
+    // demand when the user clicks "reuse prompt" — kept out of the list payload.
+    getGenerationRequest: publicProcedure
+        .input(z.string())
+        .query((opts) => {
+            const result = getGenerationRequest(db, opts.input);
+            if (result instanceof Error) {
+                throw result;
+            }
+            return result;
+        }),
+
     getExplorerState: publicProcedure.query(async () => {
-        const path = join(await projectDir(), ".project", "file-explorer.json");
+        const path = join(projectDir(), ".project", "file-explorer.json");
         try {
             return JSON.parse(await Deno.readTextFile(path)) as {
                 expanded: string[];
