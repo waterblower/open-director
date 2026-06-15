@@ -1,13 +1,13 @@
-import { load } from "@std/dotenv";
+import { load, loadSync } from "@std/dotenv";
 
 /** Resolve the project directory from the `project` entry in .env. */
-export async function projectDir(): Promise<string> {
+export function projectDir() {
     // Prefer an already-loaded env var; fall back to reading .env directly
     // (the Vite dev server doesn't populate Deno.env from .env).
     const fromEnv = Deno.env.get("project");
     if (fromEnv) return fromEnv;
 
-    const env = await load({
+    const env = loadSync({
         envPath: ".env",
         export: true,
     });
@@ -16,8 +16,8 @@ export async function projectDir(): Promise<string> {
 }
 
 /** Resolve a project-relative path to an absolute one, rejecting traversal. */
-export async function resolveInProject(sub: string): Promise<string> {
+export function resolveInProject(sub: string) {
     if (sub.includes("..")) throw new Error("Path may not contain '..'");
-    const root = await projectDir();
+    const root = projectDir();
     return sub ? `${root}/${sub}` : root;
 }

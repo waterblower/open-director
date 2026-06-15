@@ -32,11 +32,13 @@ function jsonColumn<T>(schema: z.ZodType<T>) {
     });
 }
 
-export const db = getDatabase(await projectDir());
+export const db = getDatabase(projectDir());
 
 /** Open (once per project root) the generations DB, creating it if needed. */
 function getDatabase(projectDir: string) {
-    const path = join(projectDir, ".project", "database.sqlite");
+    const dir = join(projectDir, ".project");
+    Deno.mkdirSync(dir, { recursive: true });
+    const path = join(dir, "database.sqlite");
     const db = new DatabaseSync(path);
     db.exec(`
         CREATE TABLE IF NOT EXISTS Generations (

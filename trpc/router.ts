@@ -154,7 +154,8 @@ export const appRouter = router({
     listProjectFiles: publicProcedure
         .input(z.string().optional())
         .query(async (opts): Promise<DirEntry[]> => {
-            const target = await resolveInProject(opts.input ?? "");
+            console.log("listProjectFiles", opts.input);
+            const target = resolveInProject(opts.input ?? "");
 
             const entries: DirEntry[] = [];
             for await (const entry of Deno.readDir(target)) {
@@ -402,6 +403,32 @@ export const appRouter = router({
     getGenerationByTaskId: publicProcedure
         .input(z.string())
         .query((opts) => getGenerationByTaskId(db, opts.input)),
+
+    getExplorerState: publicProcedure.query(async () => {
+        const path = join(await projectDir(), ".project", "file-explorer.json");
+        try {
+            return JSON.parse(await Deno.readTextFile(path)) as {
+                expanded: string[];
+                selected: string | null;
+            };
+        } catch {
+            return null;
+        }
+    }),
+
+    saveExplorerState: publicProcedure
+        .input(z.object({
+            expanded: z.array(z.string()),
+            selected: z.string().nullable(),
+        }))
+        .mutation(async (opts) => {
+            const dir = join(await projectDir(), ".project");
+            await Deno.mkdir(dir, { recursive: true });
+            await Deno.writeTextFile(
+                join(dir, "file-explorer.json"),
+                JSON.stringify(opts.input),
+            );
+        }),
 
     backend_events: publicProcedure.subscription(async function* () {
         while (true) {

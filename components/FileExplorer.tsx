@@ -43,20 +43,18 @@ export function FileExplorer(props: {
     // overwriting storage with empty state before the restore runs.
     const hydrated = useRef(false);
     useEffect(() => {
-        const saved = loadExplorerState();
-        if (saved) {
-            if (Array.isArray(saved.expanded)) {
-                expanded.value = new Set(saved.expanded);
-                // Load each open dir's children so the tree renders expanded.
-                for (const p of saved.expanded) {
-                    loadChildren(p);
+        trpc.getExplorerState.query().then((saved) => {
+            if (saved) {
+                if (Array.isArray(saved.expanded)) {
+                    expanded.value = new Set(saved.expanded);
+                    for (const p of saved.expanded) loadChildren(p);
+                }
+                if (saved.selected && props.selected) {
+                    props.selected.value = saved.selected;
                 }
             }
-            if (saved.selected && props.selected) {
-                props.selected.value = saved.selected;
-            }
-        }
-        hydrated.current = true;
+            hydrated.current = true;
+        });
     }, []);
 
     useSignalEffect(() => {
@@ -64,7 +62,9 @@ export function FileExplorer(props: {
             expanded: [...expanded.value],
             selected: props.selected?.value ?? null,
         };
-        if (hydrated.current) saveExplorerState(state);
+        if (hydrated.current) {
+            trpc.saveExplorerState.mutate(state).catch(console.error);
+        }
     });
 
     const openInDefault = (path: string) => {
@@ -424,28 +424,9 @@ function projectFileUrl(rel: string): string {
     return "/project-file/" + rel.split("/").map(encodeURIComponent).join("/");
 }
 
-/** localStorage key for the explorer's expanded folders + selection. */
-const EXPLORER_STATE_KEY = "fileExplorer.state.v1";
-
 interface ExplorerState {
     expanded: string[];
     selected: string | null;
-}
-
-/** Read persisted explorer state (client only); null if absent/unreadable. */
-function loadExplorerState(): ExplorerState | null {
-    try {
-        const raw = localStorage.getItem(EXPLORER_STATE_KEY);
-        return raw ? JSON.parse(raw) as ExplorerState : null;
-    } catch {
-        return null;
-    }
-}
-
-function saveExplorerState(state: ExplorerState): void {
-    try {
-        localStorage.setItem(EXPLORER_STATE_KEY, JSON.stringify(state));
-    } catch { /* storage unavailable or full — non-fatal */ }
 }
 
 /** Re-encode a blob as PNG (clipboard image writes are most portable as PNG). */
