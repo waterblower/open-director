@@ -1,10 +1,12 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest, Task } from "../seedance.ts";
-import { trpc } from "../trpc/client.ts";
+import { listProjectFiles, trpc } from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import {
+    FileEntry,
     FileExplorer,
+    makeLoadChildren,
     SIDEBAR_MAX_WIDTH,
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
@@ -33,10 +35,15 @@ export default function Application() {
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
 
+    // File Explorer
+    const projectRootDir = useSignal<FileEntry[] | null>(null);
+    const expanded_paths = useSignal<Set<string>>(new Set());
+    const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
+
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
-        const sub = trpc.ticker.subscribe(undefined, {
-            onData: (n) => {
+        const sub = trpc.backend_events.subscribe(undefined, {
+            onData: async (n) => {
                 console.log("tick", n);
                 if (n.type == "video_generated") {
                     const { gen } = n;
@@ -61,6 +68,19 @@ export default function Application() {
                         },
                         ...generated_videos.value,
                     ];
+                } else if (n.type == "fs_changed") {
+                    const res = await listProjectFiles();
+                    if (res instanceof Error) {
+                        console.error(res);
+                        return;
+                    }
+                    projectRootDir.value = res;
+                    for (const p of expanded_paths.value) {
+                        const err = await makeLoadChildren(childrenByPath)(p);
+                        if (err instanceof Error) {
+                            console.error(err);
+                        }
+                    }
                 }
             },
             onError: (err) => console.error("ticker error", err),
@@ -99,6 +119,9 @@ export default function Application() {
             <FileExplorer
                 width={sidebarWidth}
                 selected={selectedFile}
+                root={projectRootDir}
+                expanded={expanded_paths}
+                childrenByPath={childrenByPath}
             />
 
             {/* Content panel — fills the area to the right of the sidebar */}

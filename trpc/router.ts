@@ -36,6 +36,7 @@ const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 export const global_event_bus = chan<
     | {
         type: "tick";
+        n: number;
     }
     | {
         type: "video_generated";
@@ -105,7 +106,6 @@ export const appRouter = router({
             const taskId = entry.name.replace(VIDEO_EXT, "");
             onDisk.add(taskId);
 
-            const stat = await Deno.stat(join(root, VIDEOS_DIR, entry.name));
             const localUrl = get_video_url(taskId);
             console.log(localUrl);
 
@@ -115,7 +115,7 @@ export const appRouter = router({
                     status: "succeeded",
                     id: taskId,
                     url: localUrl,
-                    createdAt: stat.ctime?.toISOString() || "unknown",
+                    createdAt: "",
                 });
             } else {
                 videos.push({
@@ -395,8 +395,7 @@ export const appRouter = router({
 
     listGenerations: publicProcedure.query(() => listGenerations(db)),
 
-    // Auto-incrementing counter, one tick per second.
-    ticker: publicProcedure.subscription(async function* () {
+    backend_events: publicProcedure.subscription(async function* () {
         while (true) {
             const event = await global_event_bus.pop();
             if (event === closed) {
@@ -412,8 +411,9 @@ export type AppRouter = typeof appRouter;
 
 import { delay } from "@std/async";
 (async () => {
+    let i = 0;
     for (;;) {
-        await global_event_bus.put({ type: "tick" });
+        await global_event_bus.put({ type: "tick", n: i++ });
         await delay(10000);
     }
 })();

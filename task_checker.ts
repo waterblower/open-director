@@ -66,7 +66,7 @@ export async function check_and_download(): Promise<void | Error> {
                 console.error(`download ${task.id} failed:`, err);
                 continue;
             }
-            console.log(`downloaded ${task.id}.mp4`);
+            console.log("downloaded", `${task.id}.mp4`);
             // Record the download + full task; this sets downloaded_at, so the
             // task drops out of `pending`.
             markDownloaded(db, {
@@ -80,10 +80,12 @@ export async function check_and_download(): Promise<void | Error> {
             if (generation instanceof Error) {
                 throw generation;
             }
+            console.log("global_event_bus");
             await global_event_bus.put({
                 type: "video_generated",
                 gen: generation,
             });
+            console.log("global_event_bus done");
         }
 
         // 3. Re-run the loop every 5 seconds.
@@ -111,11 +113,17 @@ async function downloadVideo(url: string, dest: string) {
 
 // Watch the project directory for filesystem changes and emit fs_changed events,
 // debounced so burst writes produce a single notification.
+// Changes inside `.project` (DB, generated videos, uploads) are ignored — those
+// are internal and would cause noisy re-renders on every generation download.
 (async () => {
     const root = await projectDir();
+    const projectMeta = join(root, ".project");
     const watcher = Deno.watchFs(root);
     for await (const event of watcher) {
-        console.log(event);
-        await global_event_bus.put({ type: "fs_changed" });
+        const relevant = event.paths.some((p) => !p.includes(projectMeta));
+        if (!relevant) continue;
+
+        global_event_bus.put({ type: "fs_changed" });
+        await delay(200);
     }
 })();

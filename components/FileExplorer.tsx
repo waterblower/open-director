@@ -1,7 +1,398 @@
 import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { trpc } from "../trpc/client.ts";
+import { listProjectFiles, trpc } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
+
+export function FileExplorer(props: {
+    /** Sidebar width in px; mutated while dragging the divider. */
+    width: Signal<number>;
+    root: Signal<FileEntry[] | null>;
+    expanded: Signal<Set<string>>;
+    childrenByPath: Signal<Record<string, FileEntry[]>>;
+    selected?: Signal<string | null>;
+    onSelect?: (entry: FileEntry, path: string) => void;
+}) {
+    const { width, root, expanded, childrenByPath } = props;
+    const error = useSignal<string | null>(null);
+    const menu = useSignal<
+        { entry: FileEntry; path: string; x: number; y: number } | null
+    >(null);
+    const preview = useSignal<{ path: string; x: number; y: number } | null>(
+        null,
+    );
+    const dragOver = useSignal<string | null>(null);
+    const rootDragOver = useSignal(false);
+    const renaming = useSignal<string | null>(null);
+
+    // Fetch the first level when the explorer loads.
+    useEffect(() => {
+        listProjectFiles().then((res) => {
+            if (res instanceof Error) {
+                console.error(res);
+                error.value = String(res);
+                return;
+            }
+            root.value = res;
+        });
+    }, []);
+
+    const loadChildren = makeLoadChildren(childrenByPath);
+
+    // Restore the expanded folders + selection saved last session, then start
+    // persisting changes. The `hydrated` gate stops the persist effect from
+    // overwriting storage with empty state before the restore runs.
+    const hydrated = useRef(false);
+    useEffect(() => {
+        const saved = loadExplorerState();
+        if (saved) {
+            if (Array.isArray(saved.expanded)) {
+                expanded.value = new Set(saved.expanded);
+                // Load each open dir's children so the tree renders expanded.
+                for (const p of saved.expanded) {
+                    loadChildren(p);
+                }
+            }
+            if (saved.selected && props.selected) {
+                props.selected.value = saved.selected;
+            }
+        }
+        hydrated.current = true;
+    }, []);
+
+    useSignalEffect(() => {
+        const state: ExplorerState = {
+            expanded: [...expanded.value],
+            selected: props.selected?.value ?? null,
+        };
+        if (hydrated.current) saveExplorerState(state);
+    });
+
+    const openInDefault = (path: string) => {
+        menu.value = null;
+        trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
+    };
+
+    const copyImage = (path: string) => {
+        menu.value = null;
+        // Write synchronously within the click gesture (Safari requires this);
+        // ClipboardItem accepts a Promise<Blob> so the fetch can resolve later.
+        navigator.clipboard.write([
+            new ClipboardItem({
+                "image/png": fetchAsPng(projectFileUrl(path)),
+            }),
+        ]).catch((err) => console.error(err));
+    };
+
+    /** Look up a loaded entry by its full path. */
+    const findEntry = (path: string): FileEntry | undefined => {
+        const slash = path.lastIndexOf("/");
+        const parent = slash === -1 ? "" : path.slice(0, slash);
+        const name = slash === -1 ? path : path.slice(slash + 1);
+        const list = parent === ""
+            ? root.value ?? []
+            : childrenByPath.value[parent] ?? [];
+        return list.find((e) => e.name === name);
+    };
+
+    // Cmd/Ctrl+C copies the selected image (unless the user is copying text).
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c") {
+                return;
+            }
+            const path = props.selected?.value;
+            if (!path) return;
+
+            // Don't hijack copying from inputs or a real text selection.
+            const ae = document.activeElement as HTMLElement | null;
+            if (
+                ae &&
+                (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
+                    ae.isContentEditable)
+            ) return;
+            const sel = globalThis.getSelection?.();
+            if (sel && !sel.isCollapsed && sel.toString()) return;
+
+            const entry = findEntry(path);
+            if (!entry || !isImageFile(entry)) return;
+            e.preventDefault();
+            copyImage(path);
+        };
+        globalThis.addEventListener("keydown", onKey);
+        return () => globalThis.removeEventListener("keydown", onKey);
+    }, []);
+
+    const dropFile = (src: string, destDir: string) => {
+        trpc.copyIntoDir.mutate({ src, destDir })
+            .then(async ({ dest }) => {
+                // The actual (possibly de-duplicated) name the server wrote.
+                const name = dest.split("/").pop() ?? "";
+                if (destDir === "") {
+                    // Root listing is driven by `root`, not childrenByPath.
+                    const fresh = await listProjectFiles();
+                    if (fresh instanceof Error) {
+                        return console.error(fresh);
+                    }
+                    // Guarantee the new file is visible even if the refresh
+                    // didn't pick it up yet.
+                    root.value = fresh.some((e) => e.name === name)
+                        ? fresh
+                        : sortEntries([...fresh, {
+                            name,
+                            isDirectory: false,
+                            isFile: true,
+                            isSymlink: false,
+                        }]);
+                    return;
+                }
+                // Reveal the copy: expand the target dir and refresh its list.
+                expanded.value = new Set(expanded.value).add(destDir);
+                loadChildren(destDir);
+            })
+            .catch((err) => console.error(err));
+    };
+
+    /** Refresh a directory's listing (root listing lives in `root`). */
+    const refreshDir = async (dir: string) => {
+        if (dir === "") {
+            const files = await listProjectFiles();
+            if (files instanceof Error) {
+                return console.error(files);
+            }
+            root.value = files;
+        } else {
+            await loadChildren(dir);
+        }
+    };
+
+    const tree: TreeState = {
+        childrenByPath,
+        expanded,
+
+        selected: props.selected,
+        dragOver,
+        renaming,
+    };
+
+    const callbacks: TreeCallbacks = {
+        onSelect: props.onSelect,
+        loadChildren,
+        openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
+        dropFile,
+        commitRename: commitRename(renaming, props.selected, refreshDir),
+        previewImage: (path, x, y) =>
+            preview.value = path ? { path, x, y } : null,
+    };
+
+    // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
+    const onResizeStart = (e: PointerEvent) => {
+        e.preventDefault();
+        const onMove = (ev: PointerEvent) => {
+            width.value = Math.max(
+                SIDEBAR_MIN_WIDTH,
+                Math.min(ev.clientX, SIDEBAR_MAX_WIDTH),
+            );
+        };
+        const onUp = () => {
+            globalThis.removeEventListener("pointermove", onMove);
+            globalThis.removeEventListener("pointerup", onUp);
+            document.body.style.userSelect = "";
+            document.body.style.cursor = "";
+        };
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "col-resize";
+        globalThis.addEventListener("pointermove", onMove);
+        globalThis.addEventListener("pointerup", onUp);
+    };
+
+    return (
+        <>
+            <aside
+                style={{ width: `${width.value}px` }}
+                class="fixed left-0 top-0 bottom-0 z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200"
+            >
+                <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
+                    <span class="text-sm font-semibold text-gray-800">
+                        项目文件
+                    </span>
+                    <button
+                        type="button"
+                        title="打开项目根目录"
+                        aria-label="打开项目根目录"
+                        onClick={() => openInDefault("")}
+                        class="-mr-1 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                    >
+                        <svg
+                            class="size-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+                        </svg>
+                    </button>
+                </div>
+                <div
+                    // Dropping on empty space copies into the project root.
+                    onDragOver={(e) => {
+                        if (
+                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
+                        ) {
+                            return;
+                        }
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        rootDragOver.value = true;
+                    }}
+                    onDragLeave={(e) => {
+                        // Clear only when the pointer actually leaves the
+                        // container — not when it moves onto a child row
+                        // (whose dragleave bubbles up here with the child as
+                        // the event target).
+                        const next = e.relatedTarget as Node | null;
+                        if (
+                            !next ||
+                            !(e.currentTarget as HTMLElement).contains(next)
+                        ) {
+                            rootDragOver.value = false;
+                        }
+                    }}
+                    onDrop={(e) => {
+                        rootDragOver.value = false;
+                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
+                        if (!src) return;
+                        e.preventDefault();
+                        dropFile(src, ""); // "" = project root
+                    }}
+                    class={`flex-1 overflow-y-auto py-1.5 ${
+                        rootDragOver.value
+                            ? "ring-1 ring-inset ring-indigo-300 bg-indigo-50/40"
+                            : ""
+                    }`}
+                >
+                    {error.value
+                        ? (
+                            <div class="px-4 py-3 text-xs text-red-500 break-all">
+                                加载失败：{error.value}
+                            </div>
+                        )
+                        : root.value === null
+                        ? (
+                            <div class="px-4 py-3 text-xs text-gray-400">
+                                加载中…
+                            </div>
+                        )
+                        : root.value.length === 0
+                        ? (
+                            <div class="px-4 py-3 text-xs text-gray-400">
+                                暂无文件
+                            </div>
+                        )
+                        : root.value.map((entry) => (
+                            <Node
+                                key={entry.name}
+                                entry={entry}
+                                path={entry.name}
+                                depth={0}
+                                tree={tree}
+                                callbacks={callbacks}
+                            />
+                        ))}
+                </div>
+
+                {/* Resize divider */}
+                <div
+                    onPointerDown={onResizeStart}
+                    class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-indigo-300 active:bg-indigo-400"
+                />
+            </aside>
+
+            {
+                /* Floating image hover preview, offset from the cursor and
+                clamped to stay within the viewport. */
+            }
+            {preview.value && (
+                <div
+                    class="fixed z-50 pointer-events-none rounded-lg shadow-xl border border-gray-200 bg-white p-1"
+                    style={{
+                        left: `${
+                            Math.min(
+                                preview.value.x + 16,
+                                globalThis.innerWidth - 208,
+                            )
+                        }px`,
+                        top: `${
+                            Math.max(
+                                8,
+                                Math.min(
+                                    preview.value.y + 16,
+                                    globalThis.innerHeight - 208,
+                                ),
+                            )
+                        }px`,
+                    }}
+                >
+                    <img
+                        src={projectFileUrl(preview.value.path)}
+                        alt=""
+                        class="block max-w-48 max-h-48 object-contain rounded"
+                    />
+                </div>
+            )}
+
+            {/* Right-click context menu */}
+            {menu.value && (
+                <>
+                    <div
+                        class="fixed inset-0 z-40"
+                        onClick={() => menu.value = null}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            menu.value = null;
+                        }}
+                    />
+                    <div
+                        class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
+                        style={{
+                            left: `${menu.value.x}px`,
+                            top: `${menu.value.y}px`,
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => openInDefault(menu.value!.path)}
+                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                        >
+                            用默认程序打开
+                        </button>
+                        {isImageFile(menu.value.entry) && (
+                            <button
+                                type="button"
+                                onClick={() => copyImage(menu.value!.path)}
+                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                            >
+                                复制
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                renaming.value = menu.value!.path;
+                                menu.value = null;
+                            }}
+                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                        >
+                            重命名
+                        </button>
+                    </div>
+                </>
+            )}
+        </>
+    );
+}
 
 /** Mirrors the `DirEntry` returned by the `listProjectFiles` tRPC query. */
 export interface FileEntry {
@@ -138,8 +529,7 @@ interface TreeState {
     childrenByPath: Signal<Record<string, FileEntry[]>>;
     /** Currently expanded directory paths. */
     expanded: Signal<Set<string>>;
-    /** Directory paths whose children are being fetched. */
-    loading: Signal<Set<string>>;
+
     selected?: Signal<string | null>;
     /** Directory path currently hovered during a drag (for highlight). */
     dragOver: Signal<string | null>;
@@ -152,7 +542,7 @@ interface TreeState {
 interface TreeCallbacks {
     onSelect?: (entry: FileEntry, path: string) => void;
     /** Lazily fetch + cache a directory's children, returning the result. */
-    loadChildren: (path: string) => Promise<FileEntry[]>;
+    loadChildren: (path: string) => Promise<FileEntry[] | Error>;
     /** Open the right-click context menu for an entry at the cursor. */
     openMenu: (entry: FileEntry, path: string, x: number, y: number) => void;
     /** Copy a dragged project file into the given directory path. */
@@ -392,439 +782,17 @@ function commitRename(
     };
 }
 
-export function FileExplorer(props: {
-    /** Sidebar width in px; mutated while dragging the divider. */
-    width: Signal<number>;
-    selected?: Signal<string | null>;
-    onSelect?: (entry: FileEntry, path: string) => void;
-}) {
-    const { width } = props;
-    const root = useSignal<FileEntry[] | null>(null);
-    const error = useSignal<string | null>(null);
-    const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
-    const expanded = useSignal<Set<string>>(new Set());
-    const loading = useSignal<Set<string>>(new Set());
-    const menu = useSignal<
-        { entry: FileEntry; path: string; x: number; y: number } | null
-    >(null);
-    const preview = useSignal<{ path: string; x: number; y: number } | null>(
-        null,
-    );
-    const dragOver = useSignal<string | null>(null);
-    const rootDragOver = useSignal(false);
-    const renaming = useSignal<string | null>(null);
-
-    // Fetch the first level when the explorer loads.
-    useEffect(() => {
-        listProjectFiles().then((res) => {
-            if (res instanceof Error) {
-                console.error(res);
-                error.value = String(res);
-                return;
-            }
-            root.value = res;
-        });
-    }, []);
-
-    useEffect(() => {
-        const sub = trpc.ticker.subscribe(undefined, {
-            onData: (n) => {
-                console.log("tick", n);
-                if (n.type == "fs_changed") {
-                    listProjectFiles().then((res) => {
-                        if (!(res instanceof Error)) root.value = res;
-                    });
-                    for (const p of expanded.value) loadChildren(p);
-                }
-            },
-            onError: (err) => console.error("ticker error", err),
-        });
-        return () => {
-            console.log("unsubscribing");
-            sub.unsubscribe();
-        };
-    }, []);
-
-    const loadChildren = async (path: string): Promise<FileEntry[]> => {
+export function makeLoadChildren(
+    childrenByPath: Signal<Record<string, FileEntry[]>>,
+) {
+    return async (path: string) => {
         // Re-fetch even when cached so reopening shows the latest state — the
         // stale cache stays rendered until fresh data arrives.
-        loading.value = new Set(loading.value).add(path);
-
-        const next = new Set(loading.value);
-        next.delete(path);
-        loading.value = next;
-
         const res = await listProjectFiles(path);
         if (res instanceof Error) {
-            console.error(res);
-            return childrenByPath.value[path] ?? [];
+            return res;
         }
         childrenByPath.value = { ...childrenByPath.value, [path]: res };
         return res;
     };
-
-    // Restore the expanded folders + selection saved last session, then start
-    // persisting changes. The `hydrated` gate stops the persist effect from
-    // overwriting storage with empty state before the restore runs.
-    const hydrated = useRef(false);
-    useEffect(() => {
-        const saved = loadExplorerState();
-        if (saved) {
-            if (Array.isArray(saved.expanded)) {
-                expanded.value = new Set(saved.expanded);
-                // Load each open dir's children so the tree renders expanded.
-                for (const p of saved.expanded) loadChildren(p);
-            }
-            if (saved.selected && props.selected) {
-                props.selected.value = saved.selected;
-            }
-        }
-        hydrated.current = true;
-    }, []);
-
-    useSignalEffect(() => {
-        const state: ExplorerState = {
-            expanded: [...expanded.value],
-            selected: props.selected?.value ?? null,
-        };
-        if (hydrated.current) saveExplorerState(state);
-    });
-
-    const openInDefault = (path: string) => {
-        menu.value = null;
-        trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
-    };
-
-    const copyImage = (path: string) => {
-        menu.value = null;
-        // Write synchronously within the click gesture (Safari requires this);
-        // ClipboardItem accepts a Promise<Blob> so the fetch can resolve later.
-        navigator.clipboard.write([
-            new ClipboardItem({
-                "image/png": fetchAsPng(projectFileUrl(path)),
-            }),
-        ]).catch((err) => console.error(err));
-    };
-
-    /** Look up a loaded entry by its full path. */
-    const findEntry = (path: string): FileEntry | undefined => {
-        const slash = path.lastIndexOf("/");
-        const parent = slash === -1 ? "" : path.slice(0, slash);
-        const name = slash === -1 ? path : path.slice(slash + 1);
-        const list = parent === ""
-            ? root.value ?? []
-            : childrenByPath.value[parent] ?? [];
-        return list.find((e) => e.name === name);
-    };
-
-    // Cmd/Ctrl+C copies the selected image (unless the user is copying text).
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c") {
-                return;
-            }
-            const path = props.selected?.value;
-            if (!path) return;
-
-            // Don't hijack copying from inputs or a real text selection.
-            const ae = document.activeElement as HTMLElement | null;
-            if (
-                ae &&
-                (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
-                    ae.isContentEditable)
-            ) return;
-            const sel = globalThis.getSelection?.();
-            if (sel && !sel.isCollapsed && sel.toString()) return;
-
-            const entry = findEntry(path);
-            if (!entry || !isImageFile(entry)) return;
-            e.preventDefault();
-            copyImage(path);
-        };
-        globalThis.addEventListener("keydown", onKey);
-        return () => globalThis.removeEventListener("keydown", onKey);
-    }, []);
-
-    const dropFile = (src: string, destDir: string) => {
-        trpc.copyIntoDir.mutate({ src, destDir })
-            .then(async ({ dest }) => {
-                // The actual (possibly de-duplicated) name the server wrote.
-                const name = dest.split("/").pop() ?? "";
-                if (destDir === "") {
-                    // Root listing is driven by `root`, not childrenByPath.
-                    const fresh = await listProjectFiles();
-                    if (fresh instanceof Error) {
-                        return console.error(fresh);
-                    }
-                    // Guarantee the new file is visible even if the refresh
-                    // didn't pick it up yet.
-                    root.value = fresh.some((e) => e.name === name)
-                        ? fresh
-                        : sortEntries([...fresh, {
-                            name,
-                            isDirectory: false,
-                            isFile: true,
-                            isSymlink: false,
-                        }]);
-                    return;
-                }
-                // Reveal the copy: expand the target dir and refresh its list.
-                expanded.value = new Set(expanded.value).add(destDir);
-                loadChildren(destDir);
-            })
-            .catch((err) => console.error(err));
-    };
-
-    /** Refresh a directory's listing (root listing lives in `root`). */
-    const refreshDir = async (dir: string) => {
-        if (dir === "") {
-            const files = await listProjectFiles();
-            if (files instanceof Error) {
-                return console.error(files);
-            }
-            root.value = files;
-        } else {
-            await loadChildren(dir);
-        }
-    };
-
-    const tree: TreeState = {
-        childrenByPath,
-        expanded,
-        loading,
-        selected: props.selected,
-        dragOver,
-        renaming,
-    };
-
-    const callbacks: TreeCallbacks = {
-        onSelect: props.onSelect,
-        loadChildren,
-        openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
-        dropFile,
-        commitRename: commitRename(renaming, props.selected, refreshDir),
-        previewImage: (path, x, y) =>
-            preview.value = path ? { path, x, y } : null,
-    };
-
-    // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
-    const onResizeStart = (e: PointerEvent) => {
-        e.preventDefault();
-        const onMove = (ev: PointerEvent) => {
-            width.value = Math.max(
-                SIDEBAR_MIN_WIDTH,
-                Math.min(ev.clientX, SIDEBAR_MAX_WIDTH),
-            );
-        };
-        const onUp = () => {
-            globalThis.removeEventListener("pointermove", onMove);
-            globalThis.removeEventListener("pointerup", onUp);
-            document.body.style.userSelect = "";
-            document.body.style.cursor = "";
-        };
-        document.body.style.userSelect = "none";
-        document.body.style.cursor = "col-resize";
-        globalThis.addEventListener("pointermove", onMove);
-        globalThis.addEventListener("pointerup", onUp);
-    };
-
-    return (
-        <>
-            <aside
-                style={{ width: `${width.value}px` }}
-                class="fixed left-0 top-0 bottom-0 z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200"
-            >
-                <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
-                    <span class="text-sm font-semibold text-gray-800">
-                        项目文件
-                    </span>
-                    <button
-                        type="button"
-                        title="打开项目根目录"
-                        aria-label="打开项目根目录"
-                        onClick={() => openInDefault("")}
-                        class="-mr-1 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                    >
-                        <svg
-                            class="size-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
-                        </svg>
-                    </button>
-                </div>
-                <div
-                    // Dropping on empty space copies into the project root.
-                    onDragOver={(e) => {
-                        if (
-                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
-                        ) {
-                            return;
-                        }
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "copy";
-                        rootDragOver.value = true;
-                    }}
-                    onDragLeave={(e) => {
-                        // Clear only when the pointer actually leaves the
-                        // container — not when it moves onto a child row
-                        // (whose dragleave bubbles up here with the child as
-                        // the event target).
-                        const next = e.relatedTarget as Node | null;
-                        if (
-                            !next ||
-                            !(e.currentTarget as HTMLElement).contains(next)
-                        ) {
-                            rootDragOver.value = false;
-                        }
-                    }}
-                    onDrop={(e) => {
-                        rootDragOver.value = false;
-                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
-                        if (!src) return;
-                        e.preventDefault();
-                        dropFile(src, ""); // "" = project root
-                    }}
-                    class={`flex-1 overflow-y-auto py-1.5 ${
-                        rootDragOver.value
-                            ? "ring-1 ring-inset ring-indigo-300 bg-indigo-50/40"
-                            : ""
-                    }`}
-                >
-                    {error.value
-                        ? (
-                            <div class="px-4 py-3 text-xs text-red-500 break-all">
-                                加载失败：{error.value}
-                            </div>
-                        )
-                        : root.value === null
-                        ? (
-                            <div class="px-4 py-3 text-xs text-gray-400">
-                                加载中…
-                            </div>
-                        )
-                        : root.value.length === 0
-                        ? (
-                            <div class="px-4 py-3 text-xs text-gray-400">
-                                暂无文件
-                            </div>
-                        )
-                        : root.value.map((entry) => (
-                            <Node
-                                key={entry.name}
-                                entry={entry}
-                                path={entry.name}
-                                depth={0}
-                                tree={tree}
-                                callbacks={callbacks}
-                            />
-                        ))}
-                </div>
-
-                {/* Resize divider */}
-                <div
-                    onPointerDown={onResizeStart}
-                    class="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-indigo-300 active:bg-indigo-400"
-                />
-            </aside>
-
-            {
-                /* Floating image hover preview, offset from the cursor and
-                clamped to stay within the viewport. */
-            }
-            {preview.value && (
-                <div
-                    class="fixed z-50 pointer-events-none rounded-lg shadow-xl border border-gray-200 bg-white p-1"
-                    style={{
-                        left: `${
-                            Math.min(
-                                preview.value.x + 16,
-                                globalThis.innerWidth - 208,
-                            )
-                        }px`,
-                        top: `${
-                            Math.max(
-                                8,
-                                Math.min(
-                                    preview.value.y + 16,
-                                    globalThis.innerHeight - 208,
-                                ),
-                            )
-                        }px`,
-                    }}
-                >
-                    <img
-                        src={projectFileUrl(preview.value.path)}
-                        alt=""
-                        class="block max-w-48 max-h-48 object-contain rounded"
-                    />
-                </div>
-            )}
-
-            {/* Right-click context menu */}
-            {menu.value && (
-                <>
-                    <div
-                        class="fixed inset-0 z-40"
-                        onClick={() => menu.value = null}
-                        onContextMenu={(e) => {
-                            e.preventDefault();
-                            menu.value = null;
-                        }}
-                    />
-                    <div
-                        class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
-                        style={{
-                            left: `${menu.value.x}px`,
-                            top: `${menu.value.y}px`,
-                        }}
-                    >
-                        <button
-                            type="button"
-                            onClick={() => openInDefault(menu.value!.path)}
-                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                        >
-                            用默认程序打开
-                        </button>
-                        {isImageFile(menu.value.entry) && (
-                            <button
-                                type="button"
-                                onClick={() => copyImage(menu.value!.path)}
-                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                            >
-                                复制
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => {
-                                renaming.value = menu.value!.path;
-                                menu.value = null;
-                            }}
-                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                        >
-                            重命名
-                        </button>
-                    </div>
-                </>
-            )}
-        </>
-    );
-}
-
-async function listProjectFiles(path?: string) {
-    /** OS junk files that should never be shown in the explorer. */
-    const HIDDEN_NAMES = new Set([".DS_Store"]);
-
-    try {
-        const res = await trpc.listProjectFiles.query(path);
-        return res.filter((e) => !HIDDEN_NAMES.has(e.name));
-    } catch (err) {
-        return err as Error;
-    }
 }
