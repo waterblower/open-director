@@ -1,4 +1,5 @@
 import { useSignal } from "@preact/signals";
+
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest, Task } from "../seedance.ts";
 import { listProjectFiles, trpc } from "../trpc/client.ts";
@@ -111,36 +112,67 @@ export default function Application() {
     }, [sidebarWidth.value]);
 
     return (
-        <div class="relative min-h-screen bg-[#f7f8fa]">
-            {/* File explorer sidebar */}
-            <FileExplorer
-                width={sidebarWidth}
-                selected={selectedFile}
-                root={projectRootDir}
-                expanded={expanded_paths}
-                childrenByPath={childrenByPath}
-            />
-
-            {/* Content panel — fills the area to the right of the sidebar */}
-            <div
-                class="fixed top-0 right-0 bottom-0"
-                style={{ left: `${sidebarWidth.value}px` }}
-            >
-                {/* Background grid of generated videos */}
-                <GenerationsGrid
-                    generating={generating}
-                    results={generated_videos}
-                    bottomInset={composerInset}
-                    reusePrompt={reusePrompt}
+        <div class="h-screen flex flex-col bg-[#f7f8fa] overflow-hidden">
+            {/* Main area: sidebar + content, fills all space above the bottom bar */}
+            <div class="flex flex-1 min-h-0 overflow-hidden">
+                {/* Left: file explorer sidebar */}
+                <FileExplorer
+                    width={sidebarWidth}
+                    selected={selectedFile}
+                    root={projectRootDir}
+                    expanded={expanded_paths}
+                    childrenByPath={childrenByPath}
                 />
 
-                {/* Floating composer */}
-                <Composer
-                    genError={genError}
-                    composerInset={composerInset}
-                    reusePrompt={reusePrompt}
-                />
+                {/* Right: video grid + floating composer */}
+                <div class="flex-1 relative overflow-hidden">
+                    <GenerationsGrid
+                        generating={generating}
+                        results={generated_videos}
+                        bottomInset={composerInset}
+                        reusePrompt={reusePrompt}
+                    />
+                    <Composer
+                        genError={genError}
+                        composerInset={composerInset}
+                        reusePrompt={reusePrompt}
+                    />
+                </div>
+            </div>
+
+            {/* Bottom bar */}
+            <div class="flex-none flex items-center gap-1 px-3 py-1.5 border-t border-gray-200 bg-white/80 backdrop-blur-sm select-none">
+                <a
+                    href="/image"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Image Grid Editor"
+                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
+                >
+                    <GridIcon />
+                    <span class="whitespace-nowrap">
+                        图片加网格
+                    </span>
+                </a>
             </div>
         </div>
+    );
+}
+
+function GridIcon() {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+        </svg>
     );
 }

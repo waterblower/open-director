@@ -596,7 +596,7 @@ export function Composer(props: {
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
-                    class={`w-full bg-white/95 backdrop-blur rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.16)] border p-5 ${
+                    class={`w-full bg-white/95 backdrop-blur rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.16)] border p-5 select-none ${
                         dropActive.value
                             ? "border-indigo-400 ring-2 ring-indigo-300"
                             : "border-gray-200"
@@ -694,7 +694,7 @@ export function Composer(props: {
                             placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
                             rows={1}
                             // Auto-grows up to 2/3 of the viewport, then scrolls.
-                            class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block max-h-[66vh] overflow-y-auto"
+                            class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block max-h-[66vh] overflow-y-auto select-text"
                         />
 
                         {/* Mention picker */}

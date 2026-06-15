@@ -209,7 +209,7 @@ export function FileExplorer(props: {
         <>
             <aside
                 style={{ width: `${width.value}px` }}
-                class="fixed left-0 top-0 bottom-0 z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200"
+                class="h-full z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200 flex-none select-none"
             >
                 <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
                     <span class="text-sm font-semibold text-gray-800">
