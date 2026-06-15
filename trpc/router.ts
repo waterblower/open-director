@@ -72,6 +72,10 @@ interface DirEntry {
 }
 
 export const appRouter = router({
+    listGenerations: publicProcedure.query(() => {
+        const generations = listGenerations(db);
+        return generations;
+    }),
     // List generated videos in `<project>/.project/generations` as Task-like
     // objects. Creates the directory if it doesn't exist yet.
     listGeneratedVideos: publicProcedure.query(async () => {
@@ -89,12 +93,10 @@ export const appRouter = router({
 
         const videos: {
             id: string;
-            url?: string;
             createdAt: string;
             status: TaskStatus;
-            /** The original create request (prompt + settings), when logged. */
             request?: CreateTaskRequest;
-            /** Why the generation failed, when status is "failed". */
+            url?: string;
             failedReason?: string;
         }[] = [];
 
@@ -392,8 +394,6 @@ export const appRouter = router({
     getGenerationByTaskId: publicProcedure
         .input(z.string())
         .query((opts) => getGenerationByTaskId(db, opts.input)),
-
-    listGenerations: publicProcedure.query(() => listGenerations(db)),
 
     backend_events: publicProcedure.subscription(async function* () {
         while (true) {

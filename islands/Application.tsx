@@ -25,7 +25,14 @@ export default function Application() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
     const generated_videos = useSignal<
-        Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
+        {
+            id: string;
+            status: string;
+            createdAt: string;
+            request?: CreateTaskRequest;
+            url?: string;
+            failedReason?: string;
+        }[]
     >([]);
     const selectedFile = useSignal<string | null>(null);
     // A past generation's request (prompt + settings) the grid asks the
@@ -53,7 +60,7 @@ export default function Application() {
                             status: gen.status,
                             createdAt: gen.created_at,
                             url: get_video_url(gen.task_id!),
-                            request: gen.request_json ?? undefined,
+                            request: gen.request_json,
                         },
                         ...generated_videos.value,
                     ];

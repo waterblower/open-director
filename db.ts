@@ -27,8 +27,7 @@ import { projectDir } from "./project.ts";
  * can't break a whole listing.
  */
 function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().nullable().transform((s): T | null => {
-        if (s === null) return null;
+    return z.string().transform((s): T => {
         return schema.parse(JSON.parse(s));
     });
 }

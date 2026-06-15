@@ -1,6 +1,5 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance.ts";
-import { trpc } from "../trpc/client.ts";
 import { GenerationCard } from "./GenerationCard.tsx";
 
 type SortOrder = "newest" | "oldest";
@@ -8,9 +7,14 @@ type SortOrder = "newest" | "oldest";
 export function GenerationsGrid(
     props: {
         generating: Signal<boolean>;
-        results: Signal<
-            Awaited<ReturnType<typeof trpc.listGeneratedVideos.query>>
-        >;
+        results: Signal<{
+            id: string;
+            status: string;
+            createdAt: string;
+            request?: CreateTaskRequest;
+            url?: string;
+            failedReason?: string;
+        }[]>;
         bottomInset: Signal<number>;
         /** Set to a generation's request when its reuse button is clicked. */
         reusePrompt: Signal<CreateTaskRequest | null>;
@@ -62,10 +66,10 @@ export function GenerationsGrid(
                         </div>
                     </div>
                 )}
-                {generations.map((video) => (
+                {generations.map((generation) => (
                     <GenerationCard
-                        key={video.id}
-                        video={video}
+                        key={generation.id}
+                        generation={generation}
                         reusePrompt={reusePrompt}
                     />
                 ))}

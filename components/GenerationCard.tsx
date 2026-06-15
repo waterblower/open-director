@@ -3,19 +3,21 @@ import type { CreateTaskRequest } from "../seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
 
-/** One generated video, as returned by the listing query. */
-export type GeneratedVideo = Awaited<
-    ReturnType<typeof trpc.listGeneratedVideos.query>
->[number];
-
 export function GenerationCard(
     props: {
-        video: GeneratedVideo;
+        generation: {
+            id: string;
+            status: string;
+            createdAt: string;
+            request?: CreateTaskRequest;
+            url?: string;
+            failedReason?: string;
+        };
         /** Set to this generation's request when its reuse button is clicked. */
         reusePrompt: Signal<CreateTaskRequest | null>;
     },
 ) {
-    const { video, reusePrompt } = props;
+    const { generation: video, reusePrompt } = props;
     const url = video.url;
     const isPending = video.status === "running" || video.status === "queued";
     const isFailed = video.status === "failed";
