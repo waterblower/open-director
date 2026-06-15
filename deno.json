@@ -4,7 +4,7 @@
         "check": "deno fmt --check . && deno lint . && deno check",
         "dev": "vite",
         "build": "vite build",
-        "build-binary": "deno task build && deno compile -A --no-check --include ./_fresh --output dist/open-director '#entry.ts'",
+        "build-binary": "deno task build && deno compile -A --no-check --include ./_fresh --output _dist/open-director '#entry.ts'",
         "start": "deno serve -A _fresh/server.js",
         "update": "deno run -A -r jsr:@fresh/update ."
     },
@@ -20,6 +20,7 @@
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",
         "@std/async": "jsr:@std/async@^1.4.0",
+        "@std/dotenv": "jsr:@std/dotenv@^0.225.7",
         "@std/path": "jsr:@std/path@^1.0.9",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
         "fresh": "jsr:@fresh/core@^2.3.3",

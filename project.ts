@@ -1,4 +1,4 @@
-/** Helpers for resolving paths inside the configured project directory. */
+import { load } from "@std/dotenv";
 
 /** Resolve the project directory from the `project` entry in .env. */
 export async function projectDir(): Promise<string> {
@@ -7,11 +7,11 @@ export async function projectDir(): Promise<string> {
     const fromEnv = Deno.env.get("project");
     if (fromEnv) return fromEnv;
 
-    const text = await Deno.readTextFile(".env");
-    for (const line of text.split("\n")) {
-        const match = line.match(/^\s*project\s*=\s*(.*)$/);
-        if (match) return match[1].trim();
-    }
+    const env = await load({
+        envPath: ".env",
+        export: true,
+    });
+    if (env.project) return env.project;
     throw new Error("`project` is not set in .env");
 }
 
