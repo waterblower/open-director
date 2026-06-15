@@ -25,7 +25,6 @@
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
         "fresh": "jsr:@fresh/core@^2.3.3",
         "preact": "npm:preact@^10.29.1",
-        "three": "npm:three@^0.170.0",
         "@preact/signals": "npm:@preact/signals@^2.9.0",
         "@fresh/plugin-vite": "jsr:@fresh/plugin-vite@^1.1.2",
         "vite": "npm:vite@^7.1.3",

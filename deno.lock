@@ -53,7 +53,6 @@
     "npm:preact@^10.29.1": "10.29.2",
     "npm:rollup@^4.55.1": "4.61.1",
     "npm:tailwindcss@^4.1.10": "4.3.0",
-    "npm:three@0.170": "0.170.0",
     "npm:vite@^7.1.3": "7.3.5",
     "npm:vite@^7.1.4": "7.3.5",
     "npm:zod@^4.4.3": "4.4.3"
@@ -1529,7 +1528,6 @@
       "npm:@types/babel__core@^7.20.5",
       "npm:preact@^10.29.1",
       "npm:tailwindcss@^4.1.10",
-      "npm:three@0.170",
       "npm:vite@^7.1.3",
       "npm:zod@^4.4.3"
     ]
