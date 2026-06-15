@@ -34,10 +34,14 @@ export const VIDEOS_DIR = ".project/generations";
 const UPLOADS_DIR = ".project/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 export const global_event_bus = chan<
-    {
+    | {
+        type: "tick";
+    }
+    | {
         type: "video_generated";
         gen: Generation;
-    } | {
+    }
+    | {
         type: "generation_created";
         gen: {
             id: string;
@@ -321,6 +325,7 @@ export const appRouter = router({
             if (generation instanceof Error) {
                 throw generation;
             }
+            console.log("generation_created");
             await global_event_bus.put({
                 type: "generation_created",
                 gen: generation,
@@ -403,3 +408,11 @@ export const appRouter = router({
 
 // Export type only — never import the router implementation into the client.
 export type AppRouter = typeof appRouter;
+
+import { delay } from "@std/async";
+(async () => {
+    for (;;) {
+        await global_event_bus.put({ type: "tick" });
+        await delay(10000);
+    }
+})();
