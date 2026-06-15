@@ -5,11 +5,20 @@
  *   import { trpc } from "../trpc/client.ts";
  *   const users = await trpc.userList.query();
  */
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import {
+    createTRPCClient,
+    httpBatchLink,
+    splitLink,
+    unstable_httpSubscriptionLink,
+} from "@trpc/client";
 import type { AppRouter } from "./router.ts";
 
 export const trpc = createTRPCClient<AppRouter>({
     links: [
-        httpBatchLink({ url: "/trpc" }),
+        splitLink({
+            condition: (op) => op.type === "subscription",
+            true: unstable_httpSubscriptionLink({ url: "/trpc" }),
+            false: httpBatchLink({ url: "/trpc" }),
+        }),
     ],
 });

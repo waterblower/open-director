@@ -32,15 +32,21 @@ export default function Application() {
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
 
+    // Ticker subscription — log an auto-incrementing number each second
+    useEffect(() => {
+        const sub = trpc.ticker.subscribe(undefined, {
+            onData: (n) => console.log("tick", n),
+            onError: (err) => console.error("ticker error", err),
+        });
+        return () => sub.unsubscribe();
+    }, []);
+
     // Load videos from the project's .project dir on mount
     useEffect(() => {
         (async () => {
-            for (;;) {
-                const vids = await trpc.listGeneratedVideos.query();
-                generated_videos.value = vids;
-                console.log("generated_videos", vids);
-                await delay(3000);
-            }
+            const vids = await trpc.listGeneratedVideos.query();
+            generated_videos.value = vids;
+            console.log("generated_videos", vids);
         })();
     }, []);
 

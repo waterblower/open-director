@@ -22,6 +22,7 @@ import type {
     Task,
     TaskStatus,
 } from "../seedance.ts";
+import { delay } from "@std/async";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".project/generations";
@@ -363,6 +364,15 @@ export const appRouter = router({
         .query((opts) => getGeneration(db, opts.input)),
 
     listGenerations: publicProcedure.query(() => listGenerations(db)),
+
+    // Auto-incrementing counter, one tick per second.
+    ticker: publicProcedure.subscription(async function* () {
+        let n = 0;
+        while (true) {
+            yield n++;
+            await delay(1000);
+        }
+    }),
 });
 
 // Export type only — never import the router implementation into the client.
