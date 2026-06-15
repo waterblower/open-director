@@ -96,7 +96,10 @@ export default function Application() {
     return (
         <div class="relative min-h-screen bg-[#f7f8fa]">
             {/* File explorer sidebar */}
-            <FileExplorer width={sidebarWidth} selected={selectedFile} />
+            <FileExplorer
+                width={sidebarWidth}
+                selected={selectedFile}
+            />
 
             {/* Content panel — fills the area to the right of the sidebar */}
             <div

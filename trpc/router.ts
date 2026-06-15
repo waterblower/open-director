@@ -50,6 +50,7 @@ export const global_event_bus = chan<
             created_at: string;
         };
     }
+    | { type: "fs_changed" }
 >();
 
 async function exists(path: string): Promise<boolean> {

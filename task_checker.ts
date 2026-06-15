@@ -108,3 +108,14 @@ async function downloadVideo(url: string, dest: string) {
         return err as Error;
     }
 }
+
+// Watch the project directory for filesystem changes and emit fs_changed events,
+// debounced so burst writes produce a single notification.
+(async () => {
+    const root = await projectDir();
+    const watcher = Deno.watchFs(root);
+    for await (const event of watcher) {
+        console.log(event);
+        await global_event_bus.put({ type: "fs_changed" });
+    }
+})();

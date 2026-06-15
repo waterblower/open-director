@@ -426,6 +426,25 @@ export function FileExplorer(props: {
         });
     }, []);
 
+    useEffect(() => {
+        const sub = trpc.ticker.subscribe(undefined, {
+            onData: (n) => {
+                console.log("tick", n);
+                if (n.type == "fs_changed") {
+                    listProjectFiles().then((res) => {
+                        if (!(res instanceof Error)) root.value = res;
+                    });
+                    for (const p of expanded.value) loadChildren(p);
+                }
+            },
+            onError: (err) => console.error("ticker error", err),
+        });
+        return () => {
+            console.log("unsubscribing");
+            sub.unsubscribe();
+        };
+    }, []);
+
     const loadChildren = async (path: string): Promise<FileEntry[]> => {
         // Re-fetch even when cached so reopening shows the latest state — the
         // stale cache stays rendered until fresh data arrives.
