@@ -79,17 +79,22 @@ export function createGeneration(
 ) {
     try {
         const id = ulid();
-        const gen = {
+
+        db.prepare(
+            `INSERT INTO Generations (id, status, request_json, created_at)
+             VALUES (:id, :status, :request_json, :created_at)`,
+        ).run({
             id,
             status: "queued",
             request_json: JSON.stringify(request),
             created_at: new Date().toISOString(),
+        });
+        return {
+            id,
+            status: "queued",
+            request_json: request,
+            created_at: new Date().toISOString(),
         };
-        db.prepare(
-            `INSERT INTO Generations (id, status, request_json, created_at)
-             VALUES (:id, :status, :request_json, :created_at)`,
-        ).run(gen);
-        return gen;
     } catch (err) {
         return err as Error;
     }
@@ -228,16 +233,15 @@ export function markDownloaded(
  * Task ids of generations still worth polling: logged, not yet downloaded, and
  * not already known to have failed.
  */
-export function listPendingGenerations(db: DatabaseSync): string[] {
+export function listPendingGenerations(db: DatabaseSync) {
     const rows = db.prepare(
-        `SELECT task_id FROM Generations
+        `SELECT id, task_id FROM Generations
          WHERE task_id IS NOT NULL
            AND downloaded_at IS NULL
            AND (status IS NULL OR status != 'failed')`,
     ).all();
-    return z.array(z.object({ task_id: z.string() }))
-        .parse(rows)
-        .map((r) => r.task_id);
+    return z.array(z.object({ id: z.string(), task_id: z.string() }))
+        .parse(rows);
 }
 
 /**
@@ -267,13 +271,33 @@ export function recordTaskStatus(db: DatabaseSync, row: {
     });
 }
 
-/** Fetch one generation row by task id. */
-export function getGeneration(
+function parseRow(row: unknown): Generation | Error {
+    if (row === undefined) return new Error("row not found");
+    const result = GenerationRowSchema.safeParse(row);
+    if (!result.success) {
+        return result.error;
+    }
+    return result.data;
+}
+
+/** Fetch one generation row by its ULID primary key. */
+export function getGenerationById(
+    db: DatabaseSync,
+    id: string,
+): Generation | Error {
+    return parseRow(
+        db.prepare("SELECT * FROM Generations WHERE id = ?").get(id),
+    );
+}
+
+/** Fetch one generation row by its Seedance task id. */
+export function getGenerationByTaskId(
     db: DatabaseSync,
     taskId: string,
-) {
-    return db.prepare("SELECT * FROM Generations WHERE task_id = ?")
-        .get(taskId);
+): Generation | Error {
+    return parseRow(
+        db.prepare("SELECT * FROM Generations WHERE task_id = ?").get(taskId),
+    );
 }
 
 /** All generations, newest created first. */

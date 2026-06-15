@@ -5,12 +5,15 @@
  * type safety. Never import the router implementation into the client.
  */
 import { z } from "zod";
+import { join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
 import { projectDir, resolveInProject } from "../project.ts";
 import {
     createGeneration,
     db,
-    getGeneration,
+    Generation,
+    getGenerationById,
+    getGenerationByTaskId,
     listGenerations,
     recordGeneration,
     updateGeneration,
@@ -22,13 +25,28 @@ import type {
     Task,
     TaskStatus,
 } from "../seedance.ts";
-import { delay } from "@std/async";
+import { chan, closed } from "@blowater/csp";
+import { get_video_url } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".project/generations";
 /** Directory under the project root where uploaded attachments are stored. */
 const UPLOADS_DIR = ".project/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
+export const global_event_bus = chan<
+    {
+        type: "video_generated";
+        gen: Generation;
+    } | {
+        type: "generation_created";
+        gen: {
+            id: string;
+            status: string;
+            request_json: CreateTaskRequest;
+            created_at: string;
+        };
+    }
+>();
 
 async function exists(path: string): Promise<boolean> {
     try {
@@ -81,13 +99,10 @@ export const appRouter = router({
             if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
             const taskId = entry.name.replace(VIDEO_EXT, "");
             onDisk.add(taskId);
-            const rel = `${VIDEOS_DIR}/${entry.name}`;
-            const stat = await Deno.stat(`${root}/${rel}`);
 
-            // Encode each path segment so the nested VIDEOS_DIR slash stays a
-            // real path separator, not %2F.
-            const localUrl = "/project-file/" +
-                rel.split("/").map(encodeURIComponent).join("/");
+            const stat = await Deno.stat(join(root, VIDEOS_DIR, entry.name));
+            const localUrl = get_video_url(taskId);
+            console.log(localUrl);
 
             const row = rowById.get(taskId);
             if (!row) {
@@ -306,6 +321,10 @@ export const appRouter = router({
             if (generation instanceof Error) {
                 throw generation;
             }
+            await global_event_bus.put({
+                type: "generation_created",
+                gen: generation,
+            });
 
             const created = await seedance_client.generate(request);
             if (created instanceof Error) {
@@ -358,19 +377,26 @@ export const appRouter = router({
             return task;
         }),
 
-    // Read the generation log (e.g. to show a video's prompt/metadata).
-    getGeneration: publicProcedure
+    // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).
+    getGenerationById: publicProcedure
         .input(z.string())
-        .query((opts) => getGeneration(db, opts.input)),
+        .query((opts) => getGenerationById(db, opts.input)),
+
+    // Read the generation log by Seedance task id.
+    getGenerationByTaskId: publicProcedure
+        .input(z.string())
+        .query((opts) => getGenerationByTaskId(db, opts.input)),
 
     listGenerations: publicProcedure.query(() => listGenerations(db)),
 
     // Auto-incrementing counter, one tick per second.
     ticker: publicProcedure.subscription(async function* () {
-        let n = 0;
         while (true) {
-            yield n++;
-            await delay(1000);
+            const event = await global_event_bus.pop();
+            if (event === closed) {
+                throw new Error("global_event_bus closed, should not happen");
+            }
+            yield event;
         }
     }),
 });

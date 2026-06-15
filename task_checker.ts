@@ -6,31 +6,31 @@
  * Video files are named `<task.id>.mp4`, so a task is considered "already
  * downloaded" when a file with a stem equal to its id exists.
  */
-import { resolveInProject } from "./project.ts";
 import { seedance_client } from "./seedance_client.ts";
 import { delay } from "@std/async";
+import { join } from "@std/path";
 import { VIDEOS_DIR } from "./trpc/router.ts";
 import {
     db,
+    getGenerationById,
     listPendingGenerations,
     markDownloaded,
     recordTaskStatus,
 } from "./db.ts";
+import { global_event_bus } from "./trpc/router.ts";
+import { projectDir } from "./project.ts";
 
 export async function check_and_download(): Promise<void | Error> {
-    const dirAbs = await resolveInProject(VIDEOS_DIR);
-    await Deno.mkdir(dirAbs, { recursive: true });
-
     for (;;) {
         // 1. Generations still worth polling: logged locally, not yet
         //    downloaded, and not already known to have failed.
         const pending = listPendingGenerations(db);
 
         // 2. Poll each from Seedance; download the ones that have succeeded.
-        for (const taskId of pending) {
-            const task = await seedance_client.getTask(taskId);
+        for (const gen of pending) {
+            const task = await seedance_client.getTask(gen.task_id);
             if (task instanceof Error) {
-                console.error(`get task ${taskId} failed:`, task);
+                console.error(`get task ${task} failed:`, task);
                 continue;
             }
 
@@ -40,9 +40,9 @@ export async function check_and_download(): Promise<void | Error> {
                 const reason = task.error
                     ? `${task.error.code}: ${task.error.message}`
                     : undefined;
-                console.log(taskId, "failed", reason ?? "");
+                console.log(task, "failed", reason ?? "");
                 recordTaskStatus(db, {
-                    taskId,
+                    taskId: task.id,
                     status: task.status,
                     taskJson: JSON.stringify(task),
                     failedReason: reason,
@@ -54,21 +54,35 @@ export async function check_and_download(): Promise<void | Error> {
             if (task.status !== "succeeded") continue;
 
             const url = task.content?.video_url;
-            if (!url) continue; // succeeded but no video (shouldn't happen)
+            if (!url) {
+                throw new Error("succeeded but no video (shouldn't happen)");
+            }
 
-            const err = await downloadVideo(url, `${dirAbs}/${taskId}.mp4`);
+            const err = await downloadVideo(
+                url,
+                join(await projectDir(), VIDEOS_DIR, `${task.id}.mp4`),
+            );
             if (err instanceof Error) {
-                console.error(`download ${taskId} failed:`, err);
+                console.error(`download ${task.id} failed:`, err);
                 continue;
             }
-            console.log(`downloaded ${taskId}.mp4`);
+            console.log(`downloaded ${task.id}.mp4`);
             // Record the download + full task; this sets downloaded_at, so the
             // task drops out of `pending`.
             markDownloaded(db, {
-                taskId,
+                taskId: task.id,
                 status: task.status,
                 taskJson: JSON.stringify(task),
                 downloadedAt: new Date().toISOString(),
+            });
+
+            const generation = getGenerationById(db, gen.id);
+            if (generation instanceof Error) {
+                throw generation;
+            }
+            await global_event_bus.put({
+                type: "video_generated",
+                gen: generation,
             });
         }
 

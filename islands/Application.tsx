@@ -10,6 +10,7 @@ import {
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
 import { delay } from "@std/async";
+import { get_video_url } from "../utils.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
 const DEFAULT_SIDEBAR_WIDTH = 240;
@@ -35,10 +36,39 @@ export default function Application() {
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
         const sub = trpc.ticker.subscribe(undefined, {
-            onData: (n) => console.log("tick", n),
+            onData: (n) => {
+                console.log("tick", n);
+                if (n.type == "video_generated") {
+                    const { gen } = n;
+                    generated_videos.value = [
+                        {
+                            id: gen.id,
+                            status: gen.status,
+                            createdAt: gen.created_at,
+                            url: get_video_url(gen.task_id!),
+                            request: gen.request_json ?? undefined,
+                        },
+                        ...generated_videos.value,
+                    ];
+                } else if (n.type == "generation_created") {
+                    const { gen } = n;
+                    generated_videos.value = [
+                        {
+                            id: gen.id,
+                            status: "running",
+                            createdAt: gen.created_at,
+                            request: gen.request_json,
+                        },
+                        ...generated_videos.value,
+                    ];
+                }
+            },
             onError: (err) => console.error("ticker error", err),
         });
-        return () => sub.unsubscribe();
+        return () => {
+            console.log("unsubscribing");
+            sub.unsubscribe();
+        };
     }, []);
 
     // Load videos from the project's .project dir on mount
