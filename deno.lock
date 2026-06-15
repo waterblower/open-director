@@ -1732,6 +1732,7 @@
       "jsr:@fresh/core@^2.3.3",
       "jsr:@fresh/plugin-vite@^1.1.2",
       "jsr:@std/async@^1.4.0",
+      "jsr:@std/path@^1.0.9",
       "jsr:@std/ulid@1",
       "npm:@preact/signals@^2.9.0",
       "npm:@tailwindcss/vite@^4.1.12",

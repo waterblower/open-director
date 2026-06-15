@@ -8,6 +8,7 @@
  * compiles into a `deno compile` binary with no external native library.
  */
 import { DatabaseSync } from "node:sqlite";
+import { join } from "@std/path";
 import { ulid } from "@std/ulid";
 import { z } from "zod";
 import {
@@ -36,7 +37,7 @@ export const db = getDatabase(await projectDir());
 
 /** Open (once per project root) the generations DB, creating it if needed. */
 function getDatabase(projectDir: string) {
-    const path = `${projectDir}/.project/database.sqlite`;
+    const path = join(projectDir, ".project", "database.sqlite");
     const db = new DatabaseSync(path);
     db.exec(`
         CREATE TABLE IF NOT EXISTS Generations (
