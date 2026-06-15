@@ -13,3 +13,4 @@ vendor/
 
 a.ts
 db.script.ts
+/_dist
