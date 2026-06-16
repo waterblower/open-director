@@ -1,3 +1,4 @@
+import { join } from "@std/path";
 import { getStoredProjectPath } from "./kv.ts";
 
 const WINDOWS_FOLDER_PICKER_SCRIPT = String.raw`
@@ -162,11 +163,21 @@ if ($path) {
 }
 `;
 
-/** Resolve a project-relative path to an absolute one, rejecting traversal. */
-export async function resolveInProject(sub: string) {
+/**
+ * Resolve a project-relative path to an absolute one, rejecting traversal.
+ * @deprecated
+ */
+export async function resolveInProject_deprecated(sub: string) {
     if (sub.includes("..")) throw new Error("Path may not contain '..'");
     const root = await getStoredProjectPath();
     return sub ? `${root}/${sub}` : root;
+}
+
+export function resolveInProject(projectRoot: string, path: string) {
+    if (path.includes("..")) {
+        return new Error("Path may not contain '..'");
+    }
+    return join(projectRoot, path);
 }
 
 /**

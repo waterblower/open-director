@@ -1,5 +1,5 @@
 import { define } from "../../utils.ts";
-import { resolveInProject } from "../../project.ts";
+import { resolveInProject_deprecated } from "../../project.ts";
 
 const CONTENT_TYPES: Record<string, string> = {
     mp4: "video/mp4",
@@ -61,7 +61,7 @@ export const handler = define.handlers({
         for (const rel of candidates) {
             let abs: string;
             try {
-                abs = await resolveInProject(rel);
+                abs = await resolveInProject_deprecated(rel);
             } catch {
                 return new Response("Bad path", { status: 400 });
             }

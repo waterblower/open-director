@@ -1,19 +1,18 @@
-import { useSignal } from "@preact/signals";
+import { useSignal, useSignalEffect } from "@preact/signals";
 
-import { useEffect } from "preact/hooks";
-import type { CreateTaskRequest, Task } from "../seedance.ts";
-import { listProjectFiles, trpc } from "../trpc/client.ts";
+import { useEffect, useRef } from "preact/hooks";
+import type { CreateTaskRequest } from "../seedance.ts";
+import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import type { GeneratedVideo } from "../components/GenerationCard.tsx";
 import {
-    FileEntry,
     FileExplorer,
+    makeLoadChildren,
+    type ProjectData,
     SIDEBAR_MAX_WIDTH,
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
-
-import { makeLoadChildren } from "../components/FileExplorer.tsx";
 import { get_video_url } from "../utils.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
@@ -27,7 +26,6 @@ export default function Application() {
     const generating = useSignal(false);
     const genError = useSignal<string | null>(null);
     const generated_videos = useSignal<Map<string, GeneratedVideo>>(new Map());
-    const selectedFile = useSignal<string | null>(null);
     // A past generation's request (prompt + settings) the grid asks the
     // composer to reuse. The composer consumes (and clears) it.
     const reusePrompt = useSignal<CreateTaskRequest | null>(null);
@@ -35,11 +33,9 @@ export default function Application() {
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
 
-    // File Explorer
-    const projectRootEntries = useSignal<FileEntry[] | null>(null);
-    const expanded_paths = useSignal<Set<string>>(new Set());
-    const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
-    const projectRootPath = useSignal<string | null>(null);
+    // File Explorer — all project-scoped state lives in a single object that is
+    // null until a project is open.
+    const projectData = useSignal<ProjectData | null>(null);
 
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
@@ -68,17 +64,21 @@ export default function Application() {
                     });
                     generated_videos.value = next;
                 } else if (n.type == "fs_changed") {
-                    if (!projectRootPath.value) {
-                        throw new Error("projectRootPath is null");
-                    }
-                    const res = await listProjectFiles(projectRootPath.value);
+                    const pd = projectData.value;
+                    if (!pd) return;
+                    // "" = project root (paths are relative to the root).
+                    const res = await readDir(pd.rootPath, "");
                     if (res instanceof Error) {
                         console.error(res);
                         return;
                     }
-                    projectRootEntries.value = res;
-                    for (const p of expanded_paths.value) {
-                        const err = await makeLoadChildren(childrenByPath)(p);
+                    projectData.value = {
+                        ...projectData.value!,
+                        rootEntries: res,
+                    };
+                    const loadChildren = makeLoadChildren(projectData);
+                    for (const p of pd.expanded) {
+                        const err = await loadChildren(p);
                         if (err instanceof Error) {
                             console.error(err);
                         }
@@ -93,17 +93,42 @@ export default function Application() {
         };
     }, []);
 
-    // Load videos from the project's .project dir on mount
+    // Load the current project (if any) once on mount.
     useEffect(() => {
         (async () => {
-            if (!projectRootPath.value) return;
-            const vids = await trpc.listGeneratedVideos.query({
-                project_root: projectRootPath.value,
-            });
-            generated_videos.value = new Map(vids.map((v) => [v.id, v]));
-            console.log("generated_videos", vids);
+            const data = await loadProjectData();
+            if (data instanceof Error) {
+                console.error(data);
+                return;
+            }
+            if (!data) {
+                console.log("no project opened");
+                return;
+            }
+            projectData.value = data;
         })();
     }, []);
+
+    // Reload the generations grid whenever the active project changes: on the
+    // initial load and when the user picks a different folder in the file
+    // explorer. The ref guard skips other `projectData` mutations (expanding a
+    // folder, fs refreshes, …) so we only re-fetch when the root path changes.
+    const loadedRoot = useRef<string | null | undefined>(undefined);
+    useSignalEffect(() => {
+        const root = projectData.value?.rootPath ?? null;
+        if (root === loadedRoot.current) return;
+        loadedRoot.current = root;
+        (async () => {
+            if (!root) {
+                generated_videos.value = new Map();
+                return;
+            }
+            const vids = await trpc.listGeneratedVideos.query({
+                project_root: root,
+            });
+            generated_videos.value = new Map(vids.map((v) => [v.id, v]));
+        })();
+    });
 
     // Restore the saved sidebar width on mount.
     useEffect(() => {
@@ -125,11 +150,7 @@ export default function Application() {
                 {/* Left: file explorer sidebar */}
                 <FileExplorer
                     width={sidebarWidth}
-                    selected={selectedFile}
-                    rootEntries={projectRootEntries}
-                    expanded={expanded_paths}
-                    childrenByPath={childrenByPath}
-                    projectRootPath={projectRootPath}
+                    projectData={projectData}
                 />
 
                 {/* Right: video grid + floating composer */}

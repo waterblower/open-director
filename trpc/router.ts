@@ -7,7 +7,11 @@
 import { z } from "zod";
 import { join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
-import { pickProjectFolder, resolveInProject } from "../project.ts";
+import {
+    pickProjectFolder,
+    resolveInProject,
+    resolveInProject_deprecated,
+} from "../project.ts";
 import {
     createGeneration,
     db,
@@ -73,6 +77,27 @@ interface DirEntry {
     isSymlink: boolean;
 }
 
+/** Read a directory into a sorted list (directories first, then alphabetical). */
+async function listDir(absPath: string): Promise<DirEntry[]> {
+    const entries: DirEntry[] = [];
+    for await (const entry of Deno.readDir(absPath)) {
+        entries.push({
+            name: entry.name,
+            isDirectory: entry.isDirectory,
+            isFile: entry.isFile,
+            isSymlink: entry.isSymlink,
+        });
+    }
+    entries.sort((a, b) =>
+        a.isDirectory === b.isDirectory
+            ? a.name.localeCompare(b.name)
+            : a.isDirectory
+            ? -1
+            : 1
+    );
+    return entries;
+}
+
 export const appRouter = router({
     listGenerations: publicProcedure.query(() => {
         if (!db) {
@@ -86,7 +111,7 @@ export const appRouter = router({
     getProjectDir: publicProcedure.query(async () => {
         const projectDir = await getStoredProjectPath();
         if (!projectDir) {
-            throw new Error("Project not initialized");
+            return null;
         }
         return projectDir;
     }),
@@ -181,41 +206,68 @@ export const appRouter = router({
         },
     ),
 
-    // List the first-layer files/dirs of `<project>/<path>` (path relative to
-    // the project root from .env; omit or "" for the project root itself).
-    listProjectFiles: publicProcedure
-        .input(z.string().optional())
+    // Read the immediate (non-recursive) entries of `<projectRoot>/<path>`.
+    // `path` is relative to the given project root; "" reads the root itself.
+    readDir: publicProcedure
+        .input(z.object({ projectRoot: z.string(), path: z.string() }))
         .query(async (opts): Promise<DirEntry[]> => {
-            console.log("listProjectFiles", opts.input);
-            const target = await resolveInProject(opts.input ?? "");
-            if (!target) {
-                return [];
-            }
-            const entries: DirEntry[] = [];
-            for await (const entry of Deno.readDir(target)) {
-                entries.push({
-                    name: entry.name,
-                    isDirectory: entry.isDirectory,
-                    isFile: entry.isFile,
-                    isSymlink: entry.isSymlink,
-                });
-            }
-            // Directories first, then alphabetical
-            entries.sort((a, b) =>
-                a.isDirectory === b.isDirectory
-                    ? a.name.localeCompare(b.name)
-                    : a.isDirectory
-                    ? -1
-                    : 1
+            const target = resolveInProject(
+                opts.input.projectRoot,
+                opts.input.path,
             );
-            return entries;
+            if (target instanceof Error) {
+                throw target;
+            }
+            return await listDir(target);
         }),
+
+    // Load everything the file explorer needs in one round trip: the active
+    // project's absolute root path, its root-level entries, the restored
+    // expanded directories (with their children pre-loaded) and the saved
+    // selection. Returns null when no project is open.
+    loadProjectData: publicProcedure.query(async () => {
+        const rootPath = await getStoredProjectPath();
+        if (!rootPath) return null;
+
+        let expanded: string[] = [];
+        let selected: string | null = null;
+        try {
+            const saved = JSON.parse(
+                await Deno.readTextFile(
+                    join(rootPath, ".project", "file-explorer.json"),
+                ),
+            ) as { expanded?: string[]; selected?: string | null };
+            if (Array.isArray(saved.expanded)) expanded = saved.expanded;
+            if (typeof saved.selected === "string") selected = saved.selected;
+        } catch {
+            // No saved explorer state yet — start fresh.
+        }
+
+        const rootEntries = await listDir(rootPath);
+
+        // Pre-load the children of each restored-expanded directory so the tree
+        // paints fully expanded on first render.
+        const childrenByPath: Record<string, DirEntry[]> = {};
+        for (const rel of expanded) {
+            const target = resolveInProject(rootPath, rel);
+            if (target instanceof Error) {
+                throw target;
+            }
+            try {
+                childrenByPath[rel] = await listDir(target);
+            } catch {
+                // Directory removed since last session — drop it silently.
+            }
+        }
+
+        return { rootPath, rootEntries, childrenByPath, expanded, selected };
+    }),
 
     // Open a project file/dir with the OS default program.
     openInDefaultApp: publicProcedure
         .input(z.string())
         .mutation(async (opts): Promise<{ ok: boolean }> => {
-            const target = await resolveInProject(opts.input);
+            const target = await resolveInProject_deprecated(opts.input);
             if (!target) {
                 return { ok: false };
             }
@@ -242,8 +294,8 @@ export const appRouter = router({
         .input(z.object({ src: z.string(), destDir: z.string() }))
         .mutation(async (opts): Promise<{ dest: string }> => {
             const { src, destDir } = opts.input;
-            const srcAbs = await resolveInProject(src);
-            const destDirAbs = await resolveInProject(destDir);
+            const srcAbs = await resolveInProject_deprecated(src);
+            const destDirAbs = await resolveInProject_deprecated(destDir);
             if (!srcAbs || !destDirAbs) {
                 throw new Error("Invalid source or destination path");
             }
@@ -280,8 +332,8 @@ export const appRouter = router({
             const dest = dir ? `${dir}/${name}` : name;
             if (dest === path) return { path };
 
-            const srcAbs = await resolveInProject(path);
-            const destAbs = await resolveInProject(dest);
+            const srcAbs = await resolveInProject_deprecated(path);
+            const destAbs = await resolveInProject_deprecated(dest);
             if (!srcAbs || !destAbs) {
                 throw new Error("Invalid source or destination path");
             }
@@ -476,24 +528,6 @@ export const appRouter = router({
                 throw result;
             }
             return result;
-        }),
-
-    getExplorerState: publicProcedure
-        .input(z.object({ projectRootPath: z.string() }))
-        .query(async (opts) => {
-            const path = join(
-                opts.input.projectRootPath,
-                ".project",
-                "file-explorer.json",
-            );
-            try {
-                return JSON.parse(await Deno.readTextFile(path)) as {
-                    expanded: string[];
-                    selected: string | null;
-                };
-            } catch {
-                return null;
-            }
         }),
 
     saveExplorerState: publicProcedure

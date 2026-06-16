@@ -1,25 +1,34 @@
 import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { listProjectFiles, trpc } from "../trpc/client.ts";
+import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 
+/**
+ * All file-explorer state that only makes sense once a project is open. When no
+ * project is open the whole object is `null`, so entries, expansion and
+ * selection can never exist without a root path.
+ */
+export interface ProjectData {
+    /** Absolute path of the project root (display + server calls). */
+    rootPath: string;
+    /** Entries at the project root. */
+    rootEntries: FileEntry[];
+    /** Loaded children keyed by directory path (relative to the root). */
+    childrenByPath: Record<string, FileEntry[]>;
+    /** Currently expanded directory paths. */
+    expanded: Set<string>;
+    /** Path of the selected entry, or null. */
+    selected: string | null;
+}
+
 export function FileExplorer(props: {
-    projectRootPath: Signal<string | null>;
+    /** The open project's data, or null when no project is open. */
+    projectData: Signal<ProjectData | null>;
     /** Sidebar width in px; mutated while dragging the divider. */
     width: Signal<number>;
-    rootEntries: Signal<FileEntry[] | null>;
-    expanded: Signal<Set<string>>;
-    childrenByPath: Signal<Record<string, FileEntry[]>>;
-    selected?: Signal<string | null>;
     onSelect?: (entry: FileEntry, path: string) => void;
 }) {
-    const {
-        width,
-        rootEntries: root,
-        expanded,
-        childrenByPath,
-        projectRootPath,
-    } = props;
+    const { width, projectData } = props;
     const error = useSignal<string | null>(null);
     const menu = useSignal<
         { entry: FileEntry; path: string; x: number; y: number } | null
@@ -32,62 +41,30 @@ export function FileExplorer(props: {
     const renaming = useSignal<string | null>(null);
 
     let projectName: string | undefined = "请打开项目";
-    if (props.projectRootPath.value) {
-        projectName = props.projectRootPath.value.replace(/[/\\]+$/, "").split(
+    if (projectData.value) {
+        projectName = projectData.value.rootPath.replace(/[/\\]+$/, "").split(
             /[/\\]/,
         ).pop();
     }
 
-    // Fetch the first level when the explorer loads.
-    useEffect(() => {
-        // if (props.projectRootPath.value) {
-        //     listProjectFiles(props.projectRootPath.value).then((res) => {
-        //         if (res instanceof Error) {
-        //             console.error(res);
-        //             error.value = String(res);
-        //             return;
-        //         }
-        //         root.value = res;
-        //     });
-        // }
-    }, []);
+    const loadChildren = makeLoadChildren(projectData);
 
-    const loadChildren = makeLoadChildren(childrenByPath);
-
-    // Restore the expanded folders + selection saved last session, then start
-    // persisting changes. The `hydrated` gate stops the persist effect from
-    // overwriting storage with empty state before the restore runs.
+    // Persist expanded dirs + selection whenever they change. The `hydrated`
+    // gate skips the initial load (set by the parent / by picking a project) so
+    // we don't immediately re-write the state we just read back.
     const hydrated = useRef(false);
-    useEffect(() => {
-        if (!props.projectRootPath.value) {
+    useSignalEffect(() => {
+        const pd = projectData.value;
+        if (!pd) return;
+        if (!hydrated.current) {
+            hydrated.current = true;
             return;
         }
-        trpc.getExplorerState.query({
-            projectRootPath: props.projectRootPath.value,
-        }).then(
-            (saved) => {
-                if (saved) {
-                    if (Array.isArray(saved.expanded)) {
-                        expanded.value = new Set(saved.expanded);
-                        for (const p of saved.expanded) loadChildren(p);
-                    }
-                    if (saved.selected && props.selected) {
-                        props.selected.value = saved.selected;
-                    }
-                }
-                hydrated.current = true;
-            },
-        );
-    }, []);
-
-    useSignalEffect(() => {
         const state: ExplorerState = {
-            expanded: [...expanded.value],
-            selected: props.selected?.value ?? null,
+            expanded: [...pd.expanded],
+            selected: pd.selected,
         };
-        if (hydrated.current) {
-            trpc.saveExplorerState.mutate(state).catch(console.error);
-        }
+        trpc.saveExplorerState.mutate(state).catch(console.error);
     });
 
     const openInDefault = (path: string) => {
@@ -108,12 +85,14 @@ export function FileExplorer(props: {
 
     /** Look up a loaded entry by its full path. */
     const findEntry = (path: string): FileEntry | undefined => {
+        const pd = projectData.value;
+        if (!pd) return undefined;
         const slash = path.lastIndexOf("/");
         const parent = slash === -1 ? "" : path.slice(0, slash);
         const name = slash === -1 ? path : path.slice(slash + 1);
         const list = parent === ""
-            ? root.value ?? []
-            : childrenByPath.value[parent] ?? [];
+            ? pd.rootEntries
+            : pd.childrenByPath[parent] ?? [];
         return list.find((e) => e.name === name);
     };
 
@@ -123,7 +102,7 @@ export function FileExplorer(props: {
             if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c") {
                 return;
             }
-            const path = props.selected?.value;
+            const path = projectData.value?.selected;
             if (!path) return;
 
             // Don't hijack copying from inputs or a real text selection.
@@ -150,18 +129,17 @@ export function FileExplorer(props: {
             .then(async ({ dest }) => {
                 // The actual (possibly de-duplicated) name the server wrote.
                 const name = dest.split("/").pop() ?? "";
+                const pd = projectData.value;
+                if (!pd) return;
                 if (destDir === "") {
-                    // Root listing is driven by `root`, not childrenByPath.
-                    if (!projectRootPath.value) {
-                        throw new Error("projectRootPath is null");
-                    }
-                    const fresh = await listProjectFiles(projectRootPath.value);
+                    // Root listing lives in `rootEntries` ("" = project root).
+                    const fresh = await readDir(pd.rootPath, "");
                     if (fresh instanceof Error) {
                         return console.error(fresh);
                     }
                     // Guarantee the new file is visible even if the refresh
                     // didn't pick it up yet.
-                    root.value = fresh.some((e) => e.name === name)
+                    const rootEntries = fresh.some((e) => e.name === name)
                         ? fresh
                         : sortEntries([...fresh, {
                             name,
@@ -169,10 +147,14 @@ export function FileExplorer(props: {
                             isFile: true,
                             isSymlink: false,
                         }]);
+                    projectData.value = { ...projectData.value!, rootEntries };
                     return;
                 }
                 // Reveal the copy: expand the target dir and refresh its list.
-                expanded.value = new Set(expanded.value).add(destDir);
+                projectData.value = {
+                    ...projectData.value!,
+                    expanded: new Set(projectData.value!.expanded).add(destDir),
+                };
                 loadChildren(destDir);
             })
             .catch((err) => console.error(err));
@@ -181,24 +163,21 @@ export function FileExplorer(props: {
     /** Refresh a directory's listing (root listing lives in `root`). */
     const refreshDir = async (dir: string) => {
         if (dir === "") {
-            if (!projectRootPath.value) {
-                throw new Error("projectRootPath is null");
-            }
-            const files = await listProjectFiles(projectRootPath.value);
+            const root = projectData.value?.rootPath;
+            if (!root) return;
+            const files = await readDir(root, ""); // "" = project root
             if (files instanceof Error) {
                 return console.error(files);
             }
-            root.value = files;
+            if (!projectData.value) return;
+            projectData.value = { ...projectData.value, rootEntries: files };
         } else {
             await loadChildren(dir);
         }
     };
 
     const tree: TreeState = {
-        childrenByPath,
-        expanded,
-
-        selected: props.selected,
+        projectData,
         dragOver,
         renaming,
     };
@@ -208,7 +187,7 @@ export function FileExplorer(props: {
         loadChildren,
         openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
         dropFile,
-        commitRename: commitRename(renaming, props.selected, refreshDir),
+        commitRename: commitRename(renaming, projectData, refreshDir),
         previewImage: (path, x, y) =>
             preview.value = path ? { path, x, y } : null,
         openInDefault,
@@ -256,11 +235,17 @@ export function FileExplorer(props: {
                             onClick={async () => {
                                 try {
                                     const res = await trpc.pickProject.mutate();
-                                    // Reload so every view re-fetches against
-                                    // the newly-selected project.
-                                    if (res) {
-                                        projectRootPath.value = res.path;
+                                    if (!res) return;
+                                    error.value = null;
+                                    // Load the full state for the new folder.
+                                    hydrated.current = false;
+                                    const data = await loadProjectData();
+                                    if (data instanceof Error) {
+                                        console.error(data);
+                                        error.value = data.message;
+                                        return;
                                     }
+                                    projectData.value = data;
                                 } catch (err) {
                                     console.error(err);
                                 }
@@ -345,19 +330,19 @@ export function FileExplorer(props: {
                                 加载失败：{error.value}
                             </div>
                         )
-                        : root.value === null
+                        : !projectData.value
                         ? (
                             <div class="px-4 py-3 text-xs text-gray-400">
-                                加载中…
+                                请选择一个项目文件夹
                             </div>
                         )
-                        : root.value.length === 0
+                        : projectData.value.rootEntries.length === 0
                         ? (
                             <div class="px-4 py-3 text-xs text-gray-400">
                                 暂无文件
                             </div>
                         )
-                        : root.value.map((entry) => (
+                        : projectData.value.rootEntries.map((entry) => (
                             <Node
                                 key={entry.name}
                                 entry={entry}
@@ -475,7 +460,7 @@ export function FileExplorer(props: {
     );
 }
 
-/** Mirrors the `DirEntry` returned by the `listProjectFiles` tRPC query. */
+/** Mirrors the `DirEntry` returned by the `readDir` tRPC query. */
 export interface FileEntry {
     name: string;
     isDirectory: boolean;
@@ -597,12 +582,8 @@ function FileIcon() {
 
 // Shared per-explorer reactive state, threaded down the tree.
 interface TreeState {
-    /** Loaded children keyed by directory path (relative to project root). */
-    childrenByPath: Signal<Record<string, FileEntry[]>>;
-    /** Currently expanded directory paths. */
-    expanded: Signal<Set<string>>;
-
-    selected?: Signal<string | null>;
+    /** The open project's data (entries, expansion, selection). */
+    projectData: Signal<ProjectData | null>;
     /** Directory path currently hovered during a drag (for highlight). */
     dragOver: Signal<string | null>;
     /** Path of the entry being renamed inline, or null. */
@@ -689,27 +670,32 @@ function Node(
     },
 ) {
     const { entry, path, depth, tree, callbacks } = props;
-    const isOpen = tree.expanded.value.has(path);
-    const isActive = tree.selected?.value === path;
+    const pd = tree.projectData.value;
+    const isOpen = pd?.expanded.has(path) ?? false;
+    const isActive = pd?.selected === path;
     const isRenaming = tree.renaming.value === path;
-    const kids = tree.childrenByPath.value[path];
+    const kids = pd?.childrenByPath[path];
 
     const onClick = () => {
-        if (tree.selected) tree.selected.value = path;
+        const cur = tree.projectData.value;
+        if (!cur) return;
         callbacks.onSelect?.(entry, path);
-        if (!entry.isDirectory) return;
+        if (!entry.isDirectory) {
+            tree.projectData.value = { ...cur, selected: path };
+            return;
+        }
 
         // Toggle the open state immediately (the chevron rotates either way).
         // The children list only renders once loaded, so an empty dir simply
         // shows nothing under it — no "loading" row that flashes in and out.
-        const next = new Set(tree.expanded.value);
+        const next = new Set(cur.expanded);
         if (next.has(path)) {
             next.delete(path);
         } else {
             next.add(path);
             callbacks.loadChildren(path);
         }
-        tree.expanded.value = next;
+        tree.projectData.value = { ...cur, selected: path, expanded: next };
     };
 
     return (
@@ -842,7 +828,7 @@ export const SIDEBAR_MAX_WIDTH = 480;
  */
 function commitRename(
     renaming: Signal<string | null>,
-    selected: Signal<string | null> | undefined,
+    projectData: Signal<ProjectData | null>,
     refreshDir: (dir: string) => Promise<void>,
 ) {
     return async (path: string, name: string) => {
@@ -855,38 +841,30 @@ function commitRename(
         const slash = path.lastIndexOf("/");
         const parent = slash === -1 ? "" : path.slice(0, slash);
         // Keep the selection on the renamed entry.
-        if (selected?.value === path) {
-            selected.value = dest;
+        if (projectData.value?.selected === path) {
+            projectData.value = { ...projectData.value, selected: dest };
         }
         await refreshDir(parent);
     };
 }
 
-export function makeLoadChildren(
-    childrenByPath: Signal<Record<string, FileEntry[]>>,
-) {
+export function makeLoadChildren(projectData: Signal<ProjectData | null>) {
     return async (path: string) => {
+        const root = projectData.value?.rootPath;
+        if (!root) return new Error("no project open");
         // Re-fetch even when cached so reopening shows the latest state — the
         // stale cache stays rendered until fresh data arrives.
-        const res = await listProjectFiles(path);
+        const res = await readDir(root, path);
         if (res instanceof Error) {
             return res;
         }
-        childrenByPath.value = { ...childrenByPath.value, [path]: res };
+        const pd = projectData.value;
+        if (pd) {
+            projectData.value = {
+                ...pd,
+                childrenByPath: { ...pd.childrenByPath, [path]: res },
+            };
+        }
         return res;
-    };
-}
-
-async function loadProject(projectRootPath: string) {
-    if (!projectRootPath) {
-        return new Error("no project is openned");
-    }
-    const ProjectFiles = await listProjectFiles(projectRootPath);
-    if (ProjectFiles instanceof Error) {
-        return ProjectFiles;
-    }
-
-    return {
-        ProjectFiles,
     };
 }
