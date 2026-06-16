@@ -5,9 +5,7 @@ import { type KvEntry, listAllEntries } from "../kv.ts";
 /** Render a KV key array as a readable, JSON-ish path. */
 function fmtKey(key: Deno.KvKey): string {
     return key
-        .map((part) =>
-            typeof part === "string" ? part : JSON.stringify(part)
-        )
+        .map((part) => typeof part === "string" ? part : JSON.stringify(part))
         .join(" / ");
 }
 

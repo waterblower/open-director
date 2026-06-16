@@ -26,10 +26,14 @@ export async function pickProjectFolder(): Promise<string | null> {
                 return new Deno.Command("powershell", {
                     args: [
                         "-NoProfile",
+                        "-STA",
                         "-Command",
                         "Add-Type -AssemblyName System.Windows.Forms;" +
                         "$f=New-Object System.Windows.Forms.FolderBrowserDialog;" +
-                        "if($f.ShowDialog() -eq 'OK'){$f.SelectedPath}",
+                        "$f.AutoUpgradeEnabled=$true;" +
+                        "if($f.ShowDialog() -eq 'OK'){" +
+                        "[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($f.SelectedPath))" +
+                        "}",
                     ],
                 });
             default: // linux & others — needs `zenity` installed
@@ -47,6 +51,12 @@ export async function pickProjectFolder(): Promise<string | null> {
     if (!success) return null; // cancelled, or the picker tool is missing
     const out = new TextDecoder().decode(stdout).trim();
     if (!out) return null;
+    const path = Deno.build.os === "windows"
+        ? new TextDecoder().decode(
+            Uint8Array.from(atob(out), (char) => char.charCodeAt(0)),
+        )
+        : out;
     // macOS `POSIX path` has a trailing slash; trim it (but keep root "/").
-    return out.length > 1 ? out.replace(/\/+$/, "") : out;
+    console.log("pickProjectFolder", path);
+    return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
