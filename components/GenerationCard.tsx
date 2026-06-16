@@ -117,7 +117,7 @@ export function GenerationCard(
                         // Let the card own the drag, not the native video drag
                         draggable={false}
                         // cover fills the thumbnail; contain fits the whole frame in fullscreen
-                        class="w-full aspect-video object-cover [&:fullscreen]:object-contain"
+                        class="w-full aspect-video object-contain [&:fullscreen]:object-contain"
                         onClick={(e) => {
                             const v = e
                                 .currentTarget as HTMLVideoElement;
