@@ -38,3 +38,8 @@ export async function listAllEntries(): Promise<KvEntry[]> {
     }
     return entries;
 }
+
+/** Delete an entry by its exact KV key. */
+export async function deleteEntry(key: Deno.KvKey): Promise<void> {
+    await kv.delete(key);
+}

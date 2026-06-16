@@ -104,83 +104,82 @@ export const appRouter = router({
     }),
     // List generated videos in `<project>/.project/generations` as Task-like
     // objects. Creates the directory if it doesn't exist yet.
-    listGeneratedVideos: publicProcedure.query(async () => {
-        const root = await getStoredProjectPath();
-        if (!root) {
-            console.error("No project path");
-            return [];
-        }
-        const dir = `${root}/${VIDEOS_DIR}`;
-        // Creates the dir if missing; a no-op (no throw) when it already exists.
-        await Deno.mkdir(dir, { recursive: true });
+    listGeneratedVideos: publicProcedure.input(z.object({
+        project_root: z.string(),
+    })).query(
+        async ({ input }) => {
+            const dir = `${input.project_root}/${VIDEOS_DIR}`;
+            // Creates the dir if missing; a no-op (no throw) when it already exists.
+            await Deno.mkdir(dir, { recursive: true });
 
-        if (!db) {
-            return [];
-        }
-        const rows = listGenerations(db);
-        const rowById = new Map(rows.map((r) => [r.task_id, r]));
-        const onDisk = new Set<string>();
+            if (!db) {
+                return [];
+            }
+            const rows = listGenerations(db);
+            const rowById = new Map(rows.map((r) => [r.task_id, r]));
+            const onDisk = new Set<string>();
 
-        const videos: {
-            id: string;
-            createdAt: string;
-            status: TaskStatus;
-            /** Whether a create request is stored (drives the reuse button);
-             * the request itself is fetched on demand via getGenerationRequest. */
-            hasRequest: boolean;
-            url?: string;
-            failedReason?: string;
-        }[] = [];
+            const videos: {
+                id: string;
+                createdAt: string;
+                status: TaskStatus;
+                /** Whether a create request is stored (drives the reuse button);
+                 * the request itself is fetched on demand via getGenerationRequest. */
+                hasRequest: boolean;
+                url?: string;
+                failedReason?: string;
+            }[] = [];
 
-        // 1. Video files on disk — these are the succeeded, downloaded outputs.
-        //    Merge in any matching log row; if there's none, fall back to the
-        //    file alone.
-        for await (const entry of Deno.readDir(dir)) {
-            if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
-            const taskId = entry.name.replace(VIDEO_EXT, "");
-            onDisk.add(taskId);
+            // 1. Video files on disk — these are the succeeded, downloaded outputs.
+            //    Merge in any matching log row; if there's none, fall back to the
+            //    file alone.
+            for await (const entry of Deno.readDir(dir)) {
+                if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
+                const taskId = entry.name.replace(VIDEO_EXT, "");
+                onDisk.add(taskId);
 
-            const localUrl = get_video_url(taskId);
-            console.log(localUrl);
+                const localUrl = get_video_url(taskId);
+                console.log(localUrl);
 
-            const row = rowById.get(taskId);
-            if (!row) {
+                const row = rowById.get(taskId);
+                if (!row) {
+                    videos.push({
+                        status: "succeeded",
+                        id: taskId,
+                        url: localUrl,
+                        createdAt: "",
+                        hasRequest: false,
+                    });
+                } else {
+                    videos.push({
+                        status: "succeeded",
+                        id: taskId,
+                        url: localUrl,
+                        createdAt: row.created_at,
+                        hasRequest: row.request_json != null,
+                    });
+                }
+            }
+
+            // 2. Log rows with no file on disk — the video either failed or is
+            //    still queued/running on the seedance server. Surface them with
+            //    whatever status we last recorded.
+            for (const row of rows) {
+                if (row.task_id && onDisk.has(row.task_id)) continue;
                 videos.push({
-                    status: "succeeded",
-                    id: taskId,
-                    url: localUrl,
-                    createdAt: "",
-                    hasRequest: false,
-                });
-            } else {
-                videos.push({
-                    status: "succeeded",
-                    id: taskId,
-                    url: localUrl,
+                    status: row.status,
+                    // Not-yet-submitted generations have no task_id; key on the
+                    // local ULID id instead.
+                    id: row.task_id ?? row.id,
                     createdAt: row.created_at,
                     hasRequest: row.request_json != null,
+                    failedReason: row.failed_reason ?? undefined,
                 });
             }
-        }
 
-        // 2. Log rows with no file on disk — the video either failed or is
-        //    still queued/running on the seedance server. Surface them with
-        //    whatever status we last recorded.
-        for (const row of rows) {
-            if (row.task_id && onDisk.has(row.task_id)) continue;
-            videos.push({
-                status: row.status,
-                // Not-yet-submitted generations have no task_id; key on the
-                // local ULID id instead.
-                id: row.task_id ?? row.id,
-                createdAt: row.created_at,
-                hasRequest: row.request_json != null,
-                failedReason: row.failed_reason ?? undefined,
-            });
-        }
-
-        return videos;
-    }),
+            return videos;
+        },
+    ),
 
     // List the first-layer files/dirs of `<project>/<path>` (path relative to
     // the project root from .env; omit or "" for the project root itself).
@@ -479,21 +478,23 @@ export const appRouter = router({
             return result;
         }),
 
-    getExplorerState: publicProcedure.query(async () => {
-        const projectDir = await getStoredProjectPath();
-        if (!projectDir) {
-            throw new Error("Project not initialized");
-        }
-        const path = join(projectDir, ".project", "file-explorer.json");
-        try {
-            return JSON.parse(await Deno.readTextFile(path)) as {
-                expanded: string[];
-                selected: string | null;
-            };
-        } catch {
-            return null;
-        }
-    }),
+    getExplorerState: publicProcedure
+        .input(z.object({ projectRootPath: z.string() }))
+        .query(async (opts) => {
+            const path = join(
+                opts.input.projectRootPath,
+                ".project",
+                "file-explorer.json",
+            );
+            try {
+                return JSON.parse(await Deno.readTextFile(path)) as {
+                    expanded: string[];
+                    selected: string | null;
+                };
+            } catch {
+                return null;
+            }
+        }),
 
     saveExplorerState: publicProcedure
         .input(z.object({

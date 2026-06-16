@@ -4,15 +4,22 @@ import { listProjectFiles, trpc } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 
 export function FileExplorer(props: {
+    projectRootPath: Signal<string | null>;
     /** Sidebar width in px; mutated while dragging the divider. */
     width: Signal<number>;
-    root: Signal<FileEntry[] | null>;
+    rootEntries: Signal<FileEntry[] | null>;
     expanded: Signal<Set<string>>;
     childrenByPath: Signal<Record<string, FileEntry[]>>;
     selected?: Signal<string | null>;
     onSelect?: (entry: FileEntry, path: string) => void;
 }) {
-    const { width, root, expanded, childrenByPath } = props;
+    const {
+        width,
+        rootEntries: root,
+        expanded,
+        childrenByPath,
+        projectRootPath,
+    } = props;
     const error = useSignal<string | null>(null);
     const menu = useSignal<
         { entry: FileEntry; path: string; x: number; y: number } | null
@@ -23,26 +30,26 @@ export function FileExplorer(props: {
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
-    const projectName = useSignal<string | null>(null);
 
-    // Resolve the project folder name for the sidebar header.
-    useEffect(() => {
-        trpc.getProjectDir.query().then((dir) => {
-            const name = dir.replace(/[/\\]+$/, "").split(/[/\\]/).pop();
-            if (name) projectName.value = name;
-        }).catch(() => {});
-    }, []);
+    let projectName: string | undefined = "请打开项目";
+    if (props.projectRootPath.value) {
+        projectName = props.projectRootPath.value.replace(/[/\\]+$/, "").split(
+            /[/\\]/,
+        ).pop();
+    }
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
-        listProjectFiles().then((res) => {
-            if (res instanceof Error) {
-                console.error(res);
-                error.value = String(res);
-                return;
-            }
-            root.value = res;
-        });
+        // if (props.projectRootPath.value) {
+        //     listProjectFiles(props.projectRootPath.value).then((res) => {
+        //         if (res instanceof Error) {
+        //             console.error(res);
+        //             error.value = String(res);
+        //             return;
+        //         }
+        //         root.value = res;
+        //     });
+        // }
     }, []);
 
     const loadChildren = makeLoadChildren(childrenByPath);
@@ -52,18 +59,25 @@ export function FileExplorer(props: {
     // overwriting storage with empty state before the restore runs.
     const hydrated = useRef(false);
     useEffect(() => {
-        trpc.getExplorerState.query().then((saved) => {
-            if (saved) {
-                if (Array.isArray(saved.expanded)) {
-                    expanded.value = new Set(saved.expanded);
-                    for (const p of saved.expanded) loadChildren(p);
+        if (!props.projectRootPath.value) {
+            return;
+        }
+        trpc.getExplorerState.query({
+            projectRootPath: props.projectRootPath.value,
+        }).then(
+            (saved) => {
+                if (saved) {
+                    if (Array.isArray(saved.expanded)) {
+                        expanded.value = new Set(saved.expanded);
+                        for (const p of saved.expanded) loadChildren(p);
+                    }
+                    if (saved.selected && props.selected) {
+                        props.selected.value = saved.selected;
+                    }
                 }
-                if (saved.selected && props.selected) {
-                    props.selected.value = saved.selected;
-                }
-            }
-            hydrated.current = true;
-        });
+                hydrated.current = true;
+            },
+        );
     }, []);
 
     useSignalEffect(() => {
@@ -138,7 +152,10 @@ export function FileExplorer(props: {
                 const name = dest.split("/").pop() ?? "";
                 if (destDir === "") {
                     // Root listing is driven by `root`, not childrenByPath.
-                    const fresh = await listProjectFiles();
+                    if (!projectRootPath.value) {
+                        throw new Error("projectRootPath is null");
+                    }
+                    const fresh = await listProjectFiles(projectRootPath.value);
                     if (fresh instanceof Error) {
                         return console.error(fresh);
                     }
@@ -164,7 +181,10 @@ export function FileExplorer(props: {
     /** Refresh a directory's listing (root listing lives in `root`). */
     const refreshDir = async (dir: string) => {
         if (dir === "") {
-            const files = await listProjectFiles();
+            if (!projectRootPath.value) {
+                throw new Error("projectRootPath is null");
+            }
+            const files = await listProjectFiles(projectRootPath.value);
             if (files instanceof Error) {
                 return console.error(files);
             }
@@ -224,9 +244,9 @@ export function FileExplorer(props: {
                 <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
                     <span
                         class="text-sm font-semibold text-gray-800 truncate"
-                        title={projectName.value ?? undefined}
+                        title={projectName}
                     >
-                        {projectName.value ?? "项目文件"}
+                        {projectName}
                     </span>
                     <div class="flex items-center gap-0.5 -mr-1">
                         <button
@@ -238,7 +258,9 @@ export function FileExplorer(props: {
                                     const res = await trpc.pickProject.mutate();
                                     // Reload so every view re-fetches against
                                     // the newly-selected project.
-                                    if (res) location.reload();
+                                    if (res) {
+                                        projectRootPath.value = res.path;
+                                    }
                                 } catch (err) {
                                     console.error(err);
                                 }
@@ -852,5 +874,19 @@ export function makeLoadChildren(
         }
         childrenByPath.value = { ...childrenByPath.value, [path]: res };
         return res;
+    };
+}
+
+async function loadProject(projectRootPath: string) {
+    if (!projectRootPath) {
+        return new Error("no project is openned");
+    }
+    const ProjectFiles = await listProjectFiles(projectRootPath);
+    if (ProjectFiles instanceof Error) {
+        return ProjectFiles;
+    }
+
+    return {
+        ProjectFiles,
     };
 }

@@ -23,7 +23,7 @@ export const trpc = createTRPCClient<AppRouter>({
     ],
 });
 
-export async function listProjectFiles(path?: string) {
+export async function listProjectFiles(path: string) {
     /** OS junk files that should never be shown in the explorer. */
     const HIDDEN_NAMES = new Set([".DS_Store"]);
     try {

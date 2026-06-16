@@ -1,6 +1,86 @@
 import { Head } from "fresh/runtime";
 import { define } from "../utils.ts";
-import { type KvEntry, listAllEntries } from "../kv.ts";
+import { deleteEntry, type KvEntry, listAllEntries } from "../kv.ts";
+
+type EncodedKeyPart =
+    | { type: "string"; value: string }
+    | { type: "number"; value: number }
+    | { type: "boolean"; value: boolean }
+    | { type: "bigint"; value: string }
+    | { type: "bytes"; value: string };
+
+function encodeBytes(bytes: Uint8Array): string {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+}
+
+function decodeBytes(encoded: string): Uint8Array {
+    return Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+}
+
+function encodeKeyPart(part: Deno.KvKeyPart): EncodedKeyPart {
+    if (part instanceof Uint8Array) {
+        return { type: "bytes", value: encodeBytes(part) };
+    }
+    if (typeof part === "bigint") {
+        return { type: "bigint", value: part.toString() };
+    }
+    if (typeof part === "string") {
+        return { type: "string", value: part };
+    }
+    if (typeof part === "number") {
+        return { type: "number", value: part };
+    }
+    if (typeof part === "boolean") {
+        return { type: "boolean", value: part };
+    }
+    throw new TypeError("Unsupported Deno KV key part");
+}
+
+function decodeKeyPart(part: unknown): Deno.KvKeyPart | null {
+    if (part === null || typeof part !== "object") return null;
+    const encoded = part as Partial<EncodedKeyPart>;
+    switch (encoded.type) {
+        case "string":
+            return typeof encoded.value === "string" ? encoded.value : null;
+        case "number":
+            return typeof encoded.value === "number" ? encoded.value : null;
+        case "boolean":
+            return typeof encoded.value === "boolean" ? encoded.value : null;
+        case "bigint":
+            return typeof encoded.value === "string"
+                ? BigInt(encoded.value)
+                : null;
+        case "bytes":
+            return typeof encoded.value === "string"
+                ? decodeBytes(encoded.value)
+                : null;
+        default:
+            return null;
+    }
+}
+
+function encodeKey(key: Deno.KvKey): string {
+    return JSON.stringify(key.map(encodeKeyPart));
+}
+
+function decodeKey(value: FormDataEntryValue | null): Deno.KvKey | null {
+    if (typeof value !== "string") return null;
+    try {
+        const parts = JSON.parse(value) as unknown[];
+        if (!Array.isArray(parts)) return null;
+        const key: Deno.KvKeyPart[] = [];
+        for (const part of parts) {
+            const decoded = decodeKeyPart(part);
+            if (decoded === null) return null;
+            key.push(decoded);
+        }
+        return key;
+    } catch {
+        return null;
+    }
+}
 
 /** Render a KV key array as a readable, JSON-ish path. */
 function fmtKey(key: Deno.KvKey): string {
@@ -18,6 +98,24 @@ function fmtValue(value: unknown): string {
         return String(value);
     }
 }
+
+export const handler = define.handlers({
+    async POST(ctx) {
+        const form = await ctx.req.formData();
+        const action = form.get("action");
+        const key = decodeKey(form.get("key"));
+        if (action !== "delete" || key === null) {
+            return new Response("Bad request", { status: 400 });
+        }
+
+        await deleteEntry(key);
+
+        return new Response(null, {
+            status: 303,
+            headers: { location: new URL(ctx.req.url).pathname },
+        });
+    },
+});
 
 export default define.page(async function KvDebug() {
     const entries = await listAllEntries();
@@ -37,6 +135,18 @@ export default define.page(async function KvDebug() {
                     td.key { white-space: nowrap; font-weight: 600; }
                     td.value pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
                     td.stamp { white-space: nowrap; color: #9ca3af; }
+                    td.actions { width: 1%; white-space: nowrap; }
+                    .delete-form { margin: 0; }
+                    .delete-button {
+                        border: 1px solid #fecaca;
+                        border-radius: 4px;
+                        background: #fff;
+                        color: #dc2626;
+                        cursor: pointer;
+                        font: inherit;
+                        padding: 2px 8px;
+                    }
+                    .delete-button:hover { background: #fef2f2; border-color: #fca5a5; }
                     .muted { color: #9ca3af; }
                     `}
                 </style>
@@ -61,6 +171,7 @@ function KvTable({ entries }: { entries: KvEntry[] }) {
                     <th>key</th>
                     <th>value</th>
                     <th>versionstamp</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -71,6 +182,23 @@ function KvTable({ entries }: { entries: KvEntry[] }) {
                             <pre>{fmtValue(entry.value)}</pre>
                         </td>
                         <td class="stamp">{entry.versionstamp}</td>
+                        <td class="actions">
+                            <form method="post" class="delete-form">
+                                <input
+                                    type="hidden"
+                                    name="action"
+                                    value="delete"
+                                />
+                                <input
+                                    type="hidden"
+                                    name="key"
+                                    value={encodeKey(entry.key)}
+                                />
+                                <button type="submit" class="delete-button">
+                                    Delete
+                                </button>
+                            </form>
+                        </td>
                     </tr>
                 ))}
             </tbody>

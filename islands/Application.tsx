@@ -36,9 +36,10 @@ export default function Application() {
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
 
     // File Explorer
-    const projectRootDir = useSignal<FileEntry[] | null>(null);
+    const projectRootEntries = useSignal<FileEntry[] | null>(null);
     const expanded_paths = useSignal<Set<string>>(new Set());
     const childrenByPath = useSignal<Record<string, FileEntry[]>>({});
+    const projectRootPath = useSignal<string | null>(null);
 
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
@@ -67,12 +68,15 @@ export default function Application() {
                     });
                     generated_videos.value = next;
                 } else if (n.type == "fs_changed") {
-                    const res = await listProjectFiles();
+                    if (!projectRootPath.value) {
+                        throw new Error("projectRootPath is null");
+                    }
+                    const res = await listProjectFiles(projectRootPath.value);
                     if (res instanceof Error) {
                         console.error(res);
                         return;
                     }
-                    projectRootDir.value = res;
+                    projectRootEntries.value = res;
                     for (const p of expanded_paths.value) {
                         const err = await makeLoadChildren(childrenByPath)(p);
                         if (err instanceof Error) {
@@ -92,7 +96,10 @@ export default function Application() {
     // Load videos from the project's .project dir on mount
     useEffect(() => {
         (async () => {
-            const vids = await trpc.listGeneratedVideos.query();
+            if (!projectRootPath.value) return;
+            const vids = await trpc.listGeneratedVideos.query({
+                project_root: projectRootPath.value,
+            });
             generated_videos.value = new Map(vids.map((v) => [v.id, v]));
             console.log("generated_videos", vids);
         })();
@@ -119,9 +126,10 @@ export default function Application() {
                 <FileExplorer
                     width={sidebarWidth}
                     selected={selectedFile}
-                    root={projectRootDir}
+                    rootEntries={projectRootEntries}
                     expanded={expanded_paths}
                     childrenByPath={childrenByPath}
+                    projectRootPath={projectRootPath}
                 />
 
                 {/* Right: video grid + floating composer */}
