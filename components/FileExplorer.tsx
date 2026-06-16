@@ -191,6 +191,7 @@ export function FileExplorer(props: {
         commitRename: commitRename(renaming, props.selected, refreshDir),
         previewImage: (path, x, y) =>
             preview.value = path ? { path, x, y } : null,
+        openInDefault,
     };
 
     // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
@@ -600,6 +601,8 @@ interface TreeCallbacks {
     commitRename: (path: string, name: string) => void;
     /** Show (path set) or hide (path null) the image hover preview at x,y. */
     previewImage: (path: string | null, x: number, y: number) => void;
+    /** Open a file with the OS default application. */
+    openInDefault: (path: string) => void;
 }
 
 /**
@@ -702,6 +705,11 @@ function Node(
                     <button
                         type="button"
                         onClick={onClick}
+                        // Double-click opens files in the OS default app
+                        // (directories just toggle via the single click).
+                        onDblClick={!entry.isDirectory
+                            ? () => callbacks.openInDefault(path)
+                            : undefined}
                         onContextMenu={(e) => {
                             e.preventDefault();
                             callbacks.openMenu(
