@@ -1,23 +1,52 @@
-import { load, loadSync } from "@std/dotenv";
-
-/** Resolve the project directory from the `project` entry in .env. */
-export function projectDir() {
-    // Prefer an already-loaded env var; fall back to reading .env directly
-    // (the Vite dev server doesn't populate Deno.env from .env).
-    const fromEnv = Deno.env.get("project");
-    if (fromEnv) return fromEnv;
-
-    const env = loadSync({
-        envPath: ".env",
-        export: true,
-    });
-    if (env.project) return env.project;
-    throw new Error("`project` is not set in .env");
-}
+import { getStoredProjectPath } from "./kv.ts";
 
 /** Resolve a project-relative path to an absolute one, rejecting traversal. */
-export function resolveInProject(sub: string) {
+export async function resolveInProject(sub: string) {
     if (sub.includes("..")) throw new Error("Path may not contain '..'");
-    const root = projectDir();
+    const root = await getStoredProjectPath();
     return sub ? `${root}/${sub}` : root;
+}
+
+/**
+ * Open a native OS folder picker and return the chosen absolute path, or null
+ * if the user cancelled (or no picker tool is available). Runs server-side, so
+ * the dialog appears on the machine hosting the backend.
+ */
+export async function pickProjectFolder(): Promise<string | null> {
+    const command = (() => {
+        switch (Deno.build.os) {
+            case "darwin":
+                return new Deno.Command("osascript", {
+                    args: [
+                        "-e",
+                        'POSIX path of (choose folder with prompt "选择项目文件夹")',
+                    ],
+                });
+            case "windows":
+                return new Deno.Command("powershell", {
+                    args: [
+                        "-NoProfile",
+                        "-Command",
+                        "Add-Type -AssemblyName System.Windows.Forms;" +
+                        "$f=New-Object System.Windows.Forms.FolderBrowserDialog;" +
+                        "if($f.ShowDialog() -eq 'OK'){$f.SelectedPath}",
+                    ],
+                });
+            default: // linux & others — needs `zenity` installed
+                return new Deno.Command("zenity", {
+                    args: [
+                        "--file-selection",
+                        "--directory",
+                        "--title=选择项目文件夹",
+                    ],
+                });
+        }
+    })();
+
+    const { success, stdout } = await command.output();
+    if (!success) return null; // cancelled, or the picker tool is missing
+    const out = new TextDecoder().decode(stdout).trim();
+    if (!out) return null;
+    // macOS `POSIX path` has a trailing slash; trim it (but keep root "/").
+    return out.length > 1 ? out.replace(/\/+$/, "") : out;
 }

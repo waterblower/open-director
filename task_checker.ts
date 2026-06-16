@@ -18,10 +18,16 @@ import {
     recordTaskStatus,
 } from "./db.ts";
 import { global_event_bus } from "./trpc/router.ts";
-import { projectDir } from "./project.ts";
+import { getStoredProjectPath } from "./kv.ts";
 
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
+        const project_path = await getStoredProjectPath();
+        if (!db || !project_path) {
+            console.log("no project openned, waiting...");
+            await delay(5000);
+            continue;
+        }
         // 1. Generations still worth polling: logged locally, not yet
         //    downloaded, and not already known to have failed.
         const pending = listPendingGenerations(db);
@@ -60,7 +66,11 @@ export async function check_and_download(): Promise<void | Error> {
 
             const err = await downloadVideo(
                 url,
-                join(await projectDir(), VIDEOS_DIR, `${task.id}.mp4`),
+                join(
+                    project_path,
+                    VIDEOS_DIR,
+                    `${task.id}.mp4`,
+                ),
             );
             if (err instanceof Error) {
                 console.error(`download ${task.id} failed:`, err);
@@ -110,20 +120,3 @@ async function downloadVideo(url: string, dest: string) {
         return err as Error;
     }
 }
-
-// Watch the project directory for filesystem changes and emit fs_changed events,
-// debounced so burst writes produce a single notification.
-// Changes inside `.project` (DB, generated videos, uploads) are ignored — those
-// are internal and would cause noisy re-renders on every generation download.
-(async () => {
-    const root = await projectDir();
-    const projectMeta = join(root, ".project");
-    const watcher = Deno.watchFs(root);
-    for await (const event of watcher) {
-        const relevant = event.paths.some((p) => !p.includes(projectMeta));
-        if (!relevant) continue;
-
-        await global_event_bus.put({ type: "fs_changed" });
-        await delay(200);
-    }
-})();

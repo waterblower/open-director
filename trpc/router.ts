@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
-import { projectDir, resolveInProject } from "../project.ts";
+import { pickProjectFolder, resolveInProject } from "../project.ts";
 import {
     createGeneration,
     db,
@@ -17,6 +17,7 @@ import {
     getGenerationRequest,
     listGenerations,
     recordGeneration,
+    reopenDb,
     updateGeneration,
 } from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
@@ -74,20 +75,48 @@ interface DirEntry {
 
 export const appRouter = router({
     listGenerations: publicProcedure.query(() => {
+        if (!db) {
+            throw new Error("Database not initialized");
+        }
         const generations = listGenerations(db);
         return generations;
+    }),
+
+    // The active project folder (absolute path).
+    getProjectDir: publicProcedure.query(async () => {
+        const projectDir = await getStoredProjectPath();
+        if (!projectDir) {
+            throw new Error("Project not initialized");
+        }
+        return projectDir;
+    }),
+
+    // Open a native OS folder picker, switch the active project to the chosen
+    // folder, and persist it (Deno KV) so the next launch reopens it. Returns
+    // the new path, or null if the user cancelled. The client should reload
+    // afterwards so all views re-fetch against the new project.
+    pickProject: publicProcedure.mutation(async () => {
+        const path = await pickProjectFolder();
+        if (!path) return null;
+        await setStoredProjectPath(path);
+        reopenDb(); // point the generations DB at the new project
+        return { path };
     }),
     // List generated videos in `<project>/.project/generations` as Task-like
     // objects. Creates the directory if it doesn't exist yet.
     listGeneratedVideos: publicProcedure.query(async () => {
-        const root = await projectDir();
+        const root = await getStoredProjectPath();
+        if (!root) {
+            console.error("No project path");
+            return [];
+        }
         const dir = `${root}/${VIDEOS_DIR}`;
         // Creates the dir if missing; a no-op (no throw) when it already exists.
         await Deno.mkdir(dir, { recursive: true });
 
-        // Index the SQLite log by task id (= the video filename stem) so each
-        // file on disk can be enriched with the request/task metadata we stored
-        // when it was generated.
+        if (!db) {
+            return [];
+        }
         const rows = listGenerations(db);
         const rowById = new Map(rows.map((r) => [r.task_id, r]));
         const onDisk = new Set<string>();
@@ -159,8 +188,10 @@ export const appRouter = router({
         .input(z.string().optional())
         .query(async (opts): Promise<DirEntry[]> => {
             console.log("listProjectFiles", opts.input);
-            const target = resolveInProject(opts.input ?? "");
-
+            const target = await resolveInProject(opts.input ?? "");
+            if (!target) {
+                return [];
+            }
             const entries: DirEntry[] = [];
             for await (const entry of Deno.readDir(target)) {
                 entries.push({
@@ -184,9 +215,11 @@ export const appRouter = router({
     // Open a project file/dir with the OS default program.
     openInDefaultApp: publicProcedure
         .input(z.string())
-        .mutation(async (opts): Promise<{ ok: true }> => {
+        .mutation(async (opts): Promise<{ ok: boolean }> => {
             const target = await resolveInProject(opts.input);
-
+            if (!target) {
+                return { ok: false };
+            }
             const command = Deno.build.os === "windows"
                 ? new Deno.Command("cmd", { args: ["/c", "start", "", target] })
                 : Deno.build.os === "darwin"
@@ -212,6 +245,9 @@ export const appRouter = router({
             const { src, destDir } = opts.input;
             const srcAbs = await resolveInProject(src);
             const destDirAbs = await resolveInProject(destDir);
+            if (!srcAbs || !destDirAbs) {
+                throw new Error("Invalid source or destination path");
+            }
 
             const base = src.split("/").pop();
             if (!base) throw new Error("Invalid source path");
@@ -247,6 +283,9 @@ export const appRouter = router({
 
             const srcAbs = await resolveInProject(path);
             const destAbs = await resolveInProject(dest);
+            if (!srcAbs || !destAbs) {
+                throw new Error("Invalid source or destination path");
+            }
             if (await exists(destAbs)) {
                 throw new Error(`已存在同名文件：${name}`);
             }
@@ -284,6 +323,9 @@ export const appRouter = router({
             audio: z.boolean(),
         }))
         .mutation(async (opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
             const {
                 prompt,
                 attachments,
@@ -401,18 +443,35 @@ export const appRouter = router({
     // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).
     getGenerationById: publicProcedure
         .input(z.string())
-        .query((opts) => getGenerationById(db, opts.input)),
+        .query((opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const gen = getGenerationById(db, opts.input);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            return gen;
+        }),
 
     // Read the generation log by Seedance task id.
     getGenerationByTaskId: publicProcedure
         .input(z.string())
-        .query((opts) => getGenerationByTaskId(db, opts.input)),
+        .query((opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            return getGenerationByTaskId(db, opts.input);
+        }),
 
     // The create request for a generation (by ULID id or task id), fetched on
     // demand when the user clicks "reuse prompt" — kept out of the list payload.
     getGenerationRequest: publicProcedure
         .input(z.string())
         .query((opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
             const result = getGenerationRequest(db, opts.input);
             if (result instanceof Error) {
                 throw result;
@@ -421,7 +480,11 @@ export const appRouter = router({
         }),
 
     getExplorerState: publicProcedure.query(async () => {
-        const path = join(projectDir(), ".project", "file-explorer.json");
+        const projectDir = await getStoredProjectPath();
+        if (!projectDir) {
+            throw new Error("Project not initialized");
+        }
+        const path = join(projectDir, ".project", "file-explorer.json");
         try {
             return JSON.parse(await Deno.readTextFile(path)) as {
                 expanded: string[];
@@ -438,7 +501,11 @@ export const appRouter = router({
             selected: z.string().nullable(),
         }))
         .mutation(async (opts) => {
-            const dir = join(await projectDir(), ".project");
+            const projectDir = await getStoredProjectPath();
+            if (!projectDir) {
+                throw new Error("Project not initialized");
+            }
+            const dir = join(projectDir, ".project");
             await Deno.mkdir(dir, { recursive: true });
             await Deno.writeTextFile(
                 join(dir, "file-explorer.json"),
@@ -461,6 +528,7 @@ export const appRouter = router({
 export type AppRouter = typeof appRouter;
 
 import { delay } from "@std/async";
+import { getStoredProjectPath, setStoredProjectPath } from "../kv.ts";
 (async () => {
     let i = 0;
     for (;;) {

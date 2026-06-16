@@ -1,5 +1,6 @@
 {
     "nodeModulesDir": "manual",
+    "unstable": ["kv"],
     "tasks": {
         "check": "deno fmt --check . && deno lint . && deno check",
         "dev": "vite",
@@ -20,7 +21,6 @@
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",
         "@std/async": "jsr:@std/async@^1.4.0",
-        "@std/dotenv": "jsr:@std/dotenv@^0.225.7",
         "@std/path": "jsr:@std/path@^1.0.9",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
         "@types/node": "npm:@types/node@^25.9.3",
@@ -37,7 +37,13 @@
         "zod": "npm:zod@^4.4.3"
     },
     "compilerOptions": {
-        "lib": ["dom", "dom.asynciterable", "dom.iterable", "deno.ns"],
+        "lib": [
+            "dom",
+            "dom.asynciterable",
+            "dom.iterable",
+            "deno.ns",
+            "deno.unstable"
+        ],
         "jsx": "precompile",
         "jsxImportSource": "preact",
         "jsxPrecompileSkipElements": [

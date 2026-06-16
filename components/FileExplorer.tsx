@@ -215,25 +215,56 @@ export function FileExplorer(props: {
                     <span class="text-sm font-semibold text-gray-800">
                         项目文件
                     </span>
-                    <button
-                        type="button"
-                        title="打开项目根目录"
-                        aria-label="打开项目根目录"
-                        onClick={() => openInDefault("")}
-                        class="-mr-1 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                    >
-                        <svg
-                            class="size-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
+                    <div class="flex items-center gap-0.5 -mr-1">
+                        <button
+                            type="button"
+                            title="选择项目文件夹"
+                            aria-label="选择项目文件夹"
+                            onClick={async () => {
+                                try {
+                                    const res = await trpc.pickProject.mutate();
+                                    // Reload so every view re-fetches against
+                                    // the newly-selected project.
+                                    if (res) location.reload();
+                                } catch (err) {
+                                    console.error(err);
+                                }
+                            }}
+                            class="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
                         >
-                            <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
-                        </svg>
-                    </button>
+                            <svg
+                                class="size-4"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                                <path d="M12 11v6M9 14h6" />
+                            </svg>
+                        </button>
+                        <button
+                            type="button"
+                            title="打开项目根目录"
+                            aria-label="打开项目根目录"
+                            onClick={() => openInDefault("")}
+                            class="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                        >
+                            <svg
+                                class="size-4"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div
                     // Dropping on empty space copies into the project root.

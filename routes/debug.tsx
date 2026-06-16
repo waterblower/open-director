@@ -11,10 +11,9 @@ const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
  * Task ids that already have a downloaded video file in the generations folder
  * (filename stem == task id). Checks the filesystem only — not the DB.
  */
-async function listDownloadedIds(): Promise<Set<string>> {
+async function listDownloadedIds(dir: string): Promise<Set<string>> {
     const ids = new Set<string>();
     try {
-        const dir = await resolveInProject(VIDEOS_DIR);
         for await (const entry of Deno.readDir(dir)) {
             if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
             ids.add(entry.name.replace(VIDEO_EXT, ""));
@@ -61,9 +60,35 @@ function fmtTime(unixSec: number): string {
 }
 
 export default define.page(async function Debug() {
+    const projectDir = await resolveInProject(VIDEOS_DIR);
+    if (!projectDir) {
+        return (
+            <div style="font: 14px/1.6 ui-sans-serif, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #6b7280; gap: 8px;">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="40"
+                    height="40"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="M3 7a2 2 0 0 1 2-2h3l2 2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+                <p style="margin: 0; font-size: 16px; font-weight: 600; color: #374151;">
+                    No project open
+                </p>
+                <p style="margin: 0; font-size: 13px;">
+                    Open a project to view Seedance debug info.
+                </p>
+            </div>
+        );
+    }
     const [result, downloaded] = await Promise.all([
         fetchAllTasks(),
-        listDownloadedIds(),
+        listDownloadedIds(projectDir),
     ]);
 
     return (

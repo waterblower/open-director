@@ -18,8 +18,7 @@ import {
     TaskSchema,
     TaskStatus,
 } from "./seedance.ts";
-import { projectDir } from "./project.ts";
-import { parse } from "node:path";
+import { getStoredProjectPath } from "./kv.ts";
 
 /**
  * A TEXT column holding JSON serialized from `schema`. Parses and validates it
@@ -33,10 +32,33 @@ function jsonColumn<T>(schema: z.ZodType<T>) {
     });
 }
 
-export const db = getDatabase(projectDir());
+// `let` (not `const`) so switching projects can swap in that project's DB; the
+// export is a live binding, so importers see the new handle after `reopenDb()`.
+export let db = await getDatabase();
+
+/**
+ * Reopen `db` against the current `projectDir()` — call after switching
+ * projects so reads/writes hit the new project's `.project/database.sqlite`.
+ */
+export async function reopenDb() {
+    if (!db) {
+        db = await getDatabase();
+        return;
+    }
+    try {
+        db.close();
+    } catch (e) {
+        throw e as Error;
+    }
+    db = await getDatabase();
+}
 
 /** Open (once per project root) the generations DB, creating it if needed. */
-function getDatabase(projectDir: string) {
+async function getDatabase() {
+    const projectDir = await getStoredProjectPath();
+    if (!projectDir) {
+        return null;
+    }
     const dir = join(projectDir, ".project");
     Deno.mkdirSync(dir, { recursive: true });
     const path = join(dir, "database.sqlite");
