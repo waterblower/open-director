@@ -378,11 +378,26 @@ export function FileExplorer(props: {
                         }px`,
                     }}
                 >
-                    <img
-                        src={projectFileUrl(preview.value.path)}
-                        alt=""
-                        class="block max-w-48 max-h-48 object-contain rounded"
-                    />
+                    {VIDEO_EXT.test(preview.value.path)
+                        ? (
+                            <video
+                                // `#t=0.1` seeks to the first frame so a poster
+                                // image shows without playing the video.
+                                src={projectFileUrl(preview.value.path) +
+                                    "#t=0.1"}
+                                preload="metadata"
+                                muted
+                                playsInline
+                                class="block max-w-48 max-h-48 object-contain rounded"
+                            />
+                        )
+                        : (
+                            <img
+                                src={projectFileUrl(preview.value.path)}
+                                alt=""
+                                class="block max-w-48 max-h-48 object-contain rounded"
+                            />
+                        )}
                 </div>
             )}
 
@@ -446,9 +461,19 @@ export interface FileEntry {
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|avif)$/i;
+const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
 function isImageFile(entry: FileEntry): boolean {
     return entry.isFile && IMAGE_EXT.test(entry.name);
+}
+
+function isVideoFile(entry: FileEntry): boolean {
+    return entry.isFile && VIDEO_EXT.test(entry.name);
+}
+
+/** Files that show a floating hover thumbnail (images + video first frame). */
+function isPreviewable(entry: FileEntry): boolean {
+    return isImageFile(entry) || isVideoFile(entry);
 }
 
 /** Order entries like the server does: directories first, then alphabetical. */
@@ -696,8 +721,9 @@ function Node(
                             }
                             callbacks.previewImage(null, 0, 0); // hide on drag
                         }}
-                        // Image files show a floating thumbnail near the cursor.
-                        onMouseMove={isImageFile(entry)
+                        // Images and videos show a floating thumbnail near the
+                        // cursor (videos render their first frame, not playing).
+                        onMouseMove={isPreviewable(entry)
                             ? (e) =>
                                 callbacks.previewImage(
                                     path,
@@ -705,7 +731,7 @@ function Node(
                                     e.clientY,
                                 )
                             : undefined}
-                        onMouseLeave={isImageFile(entry)
+                        onMouseLeave={isPreviewable(entry)
                             ? () => callbacks.previewImage(null, 0, 0)
                             : undefined}
                         // Directories accept dropped videos from the grid.
