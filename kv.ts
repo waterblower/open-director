@@ -18,3 +18,23 @@ export async function getStoredProjectPath(): Promise<string | null> {
 export async function setStoredProjectPath(path: string): Promise<void> {
     await kv.set(PROJECT_PATH_KEY, path);
 }
+
+/** A single KV entry, flattened for display. */
+export interface KvEntry {
+    key: Deno.KvKey;
+    value: unknown;
+    versionstamp: string;
+}
+
+/** Every entry currently stored in Deno KV, in key order. */
+export async function listAllEntries(): Promise<KvEntry[]> {
+    const entries: KvEntry[] = [];
+    for await (const entry of kv.list({ prefix: [] })) {
+        entries.push({
+            key: entry.key,
+            value: entry.value,
+            versionstamp: entry.versionstamp,
+        });
+    }
+    return entries;
+}
