@@ -83,7 +83,7 @@ export default function ImageGridEditor() {
 
     return (
         <div
-            class={`min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4 transition-colors ${
+            class={`h-screen bg-gray-50 flex flex-col items-center py-10 px-4 transition-colors ${
                 isDragging.value ? "bg-indigo-50" : ""
             }`}
             onDragOver={(e) => {
@@ -224,7 +224,7 @@ export default function ImageGridEditor() {
                     <div class="w-full max-w-4xl rounded-2xl overflow-hidden shadow border border-gray-200">
                         <canvas
                             ref={canvasRef}
-                            class="w-full h-auto block"
+                            class="w-full h-full object-contain block"
                         />
                     </div>
                 )
