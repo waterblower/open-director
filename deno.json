@@ -4,7 +4,7 @@
         "check": "deno fmt --check . && deno lint . && deno check",
         "dev": "vite",
         "build": "vite build",
-        "build-binary": "deno task build && deno compile -A --no-check --include ./_fresh --output _dist/open-director '#entry.ts'",
+        "build-binary": "deno compile -A --no-check --include ./_fresh --output _dist/open-director .",
         "start": "deno serve -A _fresh/server.js",
         "update": "deno run -A -r jsr:@fresh/update ."
     },
