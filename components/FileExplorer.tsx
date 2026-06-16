@@ -23,6 +23,15 @@ export function FileExplorer(props: {
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
+    const projectName = useSignal<string | null>(null);
+
+    // Resolve the project folder name for the sidebar header.
+    useEffect(() => {
+        trpc.getProjectDir.query().then((dir) => {
+            const name = dir.replace(/[/\\]+$/, "").split(/[/\\]/).pop();
+            if (name) projectName.value = name;
+        }).catch(() => {});
+    }, []);
 
     // Fetch the first level when the explorer loads.
     useEffect(() => {
@@ -212,8 +221,11 @@ export function FileExplorer(props: {
                 class="h-full z-30 flex flex-col bg-white/95 backdrop-blur border-r border-gray-200 flex-none select-none"
             >
                 <div class="px-4 h-12 flex items-center justify-between gap-2 border-b border-gray-100 shrink-0">
-                    <span class="text-sm font-semibold text-gray-800">
-                        项目文件
+                    <span
+                        class="text-sm font-semibold text-gray-800 truncate"
+                        title={projectName.value ?? undefined}
+                    >
+                        {projectName.value ?? "项目文件"}
                     </span>
                     <div class="flex items-center gap-0.5 -mr-1">
                         <button
