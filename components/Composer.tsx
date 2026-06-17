@@ -6,13 +6,12 @@ import {
 } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { seedance_client } from "../seedance_client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import type {
     AspectRatio,
     ContentItem,
     CreateTaskRequest,
-    Task,
+    SeedanceModel,
 } from "../seedance/seedance.ts";
 import { trpc } from "../trpc/client.ts";
 
@@ -28,7 +27,24 @@ type Attachment = {
 type Mode = "reference" | "frames";
 type Resolution = "480p" | "720p" | "1080p";
 type DurationMode = "seconds" | "smart";
-type Popover = "mode" | "settings" | null;
+type Popover = "model" | "mode" | "settings" | null;
+
+const SEEDANCE_MODELS = [
+    {
+        value: "doubao-seedance-2-0-260128",
+        label: "Seedance 2.0",
+        shortLabel: "2.0",
+    },
+    {
+        value: "doubao-seedance-2-0-mini-260615",
+        label: "Seedance 2.0 Mini",
+        shortLabel: "2.0 Mini",
+    },
+] as const satisfies readonly {
+    value: SeedanceModel;
+    label: string;
+    shortLabel: string;
+}[];
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -61,6 +77,7 @@ const COMPOSER_STATE_KEY = "composer.state.v1";
 /** Persisted composer fields (attachments are intentionally excluded). */
 interface ComposerState {
     prompt: string;
+    model: SeedanceModel;
     mode: Mode;
     ratio: AspectRatio;
     resolution: Resolution;
@@ -89,6 +106,15 @@ function kindOf(file: File): AttachmentKind {
     if (file.type.startsWith("video/")) return "video";
     if (file.type.startsWith("audio/")) return "audio";
     return "image";
+}
+
+function isSeedanceModel(value: unknown): value is SeedanceModel {
+    return SEEDANCE_MODELS.some((model) => model.value === value);
+}
+
+function getModelOption(value: SeedanceModel) {
+    return SEEDANCE_MODELS.find((model) => model.value === value) ??
+        SEEDANCE_MODELS[0];
 }
 
 // The API can't fetch blob: object URLs, so inline the bytes as a data URL
@@ -182,6 +208,16 @@ function FramesIcon(props: { class?: string }) {
     );
 }
 
+function SparklesIcon(props: { class?: string }) {
+    return (
+        <IconBase class={props.class}>
+            <path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" />
+            <path d="m5 14 .9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9z" />
+            <path d="m19 14 .7 1.6 1.6.7-1.6.7L19 19l-.7-1.6-1.6-.7 1.6-.7z" />
+        </IconBase>
+    );
+}
+
 function ChevronIcon(props: { up: boolean }) {
     return (
         <IconBase class="size-3.5">
@@ -249,6 +285,7 @@ export function Composer(props: {
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
+    const model = useSignal<SeedanceModel>("doubao-seedance-2-0-260128");
     const mode = useSignal<Mode>("reference");
     const ratio = useSignal<AspectRatio>("21:9");
     const resolution = useSignal<Resolution>("480p");
@@ -295,6 +332,7 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
+            if (isSeedanceModel(saved.model)) model.value = saved.model;
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
             if (saved.resolution) resolution.value = saved.resolution;
@@ -310,6 +348,7 @@ export function Composer(props: {
     useSignalEffect(() => {
         const state: ComposerState = {
             prompt: prompt.value,
+            model: model.value,
             mode: mode.value,
             ratio: ratio.value,
             resolution: resolution.value,
@@ -340,6 +379,7 @@ export function Composer(props: {
 
         // Settings — mirror how the request was assembled on submit: `duration`
         // is only present in "seconds" mode, omitted in "smart" mode.
+        model.value = req.model;
         if (req.ratio) ratio.value = req.ratio;
         if (req.resolution) resolution.value = req.resolution;
         if (typeof req.duration === "number") {
@@ -403,6 +443,8 @@ export function Composer(props: {
     const durationLabel = useComputed(() =>
         durationMode.value === "smart" ? "智能" : `${duration.value}秒`
     );
+
+    const selectedModel = useComputed(() => getModelOption(model.value));
 
     const canSubmit = useComputed(() =>
         prompt.value.trim().length > 0 || attachments.value.length > 0
@@ -759,6 +801,58 @@ export function Composer(props: {
 
                     {/* Toolbar */}
                     <div class="flex items-center gap-2">
+                        {/* Model selector */}
+                        <div class="relative">
+                            <button
+                                type="button"
+                                onClick={() => togglePopover("model")}
+                                class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                                title={selectedModel.value.value}
+                            >
+                                <SparklesIcon class="size-4" />
+                                {selectedModel.value.shortLabel}
+                                <ChevronIcon up={popover.value === "model"} />
+                            </button>
+
+                            {popover.value === "model" && (
+                                <div class="absolute left-0 bottom-full mb-2 z-20 w-72 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
+                                    <div class="px-3 py-2 text-sm text-gray-400">
+                                        选择模型
+                                    </div>
+                                    {SEEDANCE_MODELS.map((item) => (
+                                        <button
+                                            key={item.value}
+                                            type="button"
+                                            onClick={() => {
+                                                model.value = item.value;
+                                                popover.value = null;
+                                            }}
+                                            class={`w-full flex items-start gap-2 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 ${
+                                                model.value === item.value
+                                                    ? "bg-indigo-50 hover:bg-indigo-50"
+                                                    : ""
+                                            }`}
+                                        >
+                                            <SparklesIcon class="size-4 mt-0.5 text-gray-500" />
+                                            <span class="min-w-0">
+                                                <span class="block text-sm text-gray-800">
+                                                    {item.label}
+                                                </span>
+                                                <span class="block text-[11px] text-gray-400 truncate">
+                                                    {item.value}
+                                                </span>
+                                            </span>
+                                            {model.value === item.value && (
+                                                <span class="ml-auto mt-0.5">
+                                                    <CheckIcon />
+                                                </span>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {/* Mode selector */}
                         <div class="relative">
                             <button
@@ -1006,6 +1100,7 @@ export function Composer(props: {
                                     })),
                                 );
                                 const gen_p = trpc.generate.mutate({
+                                    model: model.value,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,

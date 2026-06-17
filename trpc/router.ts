@@ -354,6 +354,10 @@ export const appRouter = router({
     // polls + downloads the result, keyed by the same task id.
     generate: publicProcedure
         .input(z.object({
+            model: z.enum([
+                "doubao-seedance-2-0-260128",
+                "doubao-seedance-2-0-mini-260615",
+            ]),
             prompt: z.string(),
             attachments: z.array(z.object({
                 kind: z.enum(["image", "video", "audio"]),
@@ -385,6 +389,7 @@ export const appRouter = router({
                 duration,
                 audio,
                 resolution,
+                model,
             } = opts.input;
 
             // Assemble the multimodal content: optional text, then each
@@ -414,7 +419,7 @@ export const appRouter = router({
             }
 
             const request: CreateTaskRequest = {
-                model: "doubao-seedance-2-0-260128",
+                model,
                 content,
                 generate_audio: audio,
                 resolution,
