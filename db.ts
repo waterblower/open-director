@@ -349,6 +349,22 @@ export function getGenerationRequest(
     return parsed.data;
 }
 
+/**
+ * Fetch one generation row by either its ULID `id` or its Seedance `task_id`
+ * (a grid card may key on either). Returns the full row — request + polled task
+ * — for the details view. Null when there's no matching row.
+ */
+export function getGenerationDetail(
+    db: DatabaseSync,
+    idOrTaskId: string,
+): Generation | null | Error {
+    const row = db.prepare(
+        "SELECT * FROM Generations WHERE id = ? OR task_id = ? LIMIT 1",
+    ).get(idOrTaskId, idOrTaskId);
+    if (row === undefined) return null;
+    return parseRow(row);
+}
+
 /** All generations, newest created first. */
 export function listGenerations(db: DatabaseSync): Generation[] {
     const rows = db.prepare(

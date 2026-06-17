@@ -18,6 +18,7 @@ import {
     Generation,
     getGenerationById,
     getGenerationByTaskId,
+    getGenerationDetail,
     getGenerationRequest,
     listGenerations,
     recordGeneration,
@@ -532,6 +533,21 @@ export const appRouter = router({
                 throw new Error("Database not initialized");
             }
             return getGenerationByTaskId(db, opts.input);
+        }),
+
+    // Full generation row (request + polled task) by ULID id or task id,
+    // fetched on demand when the user opens a generation's details modal.
+    getGenerationDetail: publicProcedure
+        .input(z.string())
+        .query((opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const result = getGenerationDetail(db, opts.input);
+            if (result instanceof Error) {
+                throw result;
+            }
+            return result;
         }),
 
     // The create request for a generation (by ULID id or task id), fetched on

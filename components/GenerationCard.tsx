@@ -1,7 +1,11 @@
-import type { Signal } from "@preact/signals";
+import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
+import {
+    type GenerationDetail,
+    GenerationDetailModal,
+} from "./GenerationDetailModal.tsx";
 
 export type GeneratedVideo = {
     id: string;
@@ -26,6 +30,25 @@ export function GenerationCard(
     const isPending = generation.status === "running" ||
         generation.status === "queued";
     const isFailed = generation.status === "failed";
+
+    // Details modal: null = closed. Fetched on demand when the info button is
+    // clicked so the grid payload stays light.
+    const detail = useSignal<GenerationDetail | null>(null);
+    const detailOpen = useSignal(false);
+    const detailLoading = useSignal(false);
+
+    const openDetail = async () => {
+        detailOpen.value = true;
+        if (detail.value || detailLoading.value) return;
+        detailLoading.value = true;
+        try {
+            detail.value = await trpc.getGenerationDetail.query(generation.id);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            detailLoading.value = false;
+        }
+    };
     // Project-relative path, e.g. ".project/vid1.mp4"
     const rel = url
         ? decodeURIComponent(url.replace(/^\/project-file\//, ""))
@@ -167,12 +190,47 @@ export function GenerationCard(
                     </span>
                 </div>
             )}
+            {
+                /* Details — opens a modal with the bigger player, timing, token /
+                cost usage, and the prompt. Hidden while still pending. */
+            }
+            {!isPending && (
+                <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                        type="button"
+                        aria-label="查看详情"
+                        draggable={false}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            // Drop focus so the keyboard focus ring doesn't
+                            // reappear on this button when the modal is closed
+                            // with Escape.
+                            e.currentTarget.blur();
+                            openDetail();
+                        }}
+                        class="peer size-8 rounded-full bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm"
+                    >
+                        <InfoIcon class="size-4" />
+                    </button>
+                    <span class="pointer-events-none absolute left-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
+                        查看详情
+                    </span>
+                </div>
+            )}
             <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
                 <VideoIcon class="size-3.5 text-white/60 shrink-0" />
                 <span class="text-white/90 text-[11px] leading-tight truncate">
                     {generation.id}
                 </span>
             </div>
+            {detailOpen.value && (
+                <GenerationDetailModal
+                    generation={generation}
+                    detail={detail.value}
+                    loading={detailLoading.value}
+                    onClose={() => detailOpen.value = false}
+                />
+            )}
         </div>
     );
 }
@@ -207,6 +265,24 @@ function ReuseIcon(props: { class?: string }) {
         >
             <path d="M9 14 4 9l5-5" />
             <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+        </svg>
+    );
+}
+
+function InfoIcon(props: { class?: string }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
         </svg>
     );
 }
