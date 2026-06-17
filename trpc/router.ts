@@ -25,6 +25,7 @@ import {
     updateGeneration,
 } from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
+import { externalizeAttachments } from "../uploads.ts";
 import type {
     ContentItem,
     CreateTaskRequest,
@@ -418,6 +419,10 @@ export const appRouter = router({
                 }
             }
 
+            // The outbound request keeps attachments inline as data URLs —
+            // Seedance can't reach our local `/project-file` server. The stored
+            // request swaps each data URL for a content-addressed file reference
+            // so the DB row stays small (see uploads.ts).
             const request: CreateTaskRequest = {
                 model,
                 content,
@@ -426,8 +431,16 @@ export const appRouter = router({
                 ratio,
                 ...(durationMode === "seconds" ? { duration } : {}),
             };
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) {
+                throw new Error("Project not initialized");
+            }
+            const storedRequest: CreateTaskRequest = {
+                ...request,
+                content: await externalizeAttachments(projectRoot, content),
+            };
 
-            const generation = createGeneration(db, request);
+            const generation = createGeneration(db, storedRequest);
             if (generation instanceof Error) {
                 throw generation;
             }
@@ -482,7 +495,7 @@ export const appRouter = router({
             // Logging failure shouldn't fail the request — the task is created.
             const recordErr = recordGeneration(db, {
                 taskId: created.id,
-                requestJson: JSON.stringify(request),
+                requestJson: JSON.stringify(storedRequest),
                 createdAt: new Date().toISOString(),
                 status: task.status,
                 task,

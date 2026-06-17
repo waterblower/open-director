@@ -12,6 +12,10 @@ const CONTENT_TYPES: Record<string, string> = {
     jpeg: "image/jpeg",
     gif: "image/gif",
     webp: "image/webp",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
 };
 
 /** Stream `length` bytes from an already-seeked file, then close it. */
