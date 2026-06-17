@@ -21,6 +21,7 @@
     "imports": {
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",
+        "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.29.0",
         "@std/async": "jsr:@std/async@^1.4.0",
         "@std/path": "jsr:@std/path@^1.0.9",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
