@@ -14,6 +14,7 @@ import type {
     SeedanceModel,
 } from "../seedance/seedance.ts";
 import { trpc } from "../trpc/client.ts";
+import { delay } from "@std/async";
 
 type AttachmentKind = "image" | "video" | "audio";
 
@@ -542,6 +543,12 @@ export function Composer(props: {
         attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
         attachments.value = [];
         prompt.value = "";
+        const ta = promptRef.current;
+        if (ta) {
+            ta.value = "";
+            ta.scrollTop = 0;
+            ta.style.height = "";
+        }
         mention.value = null;
     };
 
@@ -1087,6 +1094,11 @@ export function Composer(props: {
                                 clearAll();
                                 const gen = await gen_p;
                                 console.log("generating", gen);
+                                if (gen.status == "failed") {
+                                    genError.value = gen.failed_reason!;
+                                    await delay(3000);
+                                    genError.value = null;
+                                }
                             }}
                         >
                             <ArrowUpIcon />

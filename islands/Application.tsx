@@ -1,4 +1,4 @@
-import { useSignal, useSignalEffect } from "@preact/signals";
+import { Signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
@@ -40,10 +40,10 @@ export default function Application() {
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
         const sub = trpc.backend_events.subscribe(undefined, {
-            onData: async (n) => {
-                console.log("tick", n);
-                if (n.type == "generation_finished") {
-                    const { gen } = n;
+            onData: async (event) => {
+                console.log("event", event);
+                if (event.type == "generation_finished") {
+                    const { gen } = event;
                     const next = new Map(generated_videos.value);
                     next.set(gen.id, {
                         id: gen.id,
@@ -53,17 +53,15 @@ export default function Application() {
                         hasRequest: gen.request_json != null,
                     });
                     generated_videos.value = next;
-                } else if (n.type == "generation_created") {
-                    const { gen } = n;
-                    const next = new Map(generated_videos.value);
-                    next.set(gen.id, {
+                } else if (event.type == "generation_created") {
+                    const { gen } = event;
+                    updateGenerations(generated_videos, {
                         id: gen.id,
                         status: "running",
                         createdAt: gen.created_at,
                         hasRequest: gen.request_json != null,
                     });
-                    generated_videos.value = next;
-                } else if (n.type == "fs_changed") {
+                } else if (event.type == "fs_changed") {
                     const pd = projectData.value;
                     if (!pd) return;
                     // "" = project root (paths are relative to the root).
@@ -204,4 +202,13 @@ function GridIcon() {
             <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
         </svg>
     );
+}
+
+function updateGenerations(
+    generations: Signal<Map<string, GeneratedVideo>>,
+    gen: GeneratedVideo,
+) {
+    const new_generations = new Map(generations.value);
+    new_generations.set(gen.id, gen);
+    generations.value = new_generations;
 }

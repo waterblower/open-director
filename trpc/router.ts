@@ -57,6 +57,14 @@ export const global_event_bus = chan<
             created_at: string;
         };
     }
+    | {
+        type: "generation_updated";
+        gen: {
+            id: string;
+            status: string;
+            failed_reason?: string;
+        };
+    }
     | { type: "fs_changed" }
 >();
 
@@ -452,6 +460,14 @@ export const appRouter = router({
                 if (gen instanceof Error) {
                     throw gen;
                 }
+                await global_event_bus.put({
+                    type: "generation_updated",
+                    gen: {
+                        id: gen.id,
+                        status: "failed",
+                        failed_reason: gen.failed_reason || "",
+                    },
+                });
                 return gen;
             }
 
