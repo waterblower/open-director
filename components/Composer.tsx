@@ -608,20 +608,6 @@ export function Composer(props: {
         }
     };
 
-    const mentionFromToolbar = () => {
-        const ta = promptRef.current;
-        if (!ta) return;
-        ta.focus();
-        const caret = ta.selectionStart ?? prompt.value.length;
-        const text = prompt.value;
-        prompt.value = text.slice(0, caret) + "@" + text.slice(caret);
-        // Measure after the new value has been rendered into the textarea
-        requestAnimationFrame(() => {
-            ta.setSelectionRange(caret + 1, caret + 1);
-            openMention(ta, caret);
-        });
-    };
-
     return (
         <>
             {/* Floating composer — centered within the content panel */}
@@ -1057,17 +1043,6 @@ export function Composer(props: {
                             }`}
                         >
                             <SpeakerIcon />
-                            输出声音
-                        </button>
-
-                        {/* Mention */}
-                        <button
-                            type="button"
-                            onClick={mentionFromToolbar}
-                            class="size-9 rounded-lg border border-gray-200 text-gray-600 text-sm hover:bg-gray-50"
-                            aria-label="引用素材"
-                        >
-                            @
                         </button>
 
                         <div class="flex-1" />
