@@ -48,9 +48,9 @@ export default function Application() {
                     next.set(gen.id, {
                         id: gen.id,
                         status: gen.status,
-                        createdAt: gen.created_at,
+                        created_at: gen.created_at,
                         url: get_video_url(gen.task_id!),
-                        hasRequest: gen.request_json != null,
+                        has_request: gen.request_json != null,
                     });
                     generated_videos.value = next;
                 } else if (event.type == "generation_created") {
@@ -58,8 +58,8 @@ export default function Application() {
                     addGenerations(generated_videos, {
                         id: gen.id,
                         status: "running",
-                        createdAt: gen.created_at,
-                        hasRequest: gen.request_json != null,
+                        created_at: gen.created_at,
+                        has_request: gen.request_json != null,
                     });
                 } else if (event.type == "fs_changed") {
                     const pd = projectData.value;

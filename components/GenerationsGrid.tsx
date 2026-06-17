@@ -17,11 +17,11 @@ export function GenerationsGrid(
     const order = useSignal<SortOrder>("newest");
     if (results.value.size === 0) return null;
 
-    // createdAt is an ISO-8601 UTC string, so it sorts lexicographically.
+    // created_at is an ISO-8601 UTC string, so it sorts lexicographically.
     // `dir` flips ascending (oldest first) ↔ descending (newest first).
     const dir = order.value === "newest" ? -1 : 1;
     const generations = [...results.value.values()].toSorted((a, b) =>
-        dir * a.createdAt.localeCompare(b.createdAt)
+        dir * a.created_at.localeCompare(b.created_at)
     );
 
     return (

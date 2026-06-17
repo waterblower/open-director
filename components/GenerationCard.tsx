@@ -6,12 +6,12 @@ import { trpc } from "../trpc/client.ts";
 export type GeneratedVideo = {
     id: string;
     status: string;
-    createdAt: string;
+    created_at: string;
     /** Whether a reusable create request is stored for this generation. The
      * request itself is fetched on demand when reuse is clicked. */
-    hasRequest: boolean;
+    has_request: boolean;
     url?: string;
-    failedReason?: string;
+    failed_reason?: string;
 };
 
 export function GenerationCard(
@@ -104,7 +104,7 @@ export function GenerationCard(
                             生成失败
                         </div>
                         <div class="text-gray-400 text-[11px] leading-snug">
-                            {generation.failedReason || "未知原因"}
+                            {generation.failed_reason || "未知原因"}
                         </div>
                     </div>
                 )
@@ -138,7 +138,7 @@ export function GenerationCard(
                 tooltip (vs native `title`) so it appears without
                 the browser's ~1s hover delay. */
             }
-            {generation.hasRequest && (
+            {generation.has_request && (
                 <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         type="button"

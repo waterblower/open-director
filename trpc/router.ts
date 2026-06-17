@@ -147,13 +147,13 @@ export const appRouter = router({
 
             const videos: {
                 id: string;
-                createdAt: string;
+                created_at: string;
                 status: TaskStatus;
                 /** Whether a create request is stored (drives the reuse button);
                  * the request itself is fetched on demand via getGenerationRequest. */
-                hasRequest: boolean;
+                has_request: boolean;
                 url?: string;
-                failedReason?: string;
+                failed_reason?: string;
             }[] = [];
 
             // 1. Video files on disk — these are the succeeded, downloaded outputs.
@@ -173,16 +173,16 @@ export const appRouter = router({
                         status: "succeeded",
                         id: taskId,
                         url: localUrl,
-                        createdAt: "",
-                        hasRequest: false,
+                        created_at: "",
+                        has_request: false,
                     });
                 } else {
                     videos.push({
                         status: "succeeded",
                         id: taskId,
                         url: localUrl,
-                        createdAt: row.created_at,
-                        hasRequest: row.request_json != null,
+                        created_at: row.created_at,
+                        has_request: row.request_json != null,
                     });
                 }
             }
@@ -197,9 +197,9 @@ export const appRouter = router({
                     // Not-yet-submitted generations have no task_id; key on the
                     // local ULID id instead.
                     id: row.task_id ?? row.id,
-                    createdAt: row.created_at,
-                    hasRequest: row.request_json != null,
-                    failedReason: row.failed_reason ?? undefined,
+                    created_at: row.created_at,
+                    has_request: row.request_json != null,
+                    failed_reason: row.failed_reason ?? undefined,
                 });
             }
 

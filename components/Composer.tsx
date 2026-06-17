@@ -1103,7 +1103,15 @@ export function Composer(props: {
 
                                     updateGenerations(
                                         props.generated_videos,
-                                        gen,
+                                        {
+                                            id: gen.id,
+                                            status: gen.status,
+                                            created_at: gen.created_at,
+                                            has_request:
+                                                gen.request_json != null,
+                                            failed_reason: gen.failed_reason ??
+                                                undefined,
+                                        },
                                     );
                                     await delay(3000);
                                     genError.value = null;
