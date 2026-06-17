@@ -15,6 +15,9 @@ import type {
 } from "../seedance/seedance.ts";
 import { trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
+import { GeneratedVideo } from "@/components/GenerationCard.tsx";
+import { updateGeneration } from "@/db.ts";
+import { updateGenerations } from "@/islands/Application.tsx";
 
 type AttachmentKind = "image" | "video" | "audio";
 
@@ -281,6 +284,7 @@ export function Composer(props: {
     composerInset: Signal<number>;
     /** A past generation's request to load in; consumed (cleared) when applied. */
     reusePrompt: Signal<CreateTaskRequest | null>;
+    generated_videos: Signal<Map<string, GeneratedVideo>>;
 }) {
     const { genError, composerInset, reusePrompt } = props;
 
@@ -1096,6 +1100,11 @@ export function Composer(props: {
                                 console.log("generating", gen);
                                 if (gen.status == "failed") {
                                     genError.value = gen.failed_reason!;
+
+                                    updateGenerations(
+                                        props.generated_videos,
+                                        gen,
+                                    );
                                     await delay(3000);
                                     genError.value = null;
                                 }

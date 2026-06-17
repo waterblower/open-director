@@ -55,7 +55,7 @@ export default function Application() {
                     generated_videos.value = next;
                 } else if (event.type == "generation_created") {
                     const { gen } = event;
-                    updateGenerations(generated_videos, {
+                    addGenerations(generated_videos, {
                         id: gen.id,
                         status: "running",
                         createdAt: gen.created_at,
@@ -163,6 +163,7 @@ export default function Application() {
                         genError={genError}
                         composerInset={composerInset}
                         reusePrompt={reusePrompt}
+                        generated_videos={generated_videos}
                     />
                 </div>
             </div>
@@ -204,11 +205,27 @@ function GridIcon() {
     );
 }
 
-function updateGenerations(
+export function updateGenerations(
+    generations: Signal<Map<string, GeneratedVideo>>,
+    gen: { id: string } & Partial<GeneratedVideo>,
+) {
+    console.log("updateGenerations", gen);
+    const new_generations = new Map(generations.value);
+    const existing_gen = new_generations.get(gen.id);
+    if (existing_gen) {
+        new_generations.set(gen.id, { ...existing_gen, ...gen });
+    } else {
+        throw new Error(`Generation ${gen.id} not found`);
+    }
+    generations.value = new_generations;
+}
+
+export function addGenerations(
     generations: Signal<Map<string, GeneratedVideo>>,
     gen: GeneratedVideo,
 ) {
     const new_generations = new Map(generations.value);
     new_generations.set(gen.id, gen);
+
     generations.value = new_generations;
 }

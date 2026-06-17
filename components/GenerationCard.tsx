@@ -21,10 +21,11 @@ export function GenerationCard(
         reusePrompt: Signal<CreateTaskRequest | null>;
     },
 ) {
-    const { generation: video, reusePrompt } = props;
-    const url = video.url;
-    const isPending = video.status === "running" || video.status === "queued";
-    const isFailed = video.status === "failed";
+    const { generation, reusePrompt } = props;
+    const url = generation.url;
+    const isPending = generation.status === "running" ||
+        generation.status === "queued";
+    const isFailed = generation.status === "failed";
     // Project-relative path, e.g. ".project/vid1.mp4"
     const rel = url
         ? decodeURIComponent(url.replace(/^\/project-file\//, ""))
@@ -103,7 +104,7 @@ export function GenerationCard(
                             生成失败
                         </div>
                         <div class="text-gray-400 text-[11px] leading-snug">
-                            {video.failedReason || "未知原因"}
+                            {generation.failedReason || "未知原因"}
                         </div>
                     </div>
                 )
@@ -137,7 +138,7 @@ export function GenerationCard(
                 tooltip (vs native `title`) so it appears without
                 the browser's ~1s hover delay. */
             }
-            {video.hasRequest && (
+            {generation.hasRequest && (
                 <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         type="button"
@@ -149,7 +150,7 @@ export function GenerationCard(
                             // not when the grid loads.
                             try {
                                 const req = await trpc.getGenerationRequest
-                                    .query(video.id);
+                                    .query(generation.id);
                                 if (req) {
                                     reusePrompt.value = req;
                                 }
@@ -169,7 +170,7 @@ export function GenerationCard(
             <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/75 to-transparent px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
                 <VideoIcon class="size-3.5 text-white/60 shrink-0" />
                 <span class="text-white/90 text-[11px] leading-tight truncate">
-                    {video.id}
+                    {generation.id}
                 </span>
             </div>
         </div>
