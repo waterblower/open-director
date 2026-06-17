@@ -13,6 +13,7 @@ import {
     SIDEBAR_MIN_WIDTH,
 } from "../components/FileExplorer.tsx";
 import { Composer } from "../components/Composer.tsx";
+import { SettingsModal } from "../components/SettingsModal.tsx";
 import { get_video_url } from "../utils.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
@@ -36,6 +37,9 @@ export default function Application() {
     // File Explorer — all project-scoped state lives in a single object that is
     // null until a project is open.
     const projectData = useSignal<ProjectData | null>(null);
+
+    // Settings modal (Seedance API key). Auto-opens on mount when no key is set.
+    const settingsOpen = useSignal(false);
 
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
@@ -89,6 +93,18 @@ export default function Application() {
             console.log("unsubscribing");
             sub.unsubscribe();
         };
+    }, []);
+
+    // Prompt for the Seedance API key on mount when none is configured yet.
+    useEffect(() => {
+        (async () => {
+            try {
+                const status = await trpc.getApiKeyStatus.query();
+                if (!status.hasKey) settingsOpen.value = true;
+            } catch (err) {
+                console.error(err);
+            }
+        })();
     }, []);
 
     // Load the current project (if any) once on mount.
@@ -182,8 +198,42 @@ export default function Application() {
                         图片加网格
                     </span>
                 </a>
+
+                <div class="flex-1" />
+
+                <button
+                    type="button"
+                    onClick={() => settingsOpen.value = true}
+                    title="设置"
+                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
+                >
+                    <SettingsIcon />
+                    <span class="whitespace-nowrap">设置</span>
+                </button>
             </div>
+
+            {settingsOpen.value && (
+                <SettingsModal onClose={() => settingsOpen.value = false} />
+            )}
         </div>
+    );
+}
+
+function SettingsIcon() {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
     );
 }
 

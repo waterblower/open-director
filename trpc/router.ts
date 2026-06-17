@@ -25,7 +25,7 @@ import {
     reopenDb,
     updateGeneration,
 } from "../db.ts";
-import { seedance_client } from "../seedance_client.ts";
+import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
 import { externalizeAttachments } from "../uploads.ts";
 import type {
     ContentItem,
@@ -38,6 +38,12 @@ import { get_video_url } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".project/generations";
+
+/** Obscure an API key for display, keeping only its head and tail. */
+function maskKey(key: string): string {
+    if (key.length <= 12) return "••••";
+    return `${key.slice(0, 8)}…${key.slice(-5)}`;
+}
 /** Directory under the project root where uploaded attachments are stored. */
 const UPLOADS_DIR = ".project/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
@@ -565,6 +571,27 @@ export const appRouter = router({
             return result;
         }),
 
+    // Whether a Seedance API key is configured, plus a masked preview for the
+    // settings modal. The full key is never sent to the client.
+    getApiKeyStatus: publicProcedure.query(async () => {
+        const key = await getStoredApiKey();
+        return {
+            hasKey: !!key,
+            masked: key ? maskKey(key) : null,
+        };
+    }),
+
+    // Save the Seedance API key (machine-level in Deno KV) and rebuild the
+    // shared client so subsequent generations use it immediately.
+    setApiKey: publicProcedure
+        .input(z.object({ apiKey: z.string().trim().min(1) }))
+        .mutation(async (opts) => {
+            const key = opts.input.apiKey;
+            await setStoredApiKey(key);
+            setSeedanceApiKey(key);
+            return { hasKey: true, masked: maskKey(key) };
+        }),
+
     saveExplorerState: publicProcedure
         .input(z.object({
             expanded: z.array(z.string()),
@@ -598,7 +625,12 @@ export const appRouter = router({
 export type AppRouter = typeof appRouter;
 
 import { delay } from "@std/async";
-import { getStoredProjectPath, setStoredProjectPath } from "../kv.ts";
+import {
+    getStoredApiKey,
+    getStoredProjectPath,
+    setStoredApiKey,
+    setStoredProjectPath,
+} from "../kv.ts";
 (async () => {
     let i = 0;
     for (;;) {

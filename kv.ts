@@ -7,6 +7,7 @@
 const kv = await Deno.openKv();
 
 const PROJECT_PATH_KEY = ["config", "project_path"] as const;
+const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
 
 /** The previously-chosen project folder, or null if one was never picked. */
 export async function getStoredProjectPath(): Promise<string | null> {
@@ -17,6 +18,17 @@ export async function getStoredProjectPath(): Promise<string | null> {
 /** Persist the chosen project folder so the next launch reopens it. */
 export async function setStoredProjectPath(path: string): Promise<void> {
     await kv.set(PROJECT_PATH_KEY, path);
+}
+
+/** The configured Seedance API key, or null if one was never set. */
+export async function getStoredApiKey(): Promise<string | null> {
+    const res = await kv.get<string>(SEEDANCE_API_KEY);
+    return res.value;
+}
+
+/** Persist the Seedance API key (machine-level, shared across projects). */
+export async function setStoredApiKey(key: string): Promise<void> {
+    await kv.set(SEEDANCE_API_KEY, key);
 }
 
 /** A single KV entry, flattened for display. */
