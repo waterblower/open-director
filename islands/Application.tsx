@@ -1,7 +1,7 @@
 import { useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance.ts";
+import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import type { GeneratedVideo } from "../components/GenerationCard.tsx";

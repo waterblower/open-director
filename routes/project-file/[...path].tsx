@@ -59,11 +59,9 @@ export const handler = define.handlers({
         let size = 0;
         let ext = "";
         for (const rel of candidates) {
-            let abs: string;
-            try {
-                abs = await resolveInProject_deprecated(rel);
-            } catch {
-                return new Response("Bad path", { status: 400 });
+            const abs = await resolveInProject_deprecated(rel);
+            if (!abs) {
+                throw new Error("Path not found");
             }
             try {
                 const stat = await Deno.stat(abs);

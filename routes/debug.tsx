@@ -3,7 +3,7 @@ import { define } from "../utils.ts";
 import { seedance_client } from "../seedance_client.ts";
 import { resolveInProject_deprecated } from "../project.ts";
 import { VIDEOS_DIR } from "../trpc/router.ts";
-import type { Task, TaskStatus } from "../seedance.ts";
+import type { Task, TaskStatus } from "../seedance/seedance.ts";
 
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 

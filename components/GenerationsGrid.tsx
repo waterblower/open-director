@@ -1,5 +1,5 @@
 import { type Signal, useSignal } from "@preact/signals";
-import type { CreateTaskRequest } from "../seedance.ts";
+import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
 
 type SortOrder = "newest" | "oldest";
