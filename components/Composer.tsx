@@ -13,7 +13,7 @@ import type {
     ContentItem,
     CreateTaskRequest,
     Task,
-} from "../seedance.ts";
+} from "../seedance/seedance.ts";
 import { trpc } from "../trpc/client.ts";
 
 type AttachmentKind = "image" | "video" | "audio";

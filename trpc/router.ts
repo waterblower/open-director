@@ -30,7 +30,7 @@ import type {
     CreateTaskRequest,
     Task,
     TaskStatus,
-} from "../seedance.ts";
+} from "../seedance/seedance.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url } from "../utils.ts";
 

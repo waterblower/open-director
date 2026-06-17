@@ -17,7 +17,7 @@ import {
     Task,
     TaskSchema,
     TaskStatus,
-} from "./seedance.ts";
+} from "./seedance/seedance.ts";
 import { getStoredProjectPath } from "./kv.ts";
 
 /**

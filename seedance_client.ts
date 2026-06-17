@@ -1,4 +1,4 @@
-import { SeedanceClient } from "./seedance.ts";
+import { SeedanceClient } from "./seedance/seedance.ts";
 
 // Shared, configured Seedance client used across islands/components.
 export const seedance_client = new SeedanceClient({

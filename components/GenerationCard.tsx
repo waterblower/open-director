@@ -1,5 +1,5 @@
 import type { Signal } from "@preact/signals";
-import type { CreateTaskRequest } from "../seedance.ts";
+import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
 

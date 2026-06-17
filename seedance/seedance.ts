@@ -54,7 +54,9 @@ export type Resolution = "480p" | "720p" | "1080p";
 
 export type ServiceTier = "default" | "flex";
 
-export type SeedanceModel = "doubao-seedance-2-0-260128";
+export type SeedanceModel =
+    | "doubao-seedance-2-0-260128"
+    | "doubao-seedance-2-0-mini-260615";
 
 /** Tool the model may call. Only supported by Seedance 2.0 & 2.0 fast. */
 export interface SeedanceTool {
