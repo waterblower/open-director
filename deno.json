@@ -7,7 +7,8 @@
         "build": "vite build",
         "build-binary": "deno compile -A --no-check --include ./_fresh --output _dist/open-director .",
         "start": "deno serve -A _fresh/server.js",
-        "update": "deno run -A -r jsr:@fresh/update ."
+        "update": "deno run -A -r jsr:@fresh/update .",
+        "loc": "find . -type f -not -path '*/_fresh/*' -not -path '*/node_modules/*' -not -path '*/.git/*' \\( -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.md' -o -name '*.html' \\) -print0 | xargs -0 wc -l | awk '$2!=\"total\"{e=$2;sub(/.*\\./,\"\",e);s[e]+=$1;t+=$1} END{for(k in s) printf \"%-6s %7d\\n\",k,s[k]; printf \"%-6s %7d\\n\",\"total\",t}'"
     },
     "fmt": { "indentWidth": 4 },
     "lint": {
