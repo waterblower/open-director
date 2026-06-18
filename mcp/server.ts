@@ -15,7 +15,12 @@
 import { z } from "zod";
 import { join } from "@std/path";
 import { appRouter, VIDEOS_DIR } from "../trpc/router.ts";
-import { db, getGenerationDetail, listGenerations, updateGeneration } from "../db.ts";
+import {
+    db,
+    getGenerationDetail,
+    listGenerations,
+    updateGeneration,
+} from "../db.ts";
 import { seedance_client } from "../seedance_client.ts";
 import { getStoredProjectPath } from "../kv.ts";
 import { estimateCost } from "../seedance/pricing.ts";
@@ -109,7 +114,15 @@ const TOOLS: Tool[] = [
                 },
                 ratio: {
                     type: "string",
-                    enum: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                    enum: [
+                        "16:9",
+                        "9:16",
+                        "1:1",
+                        "4:3",
+                        "3:4",
+                        "21:9",
+                        "adaptive",
+                    ],
                     description: "Aspect ratio. Defaults to adaptive.",
                 },
                 duration: {
@@ -119,7 +132,8 @@ const TOOLS: Tool[] = [
                 },
                 generate_audio: {
                     type: "boolean",
-                    description: "Generate a synced audio track. Defaults to true.",
+                    description:
+                        "Generate a synced audio track. Defaults to true.",
                 },
             },
             required: ["prompt"],
@@ -138,12 +152,16 @@ const TOOLS: Tool[] = [
                 duration: a.duration ?? 0,
                 audio: a.generate_audio,
             });
-            return JSON.stringify({
-                id: gen.id,
-                task_id: gen.task_id ?? null,
-                status: gen.status,
-                failed_reason: gen.failed_reason ?? null,
-            }, null, 2);
+            return JSON.stringify(
+                {
+                    id: gen.id,
+                    task_id: gen.task_id ?? null,
+                    status: gen.status,
+                    failed_reason: gen.failed_reason ?? null,
+                },
+                null,
+                2,
+            );
         },
     },
     {
@@ -174,7 +192,11 @@ const TOOLS: Tool[] = [
                 prompt: promptOf(r.request_json),
             }));
             return Promise.resolve(
-                JSON.stringify({ count: generations.length, generations }, null, 2),
+                JSON.stringify(
+                    { count: generations.length, generations },
+                    null,
+                    2,
+                ),
             );
         },
     },
@@ -188,7 +210,8 @@ const TOOLS: Tool[] = [
             properties: {
                 id: {
                     type: "string",
-                    description: "The generation id (ULID) or Seedance task id.",
+                    description:
+                        "The generation id (ULID) or Seedance task id.",
                 },
             },
             required: ["id"],
@@ -225,31 +248,31 @@ const TOOLS: Tool[] = [
             }
 
             const totalTokens = task?.usage?.total_tokens ?? null;
-            const hasVideoInput = row.request_json.content.some(
-                (c) => c.type === "video_url",
-            );
             const cost = totalTokens != null
-                ? estimateCost(totalTokens, hasVideoInput)
+                ? estimateCost(totalTokens, row.request_json.model)
                 : null;
-            const elapsed =
-                task?.created_at != null && task.updated_at != null
-                    ? task.updated_at - task.created_at
-                    : null;
+            const elapsed = task?.created_at != null && task.updated_at != null
+                ? task.updated_at - task.created_at
+                : null;
 
-            return JSON.stringify({
-                id: row.id,
-                task_id: row.task_id ?? null,
-                status,
-                prompt: promptOf(row.request_json),
-                failed_reason: row.failed_reason ?? null,
-                video_path: videoPath,
-                remote_video_url: task?.content?.video_url ?? null,
-                elapsed_seconds: elapsed,
-                total_tokens: totalTokens,
-                estimated_cost: cost
-                    ? { rmb: round2(cost.rmb), usd: round2(cost.usd) }
-                    : null,
-            }, null, 2);
+            return JSON.stringify(
+                {
+                    id: row.id,
+                    task_id: row.task_id ?? null,
+                    status,
+                    prompt: promptOf(row.request_json),
+                    failed_reason: row.failed_reason ?? null,
+                    video_path: videoPath,
+                    remote_video_url: task?.content?.video_url ?? null,
+                    elapsed_seconds: elapsed,
+                    total_tokens: totalTokens,
+                    estimated_cost: cost
+                        ? { rmb: round2(cost.rmb), usd: round2(cost.usd) }
+                        : null,
+                },
+                null,
+                2,
+            );
         },
     },
     {
@@ -261,7 +284,8 @@ const TOOLS: Tool[] = [
             properties: {
                 id: {
                     type: "string",
-                    description: "The generation id (ULID) or Seedance task id.",
+                    description:
+                        "The generation id (ULID) or Seedance task id.",
                 },
             },
             required: ["id"],
@@ -286,12 +310,16 @@ const TOOLS: Tool[] = [
                 failed_reason: "已取消 (cancelled via MCP)",
             });
             if (upErr instanceof Error) throw upErr;
-            return JSON.stringify({
-                id: row.id,
-                task_id: row.task_id,
-                status: res.status,
-                message: "Cancelled.",
-            }, null, 2);
+            return JSON.stringify(
+                {
+                    id: row.id,
+                    task_id: row.task_id,
+                    status: res.status,
+                    message: "Cancelled.",
+                },
+                null,
+                2,
+            );
         },
     },
 ];
@@ -391,7 +419,9 @@ async function handleSingle(msg: any): Promise<JsonRpcResponse | null> {
             } catch (err) {
                 // Tool failures are reported as a tool result (isError), not a
                 // protocol-level error, so the model can read the message.
-                const message = err instanceof Error ? err.message : String(err);
+                const message = err instanceof Error
+                    ? err.message
+                    : String(err);
                 return rpcResult(id, {
                     content: [{ type: "text", text: `Error: ${message}` }],
                     isError: true,

@@ -56,9 +56,8 @@ export function GenerationDetailModal(props: {
 
     const totalTokens = task?.usage?.total_tokens ?? null;
     const completionTokens = task?.usage?.completion_tokens ?? null;
-    const hasVideoInput = !!req?.content.some((c) => c.type === "video_url");
-    const cost = totalTokens != null
-        ? estimateCost(totalTokens, hasVideoInput)
+    const cost = totalTokens != null && req
+        ? estimateCost(totalTokens, req.model)
         : null;
 
     const prompt = promptText(req);

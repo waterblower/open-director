@@ -1,22 +1,24 @@
 /**
  * Rough cost estimates for Seedance video generations.
  *
- * Volcano Ark bills Seedance 2.0 by tokens, at a rate that depends on whether
- * the prompt included a reference video:
- *   - with video input (video editing):       ¥28 / million tokens
- *   - without video input (pure generation):   ¥46 / million tokens
- * (≈ ¥1 per second of generated video). Source: Volcano Ark pricing, Mar 2026
- * — https://www.volcengine.com/docs/82379/1544106
+ * Volcano Ark bills Seedance 2.0 by tokens, at a per-model rate:
+ *   - Seedance 2.0 (standard): ¥28 / million tokens
+ *   - Seedance 2.0 Fast:       ¥22 / million tokens
+ *   - Seedance 2.0 Mini:       ¥14 / million tokens
+ * Source: Volcano Ark pricing — https://www.volcengine.com/docs/82379/1544106
  *
- * These are approximate: actual billing can vary by resolution / service tier,
- * and the mini model's published rate isn't separated out, so it reuses the
- * Seedance 2.0 rates here.
+ * These are approximate: actual billing can vary by resolution / service tier.
  */
-const RMB_PER_MILLION_WITH_VIDEO = 28;
-const RMB_PER_MILLION_NO_VIDEO = 46;
+import type { SeedanceModel } from "./seedance.ts";
+
+const RMB_PER_MILLION: Record<SeedanceModel, number> = {
+    "doubao-seedance-2-0-260128": 28,
+    "doubao-seedance-2-0-fast-260128": 22,
+    "doubao-seedance-2-0-mini-260615": 14,
+};
 
 /** Rough CNY→USD rate, only for showing an approximate dollar figure. */
-const USD_PER_RMB = 1 / 7.2;
+const USD_PER_RMB = 1 / 7;
 
 export interface CostEstimate {
     /** Estimated cost in Chinese yuan. */
@@ -26,16 +28,15 @@ export interface CostEstimate {
 }
 
 /**
- * Estimate the rough cost of a generation from its total token usage and
- * whether the request used a reference video.
+ * Estimate the rough cost of a generation from its total token usage and the
+ * model it ran on.
  */
 export function estimateCost(
     totalTokens: number,
-    hasVideoInput: boolean,
+    model: SeedanceModel,
 ): CostEstimate {
-    const rate = hasVideoInput
-        ? RMB_PER_MILLION_WITH_VIDEO
-        : RMB_PER_MILLION_NO_VIDEO;
+    const rate = RMB_PER_MILLION[model] ??
+        RMB_PER_MILLION["doubao-seedance-2-0-260128"];
     const rmb = (totalTokens / 1_000_000) * rate;
     return { rmb, usd: rmb * USD_PER_RMB };
 }
