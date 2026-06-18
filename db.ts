@@ -269,6 +269,22 @@ export function listPendingGenerations(db: DatabaseSync) {
 }
 
 /**
+ * Generations we believe are downloaded (succeeded + downloaded_at set, with a
+ * task id). Used to reconcile the DB against disk and re-fetch any whose video
+ * file has gone missing.
+ */
+export function listDownloadedGenerations(db: DatabaseSync) {
+    const rows = db.prepare(
+        `SELECT id, task_id FROM Generations
+         WHERE task_id IS NOT NULL
+           AND downloaded_at IS NOT NULL
+           AND status = 'succeeded'`,
+    ).all();
+    return z.array(z.object({ id: z.string(), task_id: z.string() }))
+        .parse(rows);
+}
+
+/**
  * Record a generation's polled status (and task snapshot) without marking it
  * downloaded — e.g. to persist a terminal "failed" so it stops being polled.
  */
