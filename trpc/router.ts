@@ -364,6 +364,7 @@ export const appRouter = router({
         .input(z.object({
             model: z.enum([
                 "doubao-seedance-2-0-260128",
+                "doubao-seedance-2-0-fast-260128",
                 "doubao-seedance-2-0-mini-260615",
             ]),
             prompt: z.string(),

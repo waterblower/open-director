@@ -63,22 +63,27 @@ export function GenerationDetailModal(props: {
 
     const prompt = promptText(req);
 
-    // Reference inputs attached to the request, by kind.
-    const refImages =
-        req?.content.filter((c) => c.type === "image_url").length ??
-            0;
-    const refVideos =
-        req?.content.filter((c) => c.type === "video_url").length ??
-            0;
-    const refAudios =
-        req?.content.filter((c) => c.type === "audio_url").length ??
-            0;
+    // Reference inputs attached to the request, with their (servable
+    // /project-file or data:) URLs, in prompt order.
+    type Reference = { kind: "image" | "video" | "audio"; url: string };
+    const references = (req?.content ?? []).flatMap((c): Reference[] => {
+        if (c.type === "image_url") {
+            return [{ kind: "image", url: c.image_url.url }];
+        }
+        if (c.type === "video_url") {
+            return [{ kind: "video", url: c.video_url.url }];
+        }
+        if (c.type === "audio_url") {
+            return [{ kind: "audio", url: c.audio_url.url }];
+        }
+        return [];
+    });
 
     return (
         <div
             // Sits above the grid; click the backdrop (but not the card body)
             // to dismiss. Stop drag/click bubbling back to the draggable card.
-            class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 cursor-default"
             draggable={false}
             onClick={(e) => {
                 e.stopPropagation();
@@ -104,7 +109,6 @@ export function GenerationDetailModal(props: {
                         <video
                             src={url}
                             controls
-                            autoPlay
                             playsInline
                             class="w-full max-h-[55vh] bg-black rounded-t-2xl object-contain"
                         />
@@ -186,26 +190,57 @@ export function GenerationDetailModal(props: {
                                                 （无文本提示词）
                                             </div>
                                         )}
-                                    {(refImages + refVideos + refAudios) > 0 &&
-                                        (
-                                            <div class="mt-2 flex flex-wrap gap-1.5 text-[11px] text-gray-400">
-                                                {refImages > 0 && (
-                                                    <span class="rounded-full bg-gray-800 px-2 py-0.5">
-                                                        {refImages} 张参考图片
-                                                    </span>
-                                                )}
-                                                {refVideos > 0 && (
-                                                    <span class="rounded-full bg-gray-800 px-2 py-0.5">
-                                                        {refVideos} 个参考视频
-                                                    </span>
-                                                )}
-                                                {refAudios > 0 && (
-                                                    <span class="rounded-full bg-gray-800 px-2 py-0.5">
-                                                        {refAudios} 个参考音频
-                                                    </span>
+                                    {references.length > 0 && (
+                                        <div class="mt-3">
+                                            <div class="text-xs font-medium text-gray-400 mb-1.5">
+                                                参考输入
+                                            </div>
+                                            <div class="flex flex-wrap gap-2">
+                                                {references.map((ref, i) =>
+                                                    ref.kind === "audio"
+                                                        ? (
+                                                            <audio
+                                                                key={i}
+                                                                src={ref.url}
+                                                                controls
+                                                                class="h-9 w-56 max-w-full"
+                                                            />
+                                                        )
+                                                        : (
+                                                            <a
+                                                                key={i}
+                                                                href={ref.url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                class="block size-24 rounded-lg overflow-hidden bg-black/40 ring-1 ring-white/10 hover:ring-indigo-400 hover:cursor-pointer transition"
+                                                            >
+                                                                {ref.kind ===
+                                                                        "video"
+                                                                    ? (
+                                                                        <video
+                                                                            src={ref
+                                                                                .url}
+                                                                            muted
+                                                                            playsInline
+                                                                            preload="metadata"
+                                                                            class="size-full object-cover"
+                                                                        />
+                                                                    )
+                                                                    : (
+                                                                        <img
+                                                                            src={ref
+                                                                                .url}
+                                                                            alt="参考图片"
+                                                                            loading="lazy"
+                                                                            class="size-full object-cover"
+                                                                        />
+                                                                    )}
+                                                            </a>
+                                                        )
                                                 )}
                                             </div>
-                                        )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Settings */}

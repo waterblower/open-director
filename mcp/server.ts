@@ -66,6 +66,7 @@ const GenerateInput = z.object({
     prompt: z.string().min(1),
     model: z.enum([
         "doubao-seedance-2-0-260128",
+        "doubao-seedance-2-0-fast-260128",
         "doubao-seedance-2-0-mini-260615",
     ]).default("doubao-seedance-2-0-260128"),
     resolution: z.enum(["480p", "720p", "1080p"]).default("720p"),
@@ -96,6 +97,7 @@ const TOOLS: Tool[] = [
                     type: "string",
                     enum: [
                         "doubao-seedance-2-0-260128",
+                        "doubao-seedance-2-0-fast-260128",
                         "doubao-seedance-2-0-mini-260615",
                     ],
                     description: "Seedance model id. Defaults to 2.0.",

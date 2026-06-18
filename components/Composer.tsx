@@ -40,6 +40,11 @@ const SEEDANCE_MODELS = [
         shortLabel: "2.0",
     },
     {
+        value: "doubao-seedance-2-0-fast-260128",
+        label: "Seedance 2.0 Fast",
+        shortLabel: "2.0 Fast",
+    },
+    {
         value: "doubao-seedance-2-0-mini-260615",
         label: "Seedance 2.0 Mini",
         shortLabel: "2.0 Mini",
@@ -60,7 +65,20 @@ const RATIOS = [
     { value: "adaptive", w: 13, h: 10 },
 ] as const;
 
-const RESOLUTIONS: Resolution[] = ["480p", "720p", "1080p"];
+// Resolutions each model supports. Seedance 2.0 Fast can't output 1080p (see
+// the `resolution` docs in seedance.ts); the others support all three.
+const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
+    "doubao-seedance-2-0-260128": ["480p", "720p", "1080p"],
+    "doubao-seedance-2-0-fast-260128": ["480p", "720p"],
+    "doubao-seedance-2-0-mini-260615": ["480p", "720p"],
+};
+
+/** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
+function clampResolution(model: SeedanceModel, res: Resolution): Resolution {
+    const allowed = MODEL_RESOLUTIONS[model];
+    if (allowed.includes(res)) return res;
+    return allowed.includes("720p") ? "720p" : allowed[allowed.length - 1];
+}
 
 const KIND_LABEL: Record<AttachmentKind, string> = {
     image: "图片",
@@ -450,6 +468,14 @@ export function Composer(props: {
     );
 
     const selectedModel = useComputed(() => getModelOption(model.value));
+
+    // Resolutions allowed for the current model. Keep the selection valid when
+    // the model changes (e.g. switching to 2.0 Fast drops 1080p → 720p).
+    const resolutions = useComputed(() => MODEL_RESOLUTIONS[model.value]);
+    useSignalEffect(() => {
+        const clamped = clampResolution(model.value, resolution.value);
+        if (clamped !== resolution.value) resolution.value = clamped;
+    });
 
     const canSubmit = useComputed(() =>
         prompt.value.trim().length > 0 || attachments.value.length > 0
@@ -966,8 +992,14 @@ export function Composer(props: {
                                     <div class="text-sm text-gray-500 mb-2">
                                         分辨率
                                     </div>
-                                    <div class="grid grid-cols-3 bg-gray-100 rounded-lg p-1 mb-5">
-                                        {RESOLUTIONS.map((res) => (
+                                    <div
+                                        class="grid bg-gray-100 rounded-lg p-1 mb-5"
+                                        style={{
+                                            gridTemplateColumns:
+                                                `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
+                                        }}
+                                    >
+                                        {resolutions.value.map((res) => (
                                             <button
                                                 key={res}
                                                 type="button"

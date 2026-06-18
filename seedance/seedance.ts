@@ -56,6 +56,7 @@ export type ServiceTier = "default" | "flex";
 
 export type SeedanceModel =
     | "doubao-seedance-2-0-260128"
+    | "doubao-seedance-2-0-fast-260128"
     | "doubao-seedance-2-0-mini-260615";
 
 /** Tool the model may call. Only supported by Seedance 2.0 & 2.0 fast. */
@@ -242,6 +243,7 @@ const ServiceTierSchema = z.enum(["default", "flex"]) satisfies z.ZodType<
 >;
 const SeedanceModelSchema = z.enum([
     "doubao-seedance-2-0-260128",
+    "doubao-seedance-2-0-fast-260128",
     "doubao-seedance-2-0-mini-260615",
 ]) satisfies z.ZodType<SeedanceModel>;
 const TaskStatusSchema = z.enum([
