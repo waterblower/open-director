@@ -101,7 +101,7 @@ export function setLanguage(next: Language): void {
     }
 }
 
-const TEXTS: Record<string, { English: string; Chinese: string }> = {
+const TEXTS = {
     // FileExplorer
     open_a_project: { English: "Open a project", Chinese: "请打开项目" },
     select_project_folder: {
@@ -223,6 +223,6 @@ const TEXTS: Record<string, { English: string; Chinese: string }> = {
 };
 
 /** Look up `id`'s text in `lang`, falling back to the id itself if unknown. */
-export function get_text(id: string, lang: Language): string {
+export function get_text(id: keyof typeof TEXTS, lang: Language): string {
     return TEXTS[id]?.[lang] ?? id;
 }
