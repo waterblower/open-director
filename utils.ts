@@ -1,4 +1,5 @@
 import { createDefine } from "fresh";
+import { join } from "@std/path";
 
 // This specifies the type of "ctx.state" which is used to share
 // data among middlewares, layouts and routes.
@@ -13,7 +14,10 @@ export const define = createDefine<State>();
 // current page and so consumers can strip the `/project-file/` prefix to get a
 // project-relative path (e.g. for drag-and-drop copy).
 export function get_video_url(task_id: string) {
-    return `/project-file/.project/generations/${
-        encodeURIComponent(task_id)
-    }.mp4`;
+    return join(
+        "/project-file",
+        ".open-director",
+        "generations",
+        `${task_id}.mp4`,
+    );
 }

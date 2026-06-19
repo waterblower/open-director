@@ -14,7 +14,7 @@ import { join } from "@std/path";
 import { ContentItem } from "./seedance/seedance.ts";
 
 /** Project-relative uploads dir. Forward slashes — also used to build URLs. */
-const UPLOADS_DIR = ".project/uploads";
+const UPLOADS_DIR = ".open-director/uploads";
 
 /** Map a data-URL mime type to a file extension for the stored file. */
 const MIME_EXT: Record<string, string> = {

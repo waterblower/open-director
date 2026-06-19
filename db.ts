@@ -59,7 +59,7 @@ async function getDatabase() {
     if (!projectDir) {
         return null;
     }
-    const dir = join(projectDir, ".project");
+    const dir = join(projectDir, ".open-director");
     Deno.mkdirSync(dir, { recursive: true });
     const path = join(dir, "database.sqlite");
     const db = new DatabaseSync(path);

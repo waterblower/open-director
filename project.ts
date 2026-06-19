@@ -248,7 +248,7 @@ export async function loadFileExplorerState(
     let text: string;
     try {
         text = await Deno.readTextFile(
-            join(projectRootPath, ".project", "file-explorer.json"),
+            join(projectRootPath, ".open-director", "file-explorer.json"),
         );
     } catch (err) {
         if (err instanceof Deno.errors.NotFound) {

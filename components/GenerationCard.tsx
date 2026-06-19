@@ -49,7 +49,7 @@ export function GenerationCard(
             detailLoading.value = false;
         }
     };
-    // Project-relative path, e.g. ".project/vid1.mp4"
+    // Project-relative path, e.g. ".open-director/vid1.mp4"
     const rel = url
         ? decodeURIComponent(url.replace(/^\/project-file\//, ""))
         : "";

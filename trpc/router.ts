@@ -38,7 +38,7 @@ import { chan, closed } from "@blowater/csp";
 import { get_video_url } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
-export const VIDEOS_DIR = ".project/generations";
+export const VIDEOS_DIR = ".open-director/generations";
 
 /** Obscure an API key for display, keeping only its head and tail. */
 function maskKey(key: string): string {
@@ -46,7 +46,7 @@ function maskKey(key: string): string {
     return `${key.slice(0, 8)}…${key.slice(-5)}`;
 }
 /** Directory under the project root where uploaded attachments are stored. */
-const UPLOADS_DIR = ".project/uploads";
+const UPLOADS_DIR = ".open-director/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 export const global_event_bus = chan<
     | {
@@ -596,7 +596,7 @@ export const appRouter = router({
             if (!projectDir) {
                 throw new Error("Project not initialized");
             }
-            const dir = join(projectDir, ".project");
+            const dir = join(projectDir, ".open-director");
             await Deno.mkdir(dir, { recursive: true });
             await Deno.writeTextFile(
                 join(dir, "file-explorer.json"),
