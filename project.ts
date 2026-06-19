@@ -1,5 +1,13 @@
 import { join } from "@std/path";
+import { z } from "zod";
 import { getStoredProjectPath } from "./kv.ts";
+
+const FileExplorerStateSchema = z.object({
+    expanded: z.array(z.string()).default([]),
+    selected: z.string().nullable().default(null),
+});
+
+type FileExplorerState = z.infer<typeof FileExplorerStateSchema>;
 
 const WINDOWS_FOLDER_PICKER_SCRIPT = String.raw`
 Add-Type -TypeDefinition @"
@@ -227,4 +235,35 @@ export async function pickProjectFolder(): Promise<string | null> {
     // macOS `POSIX path` has a trailing slash; trim it (but keep root "/").
     console.log("pickProjectFolder", path);
     return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+/**
+ * Load the saved file-explorer state (expanded dirs + selection) for a
+ * project. Returns the defaults when none was saved yet, or an `Error` if
+ * the saved file exists but couldn't be read or didn't match the schema.
+ */
+export async function loadFileExplorerState(
+    projectRootPath: string,
+): Promise<FileExplorerState | Error> {
+    let text: string;
+    try {
+        text = await Deno.readTextFile(
+            join(projectRootPath, ".project", "file-explorer.json"),
+        );
+    } catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+            return { expanded: [], selected: null };
+        }
+        return err as Error;
+    }
+
+    let json: unknown;
+    try {
+        json = JSON.parse(text);
+    } catch (err) {
+        return err as Error;
+    }
+
+    const parsed = FileExplorerStateSchema.safeParse(json);
+    return parsed.success ? parsed.data : parsed.error;
 }

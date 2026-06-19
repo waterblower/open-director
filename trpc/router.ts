@@ -8,6 +8,7 @@ import { z } from "zod";
 import { join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
 import {
+    loadFileExplorerState,
     pickProjectFolder,
     resolveInProject,
     resolveInProject_deprecated,
@@ -237,19 +238,11 @@ export const appRouter = router({
         const rootPath = await getStoredProjectPath();
         if (!rootPath) return null;
 
-        let expanded: string[] = [];
-        let selected: string | null = null;
-        try {
-            const saved = JSON.parse(
-                await Deno.readTextFile(
-                    join(rootPath, ".project", "file-explorer.json"),
-                ),
-            ) as { expanded?: string[]; selected?: string | null };
-            if (Array.isArray(saved.expanded)) expanded = saved.expanded;
-            if (typeof saved.selected === "string") selected = saved.selected;
-        } catch {
-            // No saved explorer state yet — start fresh.
+        const savedState = await loadFileExplorerState(rootPath);
+        if (savedState instanceof Error) {
+            throw savedState;
         }
+        const { expanded, selected } = savedState;
 
         const rootEntries = await listDir(rootPath);
 

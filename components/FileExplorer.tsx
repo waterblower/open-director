@@ -47,6 +47,16 @@ export function FileExplorer(props: {
         ).pop();
     }
 
+    // The project root rendered as the tree's top-level folder ("" = root),
+    // so it gets the same chevron/context-menu/drop handling as any other
+    // folder — no separate "open root in default app" button needed.
+    const rootEntry: FileEntry = {
+        name: projectName ?? "",
+        isDirectory: true,
+        isFile: false,
+        isSymlink: false,
+    };
+
     const loadChildren = makeLoadChildren(projectData);
 
     // Persist expanded dirs + selection whenever they change. The `hydrated`
@@ -265,25 +275,6 @@ export function FileExplorer(props: {
                                 <path d="M12 11v6M9 14h6" />
                             </svg>
                         </button>
-                        <button
-                            type="button"
-                            title="打开项目根目录"
-                            aria-label="打开项目根目录"
-                            onClick={() => openInDefault("")}
-                            class="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                        >
-                            <svg
-                                class="size-4"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
-                            </svg>
-                        </button>
                     </div>
                 </div>
                 <div
@@ -336,22 +327,15 @@ export function FileExplorer(props: {
                                 请选择一个项目文件夹
                             </div>
                         )
-                        : projectData.value.rootEntries.length === 0
-                        ? (
-                            <div class="px-4 py-3 text-xs text-gray-400">
-                                暂无文件
-                            </div>
-                        )
-                        : projectData.value.rootEntries.map((entry) => (
+                        : (
                             <Node
-                                key={entry.name}
-                                entry={entry}
-                                path={entry.name}
+                                entry={rootEntry}
+                                path=""
                                 depth={0}
                                 tree={tree}
                                 callbacks={callbacks}
                             />
-                        ))}
+                        )}
                 </div>
 
                 {/* Resize divider */}
@@ -443,16 +427,18 @@ export function FileExplorer(props: {
                                 复制
                             </button>
                         )}
-                        <button
-                            type="button"
-                            onClick={() => {
-                                renaming.value = menu.value!.path;
-                                menu.value = null;
-                            }}
-                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                        >
-                            重命名
-                        </button>
+                        {menu.value.path !== "" && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    renaming.value = menu.value!.path;
+                                    menu.value = null;
+                                }}
+                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                            >
+                                重命名
+                            </button>
+                        )}
                     </div>
                 </>
             )}
@@ -674,7 +660,8 @@ function Node(
     const isOpen = pd?.expanded.has(path) ?? false;
     const isActive = pd?.selected === path;
     const isRenaming = tree.renaming.value === path;
-    const kids = pd?.childrenByPath[path];
+    // Root entries live in `rootEntries`, not `childrenByPath` (keyed "" = root).
+    const kids = path === "" ? pd?.rootEntries : pd?.childrenByPath[path];
 
     const onClick = () => {
         const cur = tree.projectData.value;
@@ -693,7 +680,8 @@ function Node(
             next.delete(path);
         } else {
             next.add(path);
-            callbacks.loadChildren(path);
+            // Root's children are `rootEntries`, already loaded — no fetch.
+            if (path !== "") callbacks.loadChildren(path);
         }
         tree.projectData.value = { ...cur, selected: path, expanded: next };
     };
