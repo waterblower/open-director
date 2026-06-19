@@ -200,8 +200,6 @@ export default function Application() {
 
     // Settings modal (Seedance API key). Auto-opens on mount when no key is set.
     const settingsOpen = useSignal(false);
-    const languageMenuOpen = useSignal(false);
-    const languageMenuRef = useRef<HTMLDivElement>(null);
 
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
@@ -319,24 +317,6 @@ export default function Application() {
         localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value));
     }, [sidebarWidth.value]);
 
-    useEffect(() => {
-        const onPointerDown = (e: PointerEvent) => {
-            if (!languageMenuOpen.value) return;
-            const target = e.target as Node | null;
-            if (target && languageMenuRef.current?.contains(target)) return;
-            languageMenuOpen.value = false;
-        };
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") languageMenuOpen.value = false;
-        };
-        globalThis.addEventListener("pointerdown", onPointerDown);
-        globalThis.addEventListener("keydown", onKeyDown);
-        return () => {
-            globalThis.removeEventListener("pointerdown", onPointerDown);
-            globalThis.removeEventListener("keydown", onKeyDown);
-        };
-    }, []);
-
     return (
         <div class="h-screen flex flex-col bg-[#f7f8fa] overflow-hidden">
             {/* Main area: sidebar + content, fills all space above the bottom bar */}
@@ -364,87 +344,113 @@ export default function Application() {
                 </div>
             </div>
 
-            {/* Bottom bar */}
-            <div class="flex-none flex items-center gap-1 px-3 py-1.5 border-t border-gray-200 bg-white/80 backdrop-blur-sm select-none">
-                <a
-                    href="/image"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={get_text("image_grid_editor", language.value)}
-                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
-                >
-                    <GridIcon />
-                    <span class="whitespace-nowrap">
-                        {get_text("image_grid_editor", language.value)}
-                    </span>
-                </a>
-
-                <div class="flex-1" />
-
-                <div ref={languageMenuRef} class="relative">
-                    <button
-                        type="button"
-                        title={get_text("language_label", language.value)}
-                        aria-haspopup="menu"
-                        aria-expanded={languageMenuOpen.value}
-                        onClick={() =>
-                            languageMenuOpen.value = !languageMenuOpen.value}
-                        class="flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
-                    >
-                        <span class="whitespace-nowrap">
-                            {LANGUAGE_NAMES[language.value]}
-                        </span>
-                        <ChevronIcon up={languageMenuOpen.value} />
-                    </button>
-
-                    {languageMenuOpen.value && (
-                        <div
-                            role="menu"
-                            class="absolute right-0 bottom-full mb-2 z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl"
-                        >
-                            <div class="px-3 py-2 text-xs text-gray-400">
-                                {get_text("language_label", language.value)}
-                            </div>
-                            {SUPPORTED_LANGUAGES.map((item) => (
-                                <button
-                                    key={item}
-                                    type="button"
-                                    role="menuitemradio"
-                                    aria-checked={language.value === item}
-                                    onClick={() => {
-                                        setLanguage(item);
-                                        languageMenuOpen.value = false;
-                                    }}
-                                    class={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-gray-700 hover:bg-gray-50 ${
-                                        language.value === item
-                                            ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-50"
-                                            : ""
-                                    }`}
-                                >
-                                    <span>{LANGUAGE_NAMES[item]}</span>
-                                    {language.value === item && <CheckIcon />}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                <button
-                    type="button"
-                    onClick={() => settingsOpen.value = true}
-                    title={get_text("settings", language.value)}
-                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
-                >
-                    <SettingsIcon />
-                    <span class="whitespace-nowrap">
-                        {get_text("settings", language.value)}
-                    </span>
-                </button>
-            </div>
+            <Footbar onOpenSettings={() => settingsOpen.value = true} />
 
             {settingsOpen.value && (
                 <SettingsModal onClose={() => settingsOpen.value = false} />
             )}
+        </div>
+    );
+}
+
+function Footbar(props: { onOpenSettings: () => void }) {
+    const languageMenuOpen = useSignal(false);
+    const languageMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const onPointerDown = (e: PointerEvent) => {
+            if (!languageMenuOpen.value) return;
+            const target = e.target as Node | null;
+            if (target && languageMenuRef.current?.contains(target)) return;
+            languageMenuOpen.value = false;
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") languageMenuOpen.value = false;
+        };
+        globalThis.addEventListener("pointerdown", onPointerDown);
+        globalThis.addEventListener("keydown", onKeyDown);
+        return () => {
+            globalThis.removeEventListener("pointerdown", onPointerDown);
+            globalThis.removeEventListener("keydown", onKeyDown);
+        };
+    }, []);
+
+    return (
+        <div class="flex-none flex items-center gap-1 px-3 py-1.5 border-t border-gray-200 bg-white/80 backdrop-blur-sm select-none">
+            <a
+                href="/image"
+                target="_blank"
+                rel="noopener noreferrer"
+                title={get_text("image_grid_editor", language.value)}
+                class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
+            >
+                <GridIcon />
+                <span class="whitespace-nowrap">
+                    {get_text("image_grid_editor", language.value)}
+                </span>
+            </a>
+
+            <div class="flex-1" />
+
+            <div ref={languageMenuRef} class="relative">
+                <button
+                    type="button"
+                    title={get_text("language_label", language.value)}
+                    aria-haspopup="menu"
+                    aria-expanded={languageMenuOpen.value}
+                    onClick={() =>
+                        languageMenuOpen.value = !languageMenuOpen.value}
+                    class="flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
+                >
+                    <span class="whitespace-nowrap">
+                        {LANGUAGE_NAMES[language.value]}
+                    </span>
+                    <ChevronIcon up={languageMenuOpen.value} />
+                </button>
+
+                {languageMenuOpen.value && (
+                    <div
+                        role="menu"
+                        class="absolute right-0 bottom-full mb-2 z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl"
+                    >
+                        <div class="px-3 py-2 text-xs text-gray-400">
+                            {get_text("language_label", language.value)}
+                        </div>
+                        {SUPPORTED_LANGUAGES.map((item) => (
+                            <button
+                                key={item}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={language.value === item}
+                                onClick={() => {
+                                    setLanguage(item);
+                                    languageMenuOpen.value = false;
+                                }}
+                                class={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-gray-700 hover:bg-gray-50 ${
+                                    language.value === item
+                                        ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-50"
+                                        : ""
+                                }`}
+                            >
+                                <span>{LANGUAGE_NAMES[item]}</span>
+                                {language.value === item && <CheckIcon />}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <button
+                type="button"
+                onClick={props.onOpenSettings}
+                title={get_text("settings", language.value)}
+                class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
+            >
+                <SettingsIcon />
+                <span class="whitespace-nowrap">
+                    {get_text("settings", language.value)}
+                </span>
+            </button>
         </div>
     );
 }
