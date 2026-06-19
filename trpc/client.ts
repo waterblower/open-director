@@ -223,6 +223,6 @@ const TEXTS = {
 };
 
 /** Look up `id`'s text in `lang`, falling back to the id itself if unknown. */
-export function get_text(id: keyof typeof TEXTS, lang: Language): string {
-    return TEXTS[id]?.[lang] ?? id;
+export function get_text(id: keyof typeof TEXTS, lang?: Language): string {
+    return TEXTS[id]?.[lang || language.value] ?? id;
 }
