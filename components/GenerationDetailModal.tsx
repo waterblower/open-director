@@ -3,18 +3,20 @@ import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { estimateCost } from "../seedance/pricing.ts";
 import type { trpc } from "../trpc/client.ts";
 import type { GeneratedVideo } from "./GenerationCard.tsx";
+import { get_text, type Language, language } from "../islands/Application.tsx";
 
 /** The full generation row returned by the details endpoint. */
 export type GenerationDetail = Awaited<
     ReturnType<typeof trpc.getGenerationDetail.query>
 >;
 
-/** Human-readable elapsed time, e.g. "1分23秒" or "12秒". */
-function formatDuration(seconds: number): string {
+/** Human-readable elapsed time, e.g. "1m 23s" or "12s". */
+function formatDuration(seconds: number, lang: Language): string {
     const s = Math.max(0, Math.round(seconds));
-    if (s < 60) return `${s}秒`;
+    const sUnit = get_text("s_unit", lang);
+    if (s < 60) return `${s}${sUnit}`;
     const m = Math.floor(s / 60);
-    return `${m}分${s % 60}秒`;
+    return `${m}${get_text("m_unit", lang)}${s % 60}${sUnit}`;
 }
 
 /** Concatenated text of the prompt's text content items. */
@@ -95,7 +97,7 @@ export function GenerationDetailModal(props: {
             >
                 <button
                     type="button"
-                    aria-label="关闭"
+                    aria-label={get_text("close", language.value)}
                     onClick={onClose}
                     class="absolute top-3 right-3 z-10 size-8 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-sm hover:cursor-pointer transition-colors"
                 >
@@ -134,13 +136,13 @@ export function GenerationDetailModal(props: {
                         ? (
                             <div class="flex items-center gap-2 text-sm text-gray-400">
                                 <span class="size-4 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
-                                加载详情中…
+                                {get_text("loading_details", language.value)}
                             </div>
                         )
                         : !detail
                         ? (
                             <div class="text-sm text-gray-500">
-                                没有为此生成保存的详细信息。
+                                {get_text("no_saved_details", language.value)}
                             </div>
                         )
                         : (
@@ -148,9 +150,15 @@ export function GenerationDetailModal(props: {
                                 {/* Stats: time spent + token / cost usage */}
                                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                     <Stat
-                                        label="耗时"
+                                        label={get_text(
+                                            "elapsed",
+                                            language.value,
+                                        )}
                                         value={elapsed != null
-                                            ? formatDuration(elapsed)
+                                            ? formatDuration(
+                                                elapsed,
+                                                language.value,
+                                            )
                                             : "—"}
                                     />
                                     <Stat
@@ -159,11 +167,19 @@ export function GenerationDetailModal(props: {
                                             ? totalTokens.toLocaleString()
                                             : "—"}
                                         hint={completionTokens != null
-                                            ? `生成 ${completionTokens.toLocaleString()}`
+                                            ? `${
+                                                get_text(
+                                                    "generated",
+                                                    language.value,
+                                                )
+                                            } ${completionTokens.toLocaleString()}`
                                             : undefined}
                                     />
                                     <Stat
-                                        label="预估费用"
+                                        label={get_text(
+                                            "estimated_cost",
+                                            language.value,
+                                        )}
                                         value={cost != null
                                             ? `¥${cost.rmb.toFixed(2)}`
                                             : "—"}
@@ -176,7 +192,7 @@ export function GenerationDetailModal(props: {
                                 {/* Prompt */}
                                 <div>
                                     <div class="text-xs font-medium text-gray-400 mb-1.5">
-                                        提示词
+                                        {get_text("prompt", language.value)}
                                     </div>
                                     {prompt
                                         ? (
@@ -186,13 +202,19 @@ export function GenerationDetailModal(props: {
                                         )
                                         : (
                                             <div class="text-sm text-gray-500">
-                                                （无文本提示词）
+                                                {get_text(
+                                                    "no_text_prompt",
+                                                    language.value,
+                                                )}
                                             </div>
                                         )}
                                     {references.length > 0 && (
                                         <div class="mt-3">
                                             <div class="text-xs font-medium text-gray-400 mb-1.5">
-                                                参考输入
+                                                {get_text(
+                                                    "reference_inputs",
+                                                    language.value,
+                                                )}
                                             </div>
                                             <div class="flex flex-wrap gap-2">
                                                 {references.map((ref, i) =>
@@ -229,7 +251,11 @@ export function GenerationDetailModal(props: {
                                                                         <img
                                                                             src={ref
                                                                                 .url}
-                                                                            alt="参考图片"
+                                                                            alt={get_text(
+                                                                                "reference_image",
+                                                                                language
+                                                                                    .value,
+                                                                            )}
                                                                             loading="lazy"
                                                                             class="size-full object-cover"
                                                                         />
@@ -245,36 +271,68 @@ export function GenerationDetailModal(props: {
                                 {/* Settings */}
                                 {req && (
                                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                        <Stat label="模型" value={req.model} />
+                                        <Stat
+                                            label={get_text(
+                                                "model",
+                                                language.value,
+                                            )}
+                                            value={req.model}
+                                        />
                                         {req.resolution && (
                                             <Stat
-                                                label="分辨率"
+                                                label={get_text(
+                                                    "resolution",
+                                                    language.value,
+                                                )}
                                                 value={req.resolution}
                                             />
                                         )}
                                         {req.ratio && (
                                             <Stat
-                                                label="画幅"
+                                                label={get_text(
+                                                    "aspect_ratio",
+                                                    language.value,
+                                                )}
                                                 value={req.ratio}
                                             />
                                         )}
                                         {req.duration != null && (
                                             <Stat
-                                                label="时长"
-                                                value={`${req.duration}秒`}
+                                                label={get_text(
+                                                    "duration",
+                                                    language.value,
+                                                )}
+                                                value={`${req.duration}${
+                                                    get_text(
+                                                        "s_unit",
+                                                        language.value,
+                                                    )
+                                                }`}
                                             />
                                         )}
                                         {req.generate_audio != null && (
                                             <Stat
-                                                label="音频"
+                                                label={get_text(
+                                                    "audio",
+                                                    language.value,
+                                                )}
                                                 value={req.generate_audio
-                                                    ? "开"
-                                                    : "关"}
+                                                    ? get_text(
+                                                        "on",
+                                                        language.value,
+                                                    )
+                                                    : get_text(
+                                                        "off",
+                                                        language.value,
+                                                    )}
                                             />
                                         )}
                                         {req.seed != null && req.seed >= 0 && (
                                             <Stat
-                                                label="种子"
+                                                label={get_text(
+                                                    "seed",
+                                                    language.value,
+                                                )}
                                                 value={String(req.seed)}
                                             />
                                         )}
@@ -282,8 +340,10 @@ export function GenerationDetailModal(props: {
                                 )}
 
                                 <p class="text-[11px] text-gray-500">
-                                    费用为按 token
-                                    用量的粗略估算，实际以火山引擎账单为准。
+                                    {get_text(
+                                        "cost_disclaimer",
+                                        language.value,
+                                    )}
                                 </p>
                             </>
                         )}

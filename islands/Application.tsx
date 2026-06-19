@@ -1,4 +1,4 @@
-import { Signal, useSignal, useSignalEffect } from "@preact/signals";
+import { Signal, signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
@@ -18,6 +18,166 @@ import { get_video_url } from "../utils.ts";
 
 const SIDEBAR_WIDTH_KEY = "sidebarWidth";
 const DEFAULT_SIDEBAR_WIDTH = 240;
+const LANGUAGE_KEY = "language";
+
+// ---------------------------------------------------------------------------
+// i18n — a global language signal + a flat id->text lookup. Every UI string
+// in the app is registered here under an id that's the snake_case of its
+// English text; call `get_text(id, language.value)` wherever that string is
+// rendered so it re-renders when the language changes.
+// ---------------------------------------------------------------------------
+
+export type Language = "English" | "Chinese";
+
+export const SUPPORTED_LANGUAGES: Language[] = ["English", "Chinese"];
+
+/** Each language's own name for itself, used in the language menu. */
+export const LANGUAGE_NAMES: Record<Language, string> = {
+    English: "English",
+    Chinese: "中文",
+};
+
+// Guard against SSR (no `localStorage` in Deno) — the island's initial
+// render happens server-side before this module-level signal is hydrated.
+export const language: Signal<Language> = signal<Language>(
+    (typeof localStorage !== "undefined"
+        ? localStorage.getItem(LANGUAGE_KEY) as Language | null
+        : null) ?? "English",
+);
+
+/** Switch the UI language and persist the choice for the next visit. */
+export function setLanguage(next: Language): void {
+    language.value = next;
+    if (typeof localStorage !== "undefined") {
+        localStorage.setItem(LANGUAGE_KEY, next);
+    }
+}
+
+const TEXTS: Record<string, { English: string; Chinese: string }> = {
+    // FileExplorer
+    open_a_project: { English: "Open a project", Chinese: "请打开项目" },
+    select_project_folder: {
+        English: "Select project folder",
+        Chinese: "选择项目文件夹",
+    },
+    failed_to_load: { English: "Failed to load:", Chinese: "加载失败：" },
+    select_a_project_folder: {
+        English: "Select a project folder",
+        Chinese: "请选择一个项目文件夹",
+    },
+    open_with_default_app: {
+        English: "Open with default app",
+        Chinese: "用默认程序打开",
+    },
+    copy: { English: "Copy", Chinese: "复制" },
+    rename: { English: "Rename", Chinese: "重命名" },
+
+    // SettingsModal
+    please_enter_an_api_key: {
+        English: "Please enter an API key",
+        Chinese: "请输入 API Key",
+    },
+    save_failed: { English: "Save failed", Chinese: "保存失败" },
+    close: { English: "Close", Chinese: "关闭" },
+    settings: { English: "Settings", Chinese: "设置" },
+    configure_seedance_api_key: {
+        English: "Configure your Seedance API key to generate videos.",
+        Chinese: "配置 Seedance API Key 以生成视频。",
+    },
+    currently_saved: { English: "Currently saved:", Chinese: "当前已保存：" },
+    enter_a_new_key_to_replace_it: {
+        English: "Enter a new key to replace it",
+        Chinese: "输入新的 Key 以替换",
+    },
+    cancel: { English: "Cancel", Chinese: "取消" },
+    saving: { English: "Saving…", Chinese: "保存中…" },
+    save: { English: "Save", Chinese: "保存" },
+    language_label: { English: "Language", Chinese: "语言" },
+
+    // GenerationCard
+    generation_failed: { English: "Generation failed", Chinese: "生成失败" },
+    unknown_reason: { English: "Unknown reason", Chinese: "未知原因" },
+    reuse_prompt: { English: "Reuse prompt", Chinese: "复用提示词" },
+    view_details: { English: "View details", Chinese: "查看详情" },
+
+    // GenerationsGrid
+    newest_first: { English: "Newest first", Chinese: "最新在前" },
+    oldest_first: { English: "Oldest first", Chinese: "最早在前" },
+
+    // GenerationDetailModal
+    loading_details: { English: "Loading details…", Chinese: "加载详情中…" },
+    no_saved_details: {
+        English: "No saved details for this generation.",
+        Chinese: "没有为此生成保存的详细信息。",
+    },
+    elapsed: { English: "Elapsed", Chinese: "耗时" },
+    estimated_cost: { English: "Estimated cost", Chinese: "预估费用" },
+    generated: { English: "Generated", Chinese: "生成" },
+    prompt: { English: "Prompt", Chinese: "提示词" },
+    no_text_prompt: {
+        English: "(No text prompt)",
+        Chinese: "（无文本提示词）",
+    },
+    reference_inputs: { English: "Reference inputs", Chinese: "参考输入" },
+    reference_image: { English: "Reference image", Chinese: "参考图片" },
+    model: { English: "Model", Chinese: "模型" },
+    resolution: { English: "Resolution", Chinese: "分辨率" },
+    aspect_ratio: { English: "Aspect ratio", Chinese: "画幅" },
+    duration: { English: "Duration", Chinese: "时长" },
+    audio: { English: "Audio", Chinese: "音频" },
+    on: { English: "On", Chinese: "开" },
+    off: { English: "Off", Chinese: "关" },
+    seed: { English: "Seed", Chinese: "种子" },
+    cost_disclaimer: {
+        English:
+            "Cost is a rough estimate based on token usage; refer to your Volcano Engine bill for the actual amount.",
+        Chinese: "费用为按 token 用量的粗略估算，实际以火山引擎账单为准。",
+    },
+
+    // Composer
+    image: { English: "Image", Chinese: "图片" },
+    video: { English: "Video", Chinese: "视频" },
+    describe_prompt_placeholder: {
+        English:
+            "Describe the video you want to generate. Use @ to reference an uploaded asset",
+        Chinese: "描述你想生成的视频画面，可 @ 引用上传的素材",
+    },
+    image_video_audio: {
+        English: "Image / Video / Audio",
+        Chinese: "图片/视频/音频",
+    },
+    remove: { English: "Remove", Chinese: "移除" },
+    no_assets_yet: {
+        English: "No assets yet — upload one first",
+        Chinese: "暂无素材，请先上传",
+    },
+    select_model: { English: "Select model", Chinese: "选择模型" },
+    reference: { English: "Reference", Chinese: "参考生成" },
+    first_last_frame: { English: "First & last frame", Chinese: "首尾帧" },
+    select_mode: { English: "Select mode", Chinese: "选择模式" },
+    by_seconds: { English: "By seconds", Chinese: "按秒数" },
+    smart_duration: { English: "Smart duration", Chinese: "智能时长" },
+    smart: { English: "Smart", Chinese: "智能" },
+    clear_all: { English: "Clear all", Chinese: "全部清空" },
+    generate: { English: "Generate", Chinese: "生成" },
+    generation_failed_prefix: {
+        English: "Generation failed:",
+        Chinese: "生成失败：",
+    },
+    s_unit: { English: "s", Chinese: "秒" },
+    m_unit: { English: "m", Chinese: "分" },
+
+    // Application (bottom bar)
+    image_grid_editor: {
+        English: "Image Grid Editor",
+        Chinese: "图片加网格",
+    },
+};
+
+/** Look up `id`'s text in `lang`, falling back to the id itself if unknown. */
+export function get_text(id: string, lang: Language): string {
+    return TEXTS[id]?.[lang] ?? id;
+}
 
 // ---------------------------------------------------------------------------
 // Island
@@ -40,6 +200,8 @@ export default function Application() {
 
     // Settings modal (Seedance API key). Auto-opens on mount when no key is set.
     const settingsOpen = useSignal(false);
+    const languageMenuOpen = useSignal(false);
+    const languageMenuRef = useRef<HTMLDivElement>(null);
 
     // Ticker subscription — log an auto-incrementing number each second
     useEffect(() => {
@@ -157,6 +319,24 @@ export default function Application() {
         localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value));
     }, [sidebarWidth.value]);
 
+    useEffect(() => {
+        const onPointerDown = (e: PointerEvent) => {
+            if (!languageMenuOpen.value) return;
+            const target = e.target as Node | null;
+            if (target && languageMenuRef.current?.contains(target)) return;
+            languageMenuOpen.value = false;
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") languageMenuOpen.value = false;
+        };
+        globalThis.addEventListener("pointerdown", onPointerDown);
+        globalThis.addEventListener("keydown", onKeyDown);
+        return () => {
+            globalThis.removeEventListener("pointerdown", onPointerDown);
+            globalThis.removeEventListener("keydown", onKeyDown);
+        };
+    }, []);
+
     return (
         <div class="h-screen flex flex-col bg-[#f7f8fa] overflow-hidden">
             {/* Main area: sidebar + content, fills all space above the bottom bar */}
@@ -190,25 +370,75 @@ export default function Application() {
                     href="/image"
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="Image Grid Editor"
+                    title={get_text("image_grid_editor", language.value)}
                     class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
                 >
                     <GridIcon />
                     <span class="whitespace-nowrap">
-                        图片加网格
+                        {get_text("image_grid_editor", language.value)}
                     </span>
                 </a>
 
                 <div class="flex-1" />
 
+                <div ref={languageMenuRef} class="relative">
+                    <button
+                        type="button"
+                        title={get_text("language_label", language.value)}
+                        aria-haspopup="menu"
+                        aria-expanded={languageMenuOpen.value}
+                        onClick={() =>
+                            languageMenuOpen.value = !languageMenuOpen.value}
+                        class="flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
+                    >
+                        <span class="whitespace-nowrap">
+                            {LANGUAGE_NAMES[language.value]}
+                        </span>
+                        <ChevronIcon up={languageMenuOpen.value} />
+                    </button>
+
+                    {languageMenuOpen.value && (
+                        <div
+                            role="menu"
+                            class="absolute right-0 bottom-full mb-2 z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl"
+                        >
+                            <div class="px-3 py-2 text-xs text-gray-400">
+                                {get_text("language_label", language.value)}
+                            </div>
+                            {SUPPORTED_LANGUAGES.map((item) => (
+                                <button
+                                    key={item}
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={language.value === item}
+                                    onClick={() => {
+                                        setLanguage(item);
+                                        languageMenuOpen.value = false;
+                                    }}
+                                    class={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-gray-700 hover:bg-gray-50 ${
+                                        language.value === item
+                                            ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-50"
+                                            : ""
+                                    }`}
+                                >
+                                    <span>{LANGUAGE_NAMES[item]}</span>
+                                    {language.value === item && <CheckIcon />}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <button
                     type="button"
                     onClick={() => settingsOpen.value = true}
-                    title="设置"
+                    title={get_text("settings", language.value)}
                     class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 hover:cursor-pointer transition-colors text-xs font-medium"
                 >
                     <SettingsIcon />
-                    <span class="whitespace-nowrap">设置</span>
+                    <span class="whitespace-nowrap">
+                        {get_text("settings", language.value)}
+                    </span>
                 </button>
             </div>
 
@@ -251,6 +481,43 @@ function GridIcon() {
         >
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+        </svg>
+    );
+}
+
+function ChevronIcon(props: { up: boolean }) {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+        >
+            {props.up ? <path d="m18 15-6-6-6 6" /> : <path d="m6 9 6 6 6-6" />}
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            class="text-indigo-600"
+        >
+            <path d="M20 6 9 17l-5-5" />
         </svg>
     );
 }

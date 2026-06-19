@@ -2,6 +2,7 @@ import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { get_text, language } from "../islands/Application.tsx";
 
 /**
  * All file-explorer state that only makes sense once a project is open. When no
@@ -40,7 +41,10 @@ export function FileExplorer(props: {
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
 
-    let projectName: string | undefined = "请打开项目";
+    let projectName: string | undefined = get_text(
+        "open_a_project",
+        language.value,
+    );
     if (projectData.value) {
         projectName = projectData.value.rootPath.replace(/[/\\]+$/, "").split(
             /[/\\]/,
@@ -240,8 +244,14 @@ export function FileExplorer(props: {
                     <div class="flex items-center gap-0.5 -mr-1">
                         <button
                             type="button"
-                            title="选择项目文件夹"
-                            aria-label="选择项目文件夹"
+                            title={get_text(
+                                "select_project_folder",
+                                language.value,
+                            )}
+                            aria-label={get_text(
+                                "select_project_folder",
+                                language.value,
+                            )}
                             onClick={async () => {
                                 try {
                                     const res = await trpc.pickProject.mutate();
@@ -318,13 +328,18 @@ export function FileExplorer(props: {
                     {error.value
                         ? (
                             <div class="px-4 py-3 text-xs text-red-500 break-all">
-                                加载失败：{error.value}
+                                {get_text("failed_to_load", language.value)}
+                                {" "}
+                                {error.value}
                             </div>
                         )
                         : !projectData.value
                         ? (
                             <div class="px-4 py-3 text-xs text-gray-400">
-                                请选择一个项目文件夹
+                                {get_text(
+                                    "select_a_project_folder",
+                                    language.value,
+                                )}
                             </div>
                         )
                         : (
@@ -416,7 +431,7 @@ export function FileExplorer(props: {
                             onClick={() => openInDefault(menu.value!.path)}
                             class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
                         >
-                            用默认程序打开
+                            {get_text("open_with_default_app", language.value)}
                         </button>
                         {isImageFile(menu.value.entry) && (
                             <button
@@ -424,7 +439,7 @@ export function FileExplorer(props: {
                                 onClick={() => copyImage(menu.value!.path)}
                                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
                             >
-                                复制
+                                {get_text("copy", language.value)}
                             </button>
                         )}
                         {menu.value.path !== "" && (
@@ -436,7 +451,7 @@ export function FileExplorer(props: {
                                 }}
                                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
                             >
-                                重命名
+                                {get_text("rename", language.value)}
                             </button>
                         )}
                     </div>

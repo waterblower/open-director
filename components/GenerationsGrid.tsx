@@ -1,6 +1,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
+import { get_text, language } from "../islands/Application.tsx";
 
 type SortOrder = "newest" | "oldest";
 
@@ -31,8 +32,13 @@ export function GenerationsGrid(
         >
             <div class="sticky top-0 z-10 flex justify-end pb-2">
                 <div class="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
-                    {([["newest", "最新在前"], ["oldest", "最早在前"]] as const)
-                        .map(([value, label]) => (
+                    {(
+                        [["newest", "newest_first"], [
+                            "oldest",
+                            "oldest_first",
+                        ]] as const
+                    )
+                        .map(([value, textId]) => (
                             <button
                                 key={value}
                                 type="button"
@@ -43,7 +49,7 @@ export function GenerationsGrid(
                                         : "text-gray-600 hover:bg-gray-50"
                                 }`}
                             >
-                                {label}
+                                {get_text(textId, language.value)}
                             </button>
                         ))}
                 </div>

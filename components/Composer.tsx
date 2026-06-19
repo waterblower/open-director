@@ -17,7 +17,12 @@ import { trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
 import { updateGeneration } from "@/db.ts";
-import { updateGenerations } from "@/islands/Application.tsx";
+import {
+    get_text,
+    type Language,
+    language,
+    updateGenerations,
+} from "@/islands/Application.tsx";
 
 type AttachmentKind = "image" | "video" | "audio";
 
@@ -80,11 +85,13 @@ function clampResolution(model: SeedanceModel, res: Resolution): Resolution {
     return allowed.includes("720p") ? "720p" : allowed[allowed.length - 1];
 }
 
-const KIND_LABEL: Record<AttachmentKind, string> = {
-    image: "图片",
-    video: "视频",
-    audio: "音频",
-};
+/** Display label for an attachment kind, in the given language. */
+function kindLabel(kind: AttachmentKind, lang: Language): string {
+    return get_text(
+        kind === "image" ? "image" : kind === "video" ? "video" : "audio",
+        lang,
+    );
+}
 
 type Mention = {
     /** Index of the "@" character in the prompt */
@@ -438,7 +445,7 @@ export function Composer(props: {
         attachments.value = await Promise.all(media.map(async (m) => ({
             id: nextId.current++,
             kind: m.kind,
-            name: KIND_LABEL[m.kind],
+            name: kindLabel(m.kind, language.value),
             url: URL.createObjectURL(await (await fetch(m.url)).blob()),
         })));
     };
@@ -450,7 +457,7 @@ export function Composer(props: {
         applyReuse(req).catch((err) => console.error(err));
     });
 
-    // Attachments with their display labels: 图片1, 图片2, 视频1, …
+    // Attachments with their display labels: Image1, Image2, Video1, …
     const labeled = useComputed(() => {
         const counters: Record<AttachmentKind, number> = {
             image: 0,
@@ -459,12 +466,14 @@ export function Composer(props: {
         };
         return attachments.value.map((a) => ({
             ...a,
-            label: `${KIND_LABEL[a.kind]}${++counters[a.kind]}`,
+            label: `${kindLabel(a.kind, language.value)}${++counters[a.kind]}`,
         }));
     });
 
     const durationLabel = useComputed(() =>
-        durationMode.value === "smart" ? "智能" : `${duration.value}秒`
+        durationMode.value === "smart"
+            ? get_text("smart", language.value)
+            : `${duration.value}${get_text("s_unit", language.value)}`
     );
 
     const selectedModel = useComputed(() => getModelOption(model.value));
@@ -654,7 +663,9 @@ export function Composer(props: {
             >
                 {genError.value && (
                     <div class="mb-3 text-sm text-red-500 break-all bg-white/90 backdrop-blur rounded-lg px-3 py-2 shadow">
-                        生成失败：{genError.value}
+                        {get_text("generation_failed_prefix", language.value)}
+                        {" "}
+                        {genError.value}
                     </div>
                 )}
                 <div
@@ -675,7 +686,9 @@ export function Composer(props: {
                             class="w-[72px] h-[72px] rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex flex-col items-center justify-center gap-1 text-gray-400 transition-colors"
                         >
                             <span class="text-lg leading-none">+</span>
-                            <span class="text-[10px]">图片/视频/音频</span>
+                            <span class="text-[10px]">
+                                {get_text("image_video_audio", language.value)}
+                            </span>
                         </button>
                         <input
                             ref={fileInput}
@@ -738,7 +751,10 @@ export function Composer(props: {
                                         type="button"
                                         onClick={() => removeAttachment(att.id)}
                                         class="absolute top-0.5 right-0.5 size-4 rounded-full bg-black/60 text-white text-[10px] leading-none items-center justify-center hidden group-hover:flex"
-                                        aria-label="移除"
+                                        aria-label={get_text(
+                                            "remove",
+                                            language.value,
+                                        )}
                                     >
                                         ×
                                     </button>
@@ -756,7 +772,10 @@ export function Composer(props: {
                             onKeyDown={onPromptKeyDown}
                             onPaste={onPaste}
                             onBlur={() => mention.value = null}
-                            placeholder="描述你想生成的视频画面，可 @ 引用上传的素材"
+                            placeholder={get_text(
+                                "describe_prompt_placeholder",
+                                language.value,
+                            )}
                             rows={1}
                             // Auto-grows up to 2/3 of the viewport, then scrolls.
                             class="w-full resize-none border-0 outline-none text-[15px] text-gray-800 placeholder:text-gray-400 block max-h-[66vh] overflow-y-auto select-text"
@@ -775,7 +794,10 @@ export function Composer(props: {
                                 {labeled.value.length === 0
                                     ? (
                                         <div class="px-3 py-2 text-sm text-gray-400">
-                                            暂无素材，请先上传
+                                            {get_text(
+                                                "no_assets_yet",
+                                                language.value,
+                                            )}
                                         </div>
                                     )
                                     : labeled.value.map((att, i) => (
@@ -840,7 +862,10 @@ export function Composer(props: {
                             {popover.value === "model" && (
                                 <div class="absolute left-0 bottom-full mb-2 z-20 w-72 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
                                     <div class="px-3 py-2 text-sm text-gray-400">
-                                        选择模型
+                                        {get_text(
+                                            "select_model",
+                                            language.value,
+                                        )}
                                     </div>
                                     {SEEDANCE_MODELS.map((item) => (
                                         <button
@@ -885,28 +910,34 @@ export function Composer(props: {
                             >
                                 <VideoIcon class="size-4" />
                                 {mode.value === "reference"
-                                    ? "参考生成"
-                                    : "首尾帧"}
+                                    ? get_text("reference", language.value)
+                                    : get_text(
+                                        "first_last_frame",
+                                        language.value,
+                                    )}
                                 <ChevronIcon up={popover.value === "mode"} />
                             </button>
 
                             {popover.value === "mode" && (
                                 <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
                                     <div class="px-3 py-2 text-sm text-gray-400">
-                                        选择模式
+                                        {get_text(
+                                            "select_mode",
+                                            language.value,
+                                        )}
                                     </div>
                                     {(
                                         [
                                             {
                                                 value: "reference",
-                                                label: "参考生成",
+                                                textId: "reference",
                                                 icon: (
                                                     <VideoIcon class="size-4" />
                                                 ),
                                             },
                                             {
                                                 value: "frames",
-                                                label: "首尾帧",
+                                                textId: "first_last_frame",
                                                 icon: (
                                                     <FramesIcon class="size-4" />
                                                 ),
@@ -927,7 +958,10 @@ export function Composer(props: {
                                             }`}
                                         >
                                             {item.icon}
-                                            {item.label}
+                                            {get_text(
+                                                item.textId,
+                                                language.value,
+                                            )}
                                             {mode.value === item.value && (
                                                 <span class="ml-auto">
                                                     <CheckIcon />
@@ -958,7 +992,10 @@ export function Composer(props: {
                             {popover.value === "settings" && (
                                 <div class="absolute left-0 bottom-full mb-2 z-20 w-[560px] bg-white rounded-xl shadow-xl border border-gray-100 p-5">
                                     <div class="text-sm text-gray-500 mb-2">
-                                        视频比例
+                                        {get_text(
+                                            "aspect_ratio",
+                                            language.value,
+                                        )}
                                     </div>
                                     <div class="grid grid-cols-7 gap-2 mb-5">
                                         {RATIOS.map((r) => (
@@ -990,7 +1027,7 @@ export function Composer(props: {
                                     </div>
 
                                     <div class="text-sm text-gray-500 mb-2">
-                                        分辨率
+                                        {get_text("resolution", language.value)}
                                     </div>
                                     <div
                                         class="grid bg-gray-100 rounded-lg p-1 mb-5"
@@ -1017,18 +1054,18 @@ export function Composer(props: {
                                     </div>
 
                                     <div class="text-sm text-gray-500 mb-2">
-                                        视频时长
+                                        {get_text("duration", language.value)}
                                     </div>
                                     <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
                                         {(
                                             [
                                                 {
                                                     value: "seconds",
-                                                    label: "按秒数",
+                                                    textId: "by_seconds",
                                                 },
                                                 {
                                                     value: "smart",
-                                                    label: "智能时长",
+                                                    textId: "smart_duration",
                                                 },
                                             ] as const
                                         ).map((dm) => (
@@ -1045,7 +1082,10 @@ export function Composer(props: {
                                                         : "text-gray-500 hover:text-gray-700"
                                                 }`}
                                             >
-                                                {dm.label}
+                                                {get_text(
+                                                    dm.textId,
+                                                    language.value,
+                                                )}
                                             </button>
                                         ))}
                                     </div>
@@ -1066,7 +1106,10 @@ export function Composer(props: {
                                             <span class="w-16 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-sm text-gray-700 gap-1">
                                                 {duration.value}
                                                 <span class="text-gray-400">
-                                                    秒
+                                                    {get_text(
+                                                        "s_unit",
+                                                        language.value,
+                                                    )}
                                                 </span>
                                             </span>
                                         </div>
@@ -1096,7 +1139,7 @@ export function Composer(props: {
                             class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
                         >
                             <ResetIcon />
-                            全部清空
+                            {get_text("clear_all", language.value)}
                         </button>
 
                         {/* Submit */}
@@ -1104,7 +1147,7 @@ export function Composer(props: {
                             type="button"
                             disabled={!canSubmit.value}
                             class="size-9 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white flex items-center justify-center ml-1"
-                            aria-label="生成"
+                            aria-label={get_text("generate", language.value)}
                             onClick={async () => {
                                 genError.value = null;
 

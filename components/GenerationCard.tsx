@@ -2,6 +2,7 @@ import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
 import { trpc } from "../trpc/client.ts";
+import { get_text, language } from "../islands/Application.tsx";
 import {
     type GenerationDetail,
     GenerationDetailModal,
@@ -124,10 +125,11 @@ export function GenerationCard(
                     // request ids instead of clipping them.
                     <div class="w-full aspect-video overflow-y-auto p-3 pb-7 text-center [overflow-wrap:anywhere]">
                         <div class="text-red-400 text-[11px] font-medium mb-1">
-                            生成失败
+                            {get_text("generation_failed", language.value)}
                         </div>
                         <div class="text-gray-400 text-[11px] leading-snug">
-                            {generation.failed_reason || "未知原因"}
+                            {generation.failed_reason ||
+                                get_text("unknown_reason", language.value)}
                         </div>
                     </div>
                 )
@@ -165,7 +167,7 @@ export function GenerationCard(
                 <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         type="button"
-                        aria-label="复用提示词"
+                        aria-label={get_text("reuse_prompt", language.value)}
                         draggable={false}
                         onClick={async (e) => {
                             e.stopPropagation();
@@ -186,7 +188,7 @@ export function GenerationCard(
                         <ReuseIcon class="size-4" />
                     </button>
                     <span class="pointer-events-none absolute right-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
-                        复用提示词
+                        {get_text("reuse_prompt", language.value)}
                     </span>
                 </div>
             )}
@@ -198,7 +200,7 @@ export function GenerationCard(
                 <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         type="button"
-                        aria-label="查看详情"
+                        aria-label={get_text("view_details", language.value)}
                         draggable={false}
                         onClick={(e) => {
                             e.stopPropagation();
@@ -213,7 +215,7 @@ export function GenerationCard(
                         <InfoIcon class="size-4" />
                     </button>
                     <span class="pointer-events-none absolute left-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
-                        查看详情
+                        {get_text("view_details", language.value)}
                     </span>
                 </div>
             )}

@@ -1,6 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { trpc } from "../trpc/client.ts";
+import { get_text, language } from "../islands/Application.tsx";
 
 export function SettingsModal(props: {
     /** Called after the modal is dismissed or a key is saved. */
@@ -39,7 +40,7 @@ export function SettingsModal(props: {
     const save = async () => {
         const key = apiKey.value.trim();
         if (!key) {
-            error.value = "请输入 API Key";
+            error.value = get_text("please_enter_an_api_key", language.value);
             return;
         }
         saving.value = true;
@@ -51,7 +52,9 @@ export function SettingsModal(props: {
             onClose();
         } catch (err) {
             console.error(err);
-            error.value = err instanceof Error ? err.message : "保存失败";
+            error.value = err instanceof Error
+                ? err.message
+                : get_text("save_failed", language.value);
         } finally {
             saving.value = false;
         }
@@ -67,7 +70,7 @@ export function SettingsModal(props: {
             <div class="relative w-full max-w-md rounded-2xl bg-white text-gray-800 shadow-2xl">
                 <button
                     type="button"
-                    aria-label="关闭"
+                    aria-label={get_text("close", language.value)}
                     onClick={onClose}
                     class="absolute top-3 right-3 size-8 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center hover:cursor-pointer transition-colors"
                 >
@@ -76,9 +79,14 @@ export function SettingsModal(props: {
 
                 <div class="p-6 space-y-4">
                     <div>
-                        <h2 class="text-lg font-semibold">设置</h2>
+                        <h2 class="text-lg font-semibold">
+                            {get_text("settings", language.value)}
+                        </h2>
                         <p class="text-sm text-gray-500 mt-0.5">
-                            配置 Seedance API Key 以生成视频。
+                            {get_text(
+                                "configure_seedance_api_key",
+                                language.value,
+                            )}
                         </p>
                     </div>
 
@@ -88,7 +96,9 @@ export function SettingsModal(props: {
                         </label>
                         {masked.value && (
                             <p class="text-[11px] text-gray-500">
-                                当前已保存：<span class="font-mono">
+                                {get_text("currently_saved", language.value)}
+                                {" "}
+                                <span class="font-mono">
                                     {masked.value}
                                 </span>
                             </p>
@@ -99,7 +109,10 @@ export function SettingsModal(props: {
                             spellcheck={false}
                             value={apiKey.value}
                             placeholder={masked.value
-                                ? "输入新的 Key 以替换"
+                                ? get_text(
+                                    "enter_a_new_key_to_replace_it",
+                                    language.value,
+                                )
                                 : "ark-..."}
                             onInput={(e) =>
                                 apiKey.value = (e.target as HTMLInputElement)
@@ -122,7 +135,7 @@ export function SettingsModal(props: {
                             onClick={onClose}
                             class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:cursor-pointer transition-colors"
                         >
-                            取消
+                            {get_text("cancel", language.value)}
                         </button>
                         <button
                             type="button"
@@ -130,7 +143,9 @@ export function SettingsModal(props: {
                             disabled={saving.value}
                             class="px-3 py-1.5 rounded-lg text-sm bg-indigo-500 text-white hover:bg-indigo-600 hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
-                            {saving.value ? "保存中…" : "保存"}
+                            {saving.value
+                                ? get_text("saving", language.value)
+                                : get_text("save", language.value)}
                         </button>
                     </div>
                 </div>
