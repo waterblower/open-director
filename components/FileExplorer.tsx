@@ -1,8 +1,13 @@
 import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
+import {
+    get_text,
+    language,
+    loadProjectData,
+    readDir,
+    trpc,
+} from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
-import { get_text, language } from "../islands/Application.tsx";
 
 /**
  * All file-explorer state that only makes sense once a project is open. When no

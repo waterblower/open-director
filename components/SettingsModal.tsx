@@ -1,7 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
-import { trpc } from "../trpc/client.ts";
-import { get_text, language } from "../islands/Application.tsx";
+import { get_text, language, trpc } from "../trpc/client.ts";
 
 export function SettingsModal(props: {
     /** Called after the modal is dismissed or a key is saved. */

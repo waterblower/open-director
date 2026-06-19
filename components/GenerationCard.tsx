@@ -1,8 +1,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
-import { trpc } from "../trpc/client.ts";
-import { get_text, language } from "../islands/Application.tsx";
+import { get_text, language, trpc } from "../trpc/client.ts";
 import {
     type GenerationDetail,
     GenerationDetailModal,

@@ -13,16 +13,10 @@ import type {
     CreateTaskRequest,
     SeedanceModel,
 } from "../seedance/seedance.ts";
-import { trpc } from "../trpc/client.ts";
+import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
-import { updateGeneration } from "@/db.ts";
-import {
-    get_text,
-    type Language,
-    language,
-    updateGenerations,
-} from "@/islands/Application.tsx";
+import { updateGenerations } from "@/islands/Application.tsx";
 
 type AttachmentKind = "image" | "video" | "audio";
 

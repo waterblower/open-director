@@ -1,9 +1,8 @@
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { estimateCost } from "../seedance/pricing.ts";
-import type { trpc } from "../trpc/client.ts";
+import { get_text, Language, language, type trpc } from "../trpc/client.ts";
 import type { GeneratedVideo } from "./GenerationCard.tsx";
-import { get_text, type Language, language } from "../islands/Application.tsx";
 
 /** The full generation row returned by the details endpoint. */
 export type GenerationDetail = Awaited<
