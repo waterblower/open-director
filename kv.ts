@@ -3,8 +3,16 @@
  *
  * Used to remember the last-chosen project folder so a refresh/relaunch reopens
  * the same project. https://docs.deno.com/deploy/reference/deno_kv/
+ *
+ * Stored under `~/.open-director/kv.sqlite3` (`%USERPROFILE%` on Windows) so it
+ * survives independent of any single project folder.
  */
-const kv = await Deno.openKv();
+import { homedir } from "node:os";
+import { join } from "@std/path";
+
+const KV_DIR = join(homedir(), ".open-director");
+Deno.mkdirSync(KV_DIR, { recursive: true });
+const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
 const PROJECT_PATH_KEY = ["config", "project_path"] as const;
 const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
