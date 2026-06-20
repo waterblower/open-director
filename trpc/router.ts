@@ -14,6 +14,7 @@ import {
     resolveInProject_deprecated,
 } from "../project.ts";
 import {
+    archiveGeneration,
     createGeneration,
     db,
     Generation,
@@ -21,9 +22,11 @@ import {
     getGenerationByTaskId,
     getGenerationDetail,
     getGenerationRequest,
+    listArchivedGenerationIds,
     listGenerations,
     recordGeneration,
     reopenDb,
+    unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
 import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
@@ -107,6 +110,91 @@ async function listDir(absPath: string): Promise<DirEntry[]> {
     return entries;
 }
 
+/** A generated-video entry as the grid consumes it. */
+type VideoListItem = {
+    id: string;
+    created_at: string;
+    status: TaskStatus;
+    /** Whether a create request is stored (drives the reuse button);
+     * the request itself is fetched on demand via getGenerationRequest. */
+    has_request: boolean;
+    url?: string;
+    failed_reason?: string;
+};
+
+/**
+ * Build the Task-like video list for `projectRoot`, either the active
+ * (non-archived) set or the archived set, depending on `archived`. Creates
+ * the videos directory if it doesn't exist yet.
+ */
+async function buildVideoList(
+    projectRoot: string,
+    archived: boolean,
+): Promise<VideoListItem[]> {
+    const dir = `${projectRoot}/${VIDEOS_DIR}`;
+    // Creates the dir if missing; a no-op (no throw) when it already exists.
+    await Deno.mkdir(dir, { recursive: true });
+
+    if (!db) return [];
+    const rows = listGenerations(db);
+    const rowById = new Map(rows.map((r) => [r.task_id, r]));
+    const archivedIds = new Set(listArchivedGenerationIds(db));
+    const onDisk = new Set<string>();
+
+    const videos: VideoListItem[] = [];
+
+    // 1. Video files on disk — these are the succeeded, downloaded outputs.
+    //    Merge in any matching log row; if there's none, fall back to the
+    //    file alone. A file with no log row can never be archived.
+    for await (const entry of Deno.readDir(dir)) {
+        if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
+        const taskId = entry.name.replace(VIDEO_EXT, "");
+        onDisk.add(taskId);
+
+        const localUrl = get_video_url(taskId);
+
+        const row = rowById.get(taskId);
+        if (!row) {
+            if (archived) continue;
+            videos.push({
+                status: "succeeded",
+                id: taskId,
+                url: localUrl,
+                created_at: "",
+                has_request: false,
+            });
+            continue;
+        }
+        if (archivedIds.has(row.id) !== archived) continue;
+        videos.push({
+            status: "succeeded",
+            id: taskId,
+            url: localUrl,
+            created_at: row.created_at,
+            has_request: row.request_json != null,
+        });
+    }
+
+    // 2. Log rows with no file on disk — the video either failed or is
+    //    still queued/running on the seedance server. Surface them with
+    //    whatever status we last recorded.
+    for (const row of rows) {
+        if (row.task_id && onDisk.has(row.task_id)) continue;
+        if (archivedIds.has(row.id) !== archived) continue;
+        videos.push({
+            status: row.status,
+            // Not-yet-submitted generations have no task_id; key on the
+            // local ULID id instead.
+            id: row.task_id ?? row.id,
+            created_at: row.created_at,
+            has_request: row.request_json != null,
+            failed_reason: row.failed_reason ?? undefined,
+        });
+    }
+
+    return videos;
+}
+
 export const appRouter = router({
     listGenerations: publicProcedure.query(() => {
         if (!db) {
@@ -140,80 +228,13 @@ export const appRouter = router({
     // objects. Creates the directory if it doesn't exist yet.
     listGeneratedVideos: publicProcedure.input(z.object({
         project_root: z.string(),
-    })).query(
-        async ({ input }) => {
-            const dir = `${input.project_root}/${VIDEOS_DIR}`;
-            // Creates the dir if missing; a no-op (no throw) when it already exists.
-            await Deno.mkdir(dir, { recursive: true });
+    })).query(({ input }) => buildVideoList(input.project_root, false)),
 
-            if (!db) {
-                return [];
-            }
-            const rows = listGenerations(db);
-            const rowById = new Map(rows.map((r) => [r.task_id, r]));
-            const onDisk = new Set<string>();
-
-            const videos: {
-                id: string;
-                created_at: string;
-                status: TaskStatus;
-                /** Whether a create request is stored (drives the reuse button);
-                 * the request itself is fetched on demand via getGenerationRequest. */
-                has_request: boolean;
-                url?: string;
-                failed_reason?: string;
-            }[] = [];
-
-            // 1. Video files on disk — these are the succeeded, downloaded outputs.
-            //    Merge in any matching log row; if there's none, fall back to the
-            //    file alone.
-            for await (const entry of Deno.readDir(dir)) {
-                if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
-                const taskId = entry.name.replace(VIDEO_EXT, "");
-                onDisk.add(taskId);
-
-                const localUrl = get_video_url(taskId);
-                console.log(localUrl);
-
-                const row = rowById.get(taskId);
-                if (!row) {
-                    videos.push({
-                        status: "succeeded",
-                        id: taskId,
-                        url: localUrl,
-                        created_at: "",
-                        has_request: false,
-                    });
-                } else {
-                    videos.push({
-                        status: "succeeded",
-                        id: taskId,
-                        url: localUrl,
-                        created_at: row.created_at,
-                        has_request: row.request_json != null,
-                    });
-                }
-            }
-
-            // 2. Log rows with no file on disk — the video either failed or is
-            //    still queued/running on the seedance server. Surface them with
-            //    whatever status we last recorded.
-            for (const row of rows) {
-                if (row.task_id && onDisk.has(row.task_id)) continue;
-                videos.push({
-                    status: row.status,
-                    // Not-yet-submitted generations have no task_id; key on the
-                    // local ULID id instead.
-                    id: row.task_id ?? row.id,
-                    created_at: row.created_at,
-                    has_request: row.request_json != null,
-                    failed_reason: row.failed_reason ?? undefined,
-                });
-            }
-
-            return videos;
-        },
-    ),
+    // Archived generations for the same project, in the same shape — shown in
+    // the grid's "Archived" tab.
+    listArchivedGenerations: publicProcedure.input(z.object({
+        project_root: z.string(),
+    })).query(({ input }) => buildVideoList(input.project_root, true)),
 
     // Read the immediate (non-recursive) entries of `<projectRoot>/<path>`.
     // `path` is relative to the given project root; "" reads the root itself.
@@ -563,6 +584,68 @@ export const appRouter = router({
                 throw result;
             }
             return result;
+        }),
+
+    // Archive a generation (by ULID id or task id) — hides it from the grid
+    // without deleting its DB row or video file.
+    archiveGeneration: publicProcedure
+        .input(z.object({ project_root: z.string(), id: z.string() }))
+        .mutation(async (opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            // The generations DB is currently a single global handle for
+            // whichever project is active — but callers always state which
+            // project they mean, so a future per-project DB can be routed to
+            // without changing this procedure's contract.
+            const activeRoot = await getStoredProjectPath();
+            if (activeRoot !== opts.input.project_root) {
+                throw new Error(
+                    "project_root is not the active project",
+                );
+            }
+
+            const gen = getGenerationDetail(db, opts.input.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            if (!gen) {
+                throw new Error(`No generation with id ${opts.input.id}`);
+            }
+            const err = archiveGeneration(db, gen.id);
+            if (err instanceof Error) {
+                throw err;
+            }
+            return { ok: true };
+        }),
+
+    // Restore an archived generation (by ULID id or task id) — undoes
+    // archiveGeneration.
+    unarchiveGeneration: publicProcedure
+        .input(z.object({ project_root: z.string(), id: z.string() }))
+        .mutation(async (opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const activeRoot = await getStoredProjectPath();
+            if (activeRoot !== opts.input.project_root) {
+                throw new Error(
+                    "project_root is not the active project",
+                );
+            }
+
+            const gen = getGenerationDetail(db, opts.input.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            if (!gen) {
+                throw new Error(`No generation with id ${opts.input.id}`);
+            }
+            const err = unarchiveGeneration(db, gen.id);
+            if (err instanceof Error) {
+                throw err;
+            }
+            return { ok: true };
         }),
 
     // Whether a Seedance API key is configured, plus a masked preview for the

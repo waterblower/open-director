@@ -53,17 +53,25 @@ export async function reopenDb() {
     db = await getDatabase();
 }
 
-/** Open (once per project root) the generations DB, creating it if needed. */
-async function getDatabase() {
-    const projectDir = await getStoredProjectPath();
-    if (!projectDir) {
-        return null;
+/**
+ * Open (once per project root) the generations DB, creating it if needed.
+ * recommend callers to always pass project_root
+ */
+export async function getDatabase(project_root?: string) {
+    if (!project_root) {
+        const projectDir = await getStoredProjectPath();
+        if (!projectDir) {
+            return null;
+        }
+        project_root = projectDir;
     }
-    const dir = join(projectDir, ".open-director");
+
+    const dir = join(project_root, ".open-director");
     Deno.mkdirSync(dir, { recursive: true });
     const path = join(dir, "database.sqlite");
     const db = new DatabaseSync(path);
     db.exec(`
+        PRAGMA foreign_keys = ON;
         CREATE TABLE IF NOT EXISTS Generations (
             id            TEXT PRIMARY KEY,
             task_id       TEXT UNIQUE,
@@ -73,6 +81,10 @@ async function getDatabase() {
             created_at    TEXT,
             downloaded_at TEXT,
             failed_reason TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS ArchivedGenerations (
+            generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
         );
     `);
     return db;
@@ -387,4 +399,63 @@ export function listGenerations(db: DatabaseSync): Generation[] {
         "SELECT * FROM Generations ORDER BY created_at DESC",
     ).all();
     return z.array(GenerationRowSchema).parse(rows);
+}
+
+/** A row of the `ArchivedGenerations` table. */
+export const ArchivedGenerationRowSchema = z.object({
+    generation_id: z.ulid(),
+});
+
+export type ArchivedGeneration = z.infer<typeof ArchivedGenerationRowSchema>;
+
+/**
+ * Archive a generation by its ULID `id`. Idempotent — archiving an
+ * already-archived generation is a no-op rather than an error.
+ */
+export function archiveGeneration(
+    db: DatabaseSync,
+    generationId: string,
+): void | Error {
+    try {
+        db.prepare(
+            `INSERT OR IGNORE INTO ArchivedGenerations (generation_id)
+             VALUES (:generation_id)`,
+        ).run({ generation_id: generationId });
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+/** Unarchive a generation by its ULID `id`. A no-op if it wasn't archived. */
+export function unarchiveGeneration(
+    db: DatabaseSync,
+    generationId: string,
+): void | Error {
+    try {
+        db.prepare(
+            `DELETE FROM ArchivedGenerations WHERE generation_id = :generation_id`,
+        ).run({ generation_id: generationId });
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+/** Whether a generation (by its ULID `id`) is archived. */
+export function isGenerationArchived(
+    db: DatabaseSync,
+    generationId: string,
+): boolean {
+    const row = db.prepare(
+        "SELECT 1 FROM ArchivedGenerations WHERE generation_id = ?",
+    ).get(generationId);
+    return row !== undefined;
+}
+
+/** ULIDs of all archived generations. */
+export function listArchivedGenerationIds(db: DatabaseSync): string[] {
+    const rows = db.prepare(
+        "SELECT generation_id FROM ArchivedGenerations",
+    ).all();
+    return z.array(ArchivedGenerationRowSchema).parse(rows)
+        .map((row) => row.generation_id);
 }

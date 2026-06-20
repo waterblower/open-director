@@ -147,10 +147,18 @@ const TEXTS = {
     unknown_reason: { English: "Unknown reason", Chinese: "未知原因" },
     reuse_prompt: { English: "Reuse prompt", Chinese: "复用提示词" },
     view_details: { English: "View details", Chinese: "查看详情" },
+    archive: { English: "Archive", Chinese: "归档" },
+    restore: { English: "Restore", Chinese: "还原" },
 
     // GenerationsGrid
     newest_first: { English: "Newest first", Chinese: "最新在前" },
     oldest_first: { English: "Oldest first", Chinese: "最早在前" },
+    active_generations: { English: "Active", Chinese: "进行中" },
+    archived_generations: { English: "Archived", Chinese: "已归档" },
+    no_archived_generations: {
+        English: "No archived generations",
+        Chinese: "暂无归档",
+    },
 
     // GenerationDetailModal
     loading_details: { English: "Loading details…", Chinese: "加载详情中…" },

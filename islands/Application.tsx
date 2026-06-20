@@ -183,6 +183,7 @@ export default function Application() {
                         results={generated_videos}
                         bottomInset={composerInset}
                         reusePrompt={reusePrompt}
+                        projectRoot={projectData.value?.rootPath ?? null}
                     />
                     <Composer
                         genError={genError}
@@ -225,7 +226,7 @@ function Footbar(props: { onOpenSettings: () => void }) {
     }, []);
 
     return (
-        <div class="flex-none flex items-center gap-1 px-3 py-1.5 border-t border-gray-200 bg-white/80 backdrop-blur-sm select-none">
+        <div class="relative z-30 flex-none flex items-center gap-1 px-3 py-1.5 border-t border-gray-200 bg-white/80 backdrop-blur-sm select-none">
             <a
                 href="/image"
                 target="_blank"
