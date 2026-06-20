@@ -187,6 +187,9 @@ const TEXTS = {
     },
 
     // GenerationDetailModal
+    id: { English: "ID", Chinese: "ID" },
+    generation_id: { English: "Generation ID", Chinese: "生成 ID" },
+    task_id: { English: "Task ID", Chinese: "任务 ID" },
     loading_details: { English: "Loading details…", Chinese: "加载详情中…" },
     no_saved_details: {
         English: "No saved details for this generation.",

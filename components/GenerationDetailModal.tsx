@@ -1,3 +1,4 @@
+import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { estimateCost } from "../seedance/pricing.ts";
@@ -120,9 +121,43 @@ export function GenerationDetailModal(props: {
                     )}
 
                 <div class="p-5 space-y-5">
-                    <div class="flex items-center gap-2 text-sm text-gray-400 [overflow-wrap:anywhere]">
-                        <VideoIcon class="size-4 shrink-0" />
-                        <span class="font-mono">{generation.id}</span>
+                    <div class="space-y-1">
+                        {
+                            /* `generation.id` (from the grid/file-explorer caller)
+                        is whichever id that caller had on hand — often the
+                        Seedance task id, not the generation's own ULID — so
+                        it's only safe to label precisely once `detail` (the
+                        actual DB row) has loaded. */
+                        }
+                        {detail
+                            ? (
+                                <>
+                                    <IdRow
+                                        icon
+                                        label={get_text(
+                                            "generation_id",
+                                            language.value,
+                                        )}
+                                        value={detail.id}
+                                    />
+                                    {detail.task_id && (
+                                        <IdRow
+                                            label={get_text(
+                                                "task_id",
+                                                language.value,
+                                            )}
+                                            value={detail.task_id}
+                                        />
+                                    )}
+                                </>
+                            )
+                            : (
+                                <IdRow
+                                    icon
+                                    label={get_text("id", language.value)}
+                                    value={generation.id}
+                                />
+                            )}
                     </div>
 
                     {generation.failed_reason && (
@@ -190,8 +225,18 @@ export function GenerationDetailModal(props: {
 
                                 {/* Prompt */}
                                 <div>
-                                    <div class="text-xs font-medium text-gray-400 mb-1.5">
-                                        {get_text("prompt", language.value)}
+                                    <div class="flex items-center gap-1.5 mb-1.5">
+                                        <div class="text-xs font-medium text-gray-400">
+                                            {get_text(
+                                                "prompt",
+                                                language.value,
+                                            )}
+                                        </div>
+                                        {prompt && (
+                                            <CopyButton
+                                                value={prompt}
+                                            />
+                                        )}
                                     </div>
                                     {prompt
                                         ? (
@@ -352,6 +397,54 @@ export function GenerationDetailModal(props: {
     );
 }
 
+/** A labeled, monospaced id value with a copy button. `icon` shows the video
+ * glyph in place of the leading spacer, for the first row of a group. */
+function IdRow(props: { label: string; value: string; icon?: boolean }) {
+    return (
+        <div class="flex items-center gap-2 text-sm text-gray-400 [overflow-wrap:anywhere]">
+            {props.icon
+                ? <VideoIcon class="size-4 shrink-0" />
+                : <span class="size-4 shrink-0" />}
+            <span>{props.label}:</span>
+            <span class="font-mono text-gray-200">{props.value}</span>
+            <CopyButton value={props.value} />
+        </div>
+    );
+}
+
+/** Small icon button that copies `value` to the clipboard, with a brief
+ * "copied" confirmation in place of the copy icon. */
+function CopyButton(props: { value: string }) {
+    const copied = useSignal(false);
+
+    const copy = async (e: MouseEvent) => {
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(props.value);
+            copied.value = true;
+            setTimeout(() => copied.value = false, 1500);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={copy}
+            aria-label={get_text("copy", language.value)}
+            title={copied.value
+                ? get_text("copied", language.value)
+                : get_text("copy", language.value)}
+            class="shrink-0 size-5 rounded flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/10 hover:cursor-pointer transition-colors"
+        >
+            {copied.value
+                ? <CheckIcon class="size-3.5 text-emerald-400" />
+                : <CopyIcon class="size-3.5" />}
+        </button>
+    );
+}
+
 function Stat(props: { label: string; value: string; hint?: string }) {
     return (
         <div class="rounded-lg bg-gray-800/70 px-3 py-2">
@@ -379,6 +472,39 @@ function VideoIcon(props: { class?: string }) {
         >
             <rect x="2" y="4" width="20" height="16" rx="3" />
             <path d="m10 9 5 3-5 3z" />
+        </svg>
+    );
+}
+
+function CopyIcon(props: { class?: string }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    );
+}
+
+function CheckIcon(props: { class?: string }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <path d="M20 6 9 17l-5-5" />
         </svg>
     );
 }
