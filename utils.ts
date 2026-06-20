@@ -1,5 +1,4 @@
 import { createDefine } from "fresh";
-import { join } from "@std/path";
 
 // This specifies the type of "ctx.state" which is used to share
 // data among middlewares, layouts and routes.
@@ -12,14 +11,10 @@ export const define = createDefine<State>();
 // Servable URL for a generated video. Leading-slash absolute path (matching the
 // `/project-file/...` convention everywhere else) so it loads regardless of the
 // current page and so consumers can strip the `/project-file/` prefix to get a
-// project-relative path (e.g. for drag-and-drop copy).
+// project-relative path (e.g. for drag-and-drop copy). Built with a literal
+// "/" — `@std/path`'s `join` would use "\" on Windows, breaking that prefix.
 export function get_video_url(task_id: string) {
-    return join(
-        "/project-file",
-        ".open-director",
-        "generations",
-        `${task_id}.mp4`,
-    );
+    return `/project-file/.open-director/generations/${task_id}.mp4`;
 }
 
 /** Hex-encoded SHA-256 digest of `bytes`, for content-addressing files. */
