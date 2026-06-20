@@ -48,6 +48,16 @@ function requireDb(): NonNullable<typeof db> {
     return db;
 }
 
+/**
+ * Forward-slash form of an absolute path, for paths returned to MCP clients.
+ * Windows accepts "/" in paths just as well as "\", and this sidesteps any
+ * client/renderer that treats a literal "\." (e.g. before a dotfile like
+ * `.open-director`) as a Markdown escape sequence and silently drops it.
+ */
+function toPortablePath(p: string): string {
+    return p.replaceAll("\\", "/");
+}
+
 /** Concatenated text of a request's text content items. */
 function promptOf(req: CreateTaskRequest): string {
     return req.content
@@ -55,6 +65,42 @@ function promptOf(req: CreateTaskRequest): string {
         .map((c) => c.text)
         .join("\n")
         .trim();
+}
+
+interface ReferenceInput {
+    kind: "image" | "video" | "audio";
+    url: string;
+    /** Absolute local file path, when `url` is one of our own
+     * `/project-file/...` references and a project is open; null for
+     * external URLs or data URLs that somehow weren't externalized. */
+    path: string | null;
+}
+
+/** Reference image/video/audio attachments on a request, in prompt order. */
+function referenceInputsOf(
+    req: CreateTaskRequest,
+    projectRoot: string | null,
+): ReferenceInput[] {
+    const refs = req.content.flatMap((c): Omit<ReferenceInput, "path">[] => {
+        if (c.type === "image_url") {
+            return [{ kind: "image", url: c.image_url.url }];
+        }
+        if (c.type === "video_url") {
+            return [{ kind: "video", url: c.video_url.url }];
+        }
+        if (c.type === "audio_url") {
+            return [{ kind: "audio", url: c.audio_url.url }];
+        }
+        return [];
+    });
+    return refs.map((ref) => ({
+        ...ref,
+        path: projectRoot && ref.url.startsWith("/project-file/")
+            ? toPortablePath(
+                join(projectRoot, ref.url.replace(/^\/project-file\//, "")),
+            )
+            : null,
+    }));
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -209,7 +255,8 @@ const TOOLS: Tool[] = [
         name: "get_generation",
         description:
             "Get the full status of one generation by its id or task id: live " +
-            "status, downloaded video file path, token usage and rough cost.",
+            "status, downloaded video file path, reference image/video/audio " +
+            "inputs (with local file paths), token usage and rough cost.",
         inputSchema: {
             type: "object",
             properties: {
@@ -260,12 +307,19 @@ const TOOLS: Tool[] = [
                 ? task.updated_at - task.created_at
                 : null;
 
+            // Reference images/video/audio attached to the prompt, with a
+            // local file path alongside the stored `/project-file/...` url
+            // when it's one of ours — so a local agent can read the bytes
+            // directly instead of having to know this server's origin.
+            const references = referenceInputsOf(row.request_json, projectRoot);
+
             return JSON.stringify(
                 {
                     id: row.id,
                     task_id: row.task_id ?? null,
                     status,
                     prompt: promptOf(row.request_json),
+                    reference_inputs: references,
                     failed_reason: row.failed_reason ?? null,
                     video_path: videoPath,
                     remote_video_url: task?.content?.video_url ?? null,
