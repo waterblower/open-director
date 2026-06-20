@@ -29,6 +29,11 @@ import type { CreateTaskRequest } from "../seedance/seedance.ts";
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "open-director", version: "0.1.0" } as const;
 
+/** The protocol version this server advertises in `initialize`. */
+export const MCP_PROTOCOL_VERSION = PROTOCOL_VERSION;
+/** The `serverInfo` this server advertises in `initialize`. */
+export const MCP_SERVER_INFO = SERVER_INFO;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -323,6 +328,16 @@ const TOOLS: Tool[] = [
         },
     },
 ];
+
+/** Tool metadata (name, description, input schema) without the handler, for
+ * display in the GUI's MCP info modal — exactly what `tools/list` returns. */
+export function listMcpTools() {
+    return TOOLS.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+    }));
+}
 
 // ---------------------------------------------------------------------------
 // JSON-RPC dispatch

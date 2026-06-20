@@ -143,6 +143,31 @@ const TEXTS = {
     save: { English: "Save", Chinese: "保存" },
     language_label: { English: "Language", Chinese: "语言" },
 
+    // McpInfoModal
+    mcp_server: { English: "MCP Server", Chinese: "MCP 服务器" },
+    mcp_server_subtitle: {
+        English:
+            "Let a local coding agent (Claude Code, Codex, …) drive Open Director.",
+        Chinese: "让本地编码助手（Claude Code、Codex 等）操作 Open Director。",
+    },
+    connection: { English: "Connection", Chinese: "连接信息" },
+    endpoint_url: { English: "Endpoint URL", Chinese: "服务地址" },
+    protocol: { English: "Protocol", Chinese: "协议" },
+    protocol_version: { English: "Protocol version", Chinese: "协议版本" },
+    transport: { English: "Transport", Chinese: "传输方式" },
+    server_name: { English: "Server name", Chinese: "服务器名称" },
+    server_version: { English: "Server version", Chinese: "服务器版本" },
+    quick_setup: { English: "Quick setup", Chinese: "快速配置" },
+    available_tools: { English: "Available tools", Chinese: "可用工具" },
+    parameters: { English: "Parameters", Chinese: "参数" },
+    required: { English: "required", Chinese: "必填" },
+    copied: { English: "Copied", Chinese: "已复制" },
+    no_project_open_mcp_warning: {
+        English:
+            "No project is open — tools that touch generations will fail until one is.",
+        Chinese: "尚未打开项目——涉及生成记录的工具在打开项目前会调用失败。",
+    },
+
     // GenerationCard
     generation_failed: { English: "Generation failed", Chinese: "生成失败" },
     unknown_reason: { English: "Unknown reason", Chinese: "未知原因" },

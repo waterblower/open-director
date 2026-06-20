@@ -32,6 +32,11 @@ import {
 } from "../db.ts";
 import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
 import { externalizeAttachments } from "../uploads.ts";
+import {
+    listMcpTools,
+    MCP_PROTOCOL_VERSION,
+    MCP_SERVER_INFO,
+} from "../mcp/server.ts";
 import type {
     ContentItem,
     CreateTaskRequest,
@@ -669,6 +674,20 @@ export const appRouter = router({
             }
             return { ok: true };
         }),
+
+    // Everything the GUI's MCP info modal shows: server identity, protocol
+    // version, and the tool catalog exactly as advertised over `tools/list`.
+    // The endpoint URL itself is derived client-side from `location.origin`
+    // since the server doesn't know which host/port the browser used.
+    getMcpServerInfo: publicProcedure.query(() => {
+        return {
+            name: MCP_SERVER_INFO.name,
+            version: MCP_SERVER_INFO.version,
+            protocolVersion: MCP_PROTOCOL_VERSION,
+            endpointPath: "/mcp",
+            tools: listMcpTools(),
+        };
+    }),
 
     // Whether a Seedance API key is configured, plus a masked preview for the
     // settings modal. The full key is never sent to the client.
