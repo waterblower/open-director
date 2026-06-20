@@ -13,15 +13,18 @@ import { join } from "@std/path";
 import { VIDEOS_DIR } from "./trpc/router.ts";
 import {
     db,
+    getContentHashByGenerationId,
     getGenerationById,
     listDownloadedGenerations,
     listPendingGenerations,
     markDownloaded,
+    recordContentHash,
     recordTaskStatus,
 } from "./db.ts";
 import type { Task } from "./seedance/seedance.ts";
 import { global_event_bus } from "./trpc/router.ts";
 import { getStoredProjectPath } from "./kv.ts";
+import { sha256Hex } from "./utils.ts";
 
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
@@ -77,22 +80,38 @@ export async function check_and_download(): Promise<void | Error> {
         const downloaded = listDownloadedGenerations(db);
         for (const gen of downloaded) {
             try {
-                const dest = join(project_path, VIDEOS_DIR, `${gen.task_id}.mp4`);
-                if (await fileExists(dest)) continue;
-
-                console.log(`missing on disk, re-downloading ${gen.task_id}.mp4`);
-                const task = await seedance_client.getTask(gen.task_id);
-                if (task instanceof Error) {
-                    console.error(`re-fetch task ${gen.task_id} failed:`, task);
-                    continue;
-                }
-                if (task.status !== "succeeded") {
-                    console.error(
-                        `cannot re-download ${gen.task_id}: status ${task.status}`,
+                const dest = join(
+                    project_path,
+                    VIDEOS_DIR,
+                    `${gen.task_id}.mp4`,
+                );
+                if (!(await fileExists(dest))) {
+                    console.log(
+                        `missing on disk, re-downloading ${gen.task_id}.mp4`,
                     );
+                    const task = await seedance_client.getTask(gen.task_id);
+                    if (task instanceof Error) {
+                        console.error(
+                            `re-fetch task ${gen.task_id} failed:`,
+                            task,
+                        );
+                        continue;
+                    }
+                    if (task.status !== "succeeded") {
+                        console.error(
+                            `cannot re-download ${gen.task_id}: status ${task.status}`,
+                        );
+                        continue;
+                    }
+                    await downloadAndRecord(db, project_path, gen.id, task);
                     continue;
                 }
-                await downloadAndRecord(db, project_path, gen.id, task);
+
+                // Backfill the content hash for videos downloaded before
+                // hashing existed — only ever computed once per generation.
+                if (getContentHashByGenerationId(db, gen.id) == null) {
+                    await hashAndRecord(db, gen.id, dest);
+                }
             } catch (err) {
                 console.error(`healing generation ${gen.task_id} failed:`, err);
             }
@@ -116,19 +135,20 @@ async function downloadAndRecord(
 ): Promise<void> {
     const url = task.content?.video_url;
     if (!url) {
-        console.error(`task ${task.id} succeeded but has no video url; skipping`);
+        console.error(
+            `task ${task.id} succeeded but has no video url; skipping`,
+        );
         return;
     }
 
-    const err = await downloadVideo(
-        url,
-        join(projectPath, VIDEOS_DIR, `${task.id}.mp4`),
-    );
+    const dest = join(projectPath, VIDEOS_DIR, `${task.id}.mp4`);
+    const err = await downloadVideo(url, dest);
     if (err instanceof Error) {
         console.error(`download ${task.id} failed:`, err);
         return;
     }
     console.log("downloaded", `${task.id}.mp4`);
+    await hashAndRecord(db, genId, dest);
 
     markDownloaded(db, {
         taskId: task.id,
@@ -148,6 +168,27 @@ async function downloadAndRecord(
         type: "generation_finished",
         gen: generation,
     });
+}
+
+/**
+ * Hash a downloaded video and record it against its generation, so any later
+ * copy or rename of that file can be traced back to the prompt that produced
+ * it (see `getGenerationIdByContentHash`).
+ */
+async function hashAndRecord(
+    db: DatabaseSync,
+    genId: string,
+    dest: string,
+): Promise<void> {
+    try {
+        const hash = await sha256Hex(await Deno.readFile(dest));
+        const err = recordContentHash(db, genId, hash);
+        if (err instanceof Error) {
+            console.error(`record content hash for ${genId} failed:`, err);
+        }
+    } catch (err) {
+        console.error(`hash ${dest} failed:`, err);
+    }
 }
 
 /** Whether a file exists at `path`. */

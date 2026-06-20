@@ -119,6 +119,7 @@ const TEXTS = {
     },
     copy: { English: "Copy", Chinese: "复制" },
     rename: { English: "Rename", Chinese: "重命名" },
+    prompt_details: { English: "Prompt details", Chinese: "提示词详情" },
 
     // SettingsModal
     please_enter_an_api_key: {

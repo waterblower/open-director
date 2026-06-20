@@ -86,6 +86,11 @@ export async function getDatabase(project_root?: string) {
         CREATE TABLE IF NOT EXISTS ArchivedGenerations (
             generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
         );
+
+        CREATE TABLE IF NOT EXISTS ContentHashes (
+            generation_id TEXT UNIQUE REFERENCES Generations(id),
+            content_hash  TEXT UNIQUE
+        );
     `);
     return db;
 }
@@ -458,4 +463,56 @@ export function listArchivedGenerationIds(db: DatabaseSync): string[] {
     ).all();
     return z.array(ArchivedGenerationRowSchema).parse(rows)
         .map((row) => row.generation_id);
+}
+
+/** A row of the `ContentHashes` table. */
+export const ContentHashRowSchema = z.object({
+    generation_id: z.ulid(),
+    content_hash: z.string(),
+});
+
+export type ContentHashRow = z.infer<typeof ContentHashRowSchema>;
+
+/**
+ * Record (or update) the content hash of a generation's downloaded video, so
+ * a copy or rename of that file elsewhere in the project can still be traced
+ * back to the generation that produced it by matching bytes.
+ */
+export function recordContentHash(
+    db: DatabaseSync,
+    generationId: string,
+    contentHash: string,
+): void | Error {
+    try {
+        db.prepare(
+            `INSERT INTO ContentHashes (generation_id, content_hash)
+             VALUES (:generation_id, :content_hash)
+             ON CONFLICT(generation_id) DO UPDATE SET
+                 content_hash = excluded.content_hash`,
+        ).run({ generation_id: generationId, content_hash: contentHash });
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+/** The content hash recorded for a generation, if any. */
+export function getContentHashByGenerationId(
+    db: DatabaseSync,
+    generationId: string,
+): string | null {
+    const row = db.prepare(
+        "SELECT content_hash FROM ContentHashes WHERE generation_id = ?",
+    ).get(generationId) as { content_hash: string } | undefined;
+    return row?.content_hash ?? null;
+}
+
+/** The generation whose video's content hash matches `contentHash`, if any. */
+export function getGenerationIdByContentHash(
+    db: DatabaseSync,
+    contentHash: string,
+): string | null {
+    const row = db.prepare(
+        "SELECT generation_id FROM ContentHashes WHERE content_hash = ?",
+    ).get(contentHash) as { generation_id: string } | undefined;
+    return row?.generation_id ?? null;
 }

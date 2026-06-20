@@ -21,3 +21,11 @@ export function get_video_url(task_id: string) {
         `${task_id}.mp4`,
     );
 }
+
+/** Hex-encoded SHA-256 digest of `bytes`, for content-addressing files. */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+}

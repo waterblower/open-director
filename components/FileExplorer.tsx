@@ -1,4 +1,9 @@
-import { type Signal, useSignal, useSignalEffect } from "@preact/signals";
+import {
+    type Signal,
+    signal,
+    useSignal,
+    useSignalEffect,
+} from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import {
     get_text,
@@ -8,6 +13,11 @@ import {
     trpc,
 } from "../trpc/client.ts";
 import { PROJECT_FILE_MIME } from "./dnd.ts";
+import type { GeneratedVideo } from "./GenerationCard.tsx";
+import {
+    type GenerationDetail,
+    GenerationDetailModal,
+} from "./GenerationDetailModal.tsx";
 
 /**
  * All file-explorer state that only makes sense once a project is open. When no
@@ -36,15 +46,31 @@ export function FileExplorer(props: {
 }) {
     const { width, projectData } = props;
     const error = useSignal<string | null>(null);
-    const menu = useSignal<
-        { entry: FileEntry; path: string; x: number; y: number } | null
-    >(null);
+
     const preview = useSignal<{ path: string; x: number; y: number } | null>(
         null,
     );
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
+
+    const menu = useSignal<
+        {
+            entry: FileEntry;
+            path: string;
+            x: number;
+            y: number;
+            /** Generation id matched (by content hash) for this file, or
+             * null while unchecked / no match. A nested signal so the lookup
+             * can resolve in place without replacing the whole menu object. */
+            promptGenerationId: Signal<string | null>;
+        } | null
+    >(null);
+    const promptModal = useSignal<
+        { generationId: string; path: string } | null
+    >(
+        null,
+    );
 
     let projectName: string | undefined = get_text(
         "open_a_project",
@@ -201,10 +227,37 @@ export function FileExplorer(props: {
         renaming,
     };
 
+    // Opens the context menu and, for files, checks whether their content
+    // matches a recorded generation — the "Prompt details" item only shows up
+    // once (if) that check resolves with a match.
+    const openMenu = async (
+        entry: FileEntry,
+        path: string,
+        x: number,
+        y: number,
+    ) => {
+        const promptGenerationId = signal<string | null>(null);
+        menu.value = { entry, path, x, y, promptGenerationId };
+        const root = projectData.value?.rootPath;
+        if (!entry.isFile || !root) return;
+        try {
+            const id = await trpc.getGenerationIdForFile.query({
+                project_root: root,
+                path,
+            });
+            // Ignore if the menu has moved on to a different entry by now.
+            if (menu.value?.promptGenerationId === promptGenerationId) {
+                promptGenerationId.value = id;
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
     const callbacks: TreeCallbacks = {
         onSelect: props.onSelect,
         loadChildren,
-        openMenu: (entry, path, x, y) => menu.value = { entry, path, x, y },
+        openMenu,
         dropFile,
         commitRename: commitRename(renaming, projectData, refreshDir),
         previewImage: (path, x, y) =>
@@ -459,8 +512,32 @@ export function FileExplorer(props: {
                                 {get_text("rename", language.value)}
                             </button>
                         )}
+                        {menu.value.promptGenerationId.value && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    promptModal.value = {
+                                        generationId: menu.value!
+                                            .promptGenerationId.value!,
+                                        path: menu.value!.path,
+                                    };
+                                    menu.value = null;
+                                }}
+                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                            >
+                                {get_text("prompt_details", language.value)}
+                            </button>
+                        )}
                     </div>
                 </>
+            )}
+
+            {promptModal.value && (
+                <FilePromptDetailsModal
+                    generationId={promptModal.value.generationId}
+                    path={promptModal.value.path}
+                    onClose={() => promptModal.value = null}
+                />
             )}
         </>
     );
@@ -504,6 +581,51 @@ function sortEntries(entries: FileEntry[]): FileEntry[] {
 /** Build the URL that serves a project-relative file. */
 function projectFileUrl(rel: string): string {
     return "/project-file/" + rel.split("/").map(encodeURIComponent).join("/");
+}
+
+/**
+ * The generation detail modal for a file matched by content hash. Fetches
+ * the generation's stored detail on mount; the video preview plays the
+ * file actually clicked (which may be a renamed copy), not the original.
+ */
+function FilePromptDetailsModal(
+    props: { generationId: string; path: string; onClose: () => void },
+) {
+    const { generationId, path, onClose } = props;
+    const detail = useSignal<GenerationDetail | null>(null);
+    const loading = useSignal(true);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                detail.value = await trpc.getGenerationDetail.query(
+                    generationId,
+                );
+            } catch (err) {
+                console.error(err);
+            } finally {
+                loading.value = false;
+            }
+        })();
+    }, [generationId]);
+
+    const generation: GeneratedVideo = {
+        id: generationId,
+        status: detail.value?.status ?? "succeeded",
+        created_at: detail.value?.created_at ?? "",
+        has_request: detail.value?.request_json != null,
+        url: projectFileUrl(path),
+        failed_reason: detail.value?.failed_reason ?? undefined,
+    };
+
+    return (
+        <GenerationDetailModal
+            generation={generation}
+            detail={detail.value}
+            loading={loading.value}
+            onClose={onClose}
+        />
+    );
 }
 
 interface ExplorerState {

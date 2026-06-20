@@ -21,6 +21,7 @@ import {
     getGenerationById,
     getGenerationByTaskId,
     getGenerationDetail,
+    getGenerationIdByContentHash,
     getGenerationRequest,
     listArchivedGenerationIds,
     listGenerations,
@@ -38,7 +39,7 @@ import type {
     TaskStatus,
 } from "../seedance/seedance.ts";
 import { chan, closed } from "@blowater/csp";
-import { get_video_url } from "../utils.ts";
+import { get_video_url, sha256Hex } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".open-director/generations";
@@ -235,6 +236,27 @@ export const appRouter = router({
     listArchivedGenerations: publicProcedure.input(z.object({
         project_root: z.string(),
     })).query(({ input }) => buildVideoList(input.project_root, true)),
+
+    // Look up a generation by a project file's content — hashes the file at
+    // `path` and matches it against recorded video hashes, so a copy or
+    // rename of a generated video (e.g. dragged into a folder) can still be
+    // traced back to the prompt that produced it. Null when there's no
+    // project DB, the file can't be read, or no generation matches.
+    getGenerationIdForFile: publicProcedure
+        .input(z.object({ project_root: z.string(), path: z.string() }))
+        .query(async ({ input }) => {
+            if (!db) return null;
+            const target = resolveInProject(input.project_root, input.path);
+            if (target instanceof Error) return null;
+            let bytes: Uint8Array;
+            try {
+                bytes = await Deno.readFile(target);
+            } catch {
+                return null;
+            }
+            const hash = await sha256Hex(bytes);
+            return getGenerationIdByContentHash(db, hash);
+        }),
 
     // Read the immediate (non-recursive) entries of `<projectRoot>/<path>`.
     // `path` is relative to the given project root; "" reads the root itself.
