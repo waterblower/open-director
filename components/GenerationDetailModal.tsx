@@ -58,7 +58,7 @@ export function GenerationDetailModal(props: {
     const totalTokens = task?.usage?.total_tokens ?? null;
     const completionTokens = task?.usage?.completion_tokens ?? null;
     const cost = totalTokens != null && req
-        ? estimateCost(totalTokens, req.model)
+        ? estimateCost(totalTokens, req)
         : null;
 
     const prompt = promptText(req);

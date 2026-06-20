@@ -249,7 +249,7 @@ const TOOLS: Tool[] = [
 
             const totalTokens = task?.usage?.total_tokens ?? null;
             const cost = totalTokens != null
-                ? estimateCost(totalTokens, row.request_json.model)
+                ? estimateCost(totalTokens, row.request_json)
                 : null;
             const elapsed = task?.created_at != null && task.updated_at != null
                 ? task.updated_at - task.created_at
