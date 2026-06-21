@@ -5,8 +5,8 @@ export default function ImageGridEditor() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imageSrc = useSignal<string | null>(null);
-    const cols = useSignal(9);
-    const rows = useSignal(9);
+    const cols = useSignal(39);
+    const rows = useSignal(39);
     const lineColor = useSignal("#000000");
     const lineWidth = useSignal(1);
     const fileName = useSignal("image");
