@@ -50,6 +50,8 @@ export function FileExplorer(props: {
     const preview = useSignal<{ path: string; x: number; y: number } | null>(
         null,
     );
+    /** Path of the video currently playing in the double-click modal, or null. */
+    const videoModal = useSignal<string | null>(null);
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
     const renaming = useSignal<string | null>(null);
@@ -263,6 +265,7 @@ export function FileExplorer(props: {
         previewImage: (path, x, y) =>
             preview.value = path ? { path, x, y } : null,
         openInDefault,
+        playVideo: (path) => videoModal.value = path,
     };
 
     // Drag the right edge to resize; the sidebar starts at x=0 so width = x.
@@ -539,6 +542,36 @@ export function FileExplorer(props: {
                     onClose={() => promptModal.value = null}
                 />
             )}
+
+            {/* Double-click on a video opens it here, autoplaying. */}
+            {videoModal.value && (
+                <div
+                    class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                            videoModal.value = null;
+                        }
+                    }}
+                >
+                    <div class="relative w-full max-w-3xl">
+                        <button
+                            type="button"
+                            aria-label={get_text("close", language.value)}
+                            onClick={() => videoModal.value = null}
+                            class="absolute -top-9 right-0 size-8 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-sm hover:cursor-pointer transition-colors"
+                        >
+                            ✕
+                        </button>
+                        <video
+                            src={projectFileUrl(videoModal.value)}
+                            autoPlay
+                            controls
+                            playsInline
+                            class="w-full max-h-[85vh] bg-black rounded-2xl object-contain"
+                        />
+                    </div>
+                </div>
+            )}
         </>
     );
 }
@@ -734,6 +767,8 @@ interface TreeCallbacks {
     previewImage: (path: string | null, x: number, y: number) => void;
     /** Open a file with the OS default application. */
     openInDefault: (path: string) => void;
+    /** Open a video in the autoplay modal. */
+    playVideo: (path: string) => void;
 }
 
 /**
@@ -843,11 +878,14 @@ function Node(
                     <button
                         type="button"
                         onClick={onClick}
-                        // Double-click opens files in the OS default app
+                        // Double-click opens files in the OS default app,
+                        // except videos which play inline in a modal
                         // (directories just toggle via the single click).
-                        onDblClick={!entry.isDirectory
-                            ? () => callbacks.openInDefault(path)
-                            : undefined}
+                        onDblClick={entry.isDirectory
+                            ? undefined
+                            : isVideoFile(entry)
+                            ? () => callbacks.playVideo(path)
+                            : () => callbacks.openInDefault(path)}
                         onContextMenu={(e) => {
                             e.preventDefault();
                             callbacks.openMenu(
