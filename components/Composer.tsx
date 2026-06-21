@@ -984,14 +984,14 @@ export function Composer(props: {
                             </button>
 
                             {popover.value === "settings" && (
-                                <div class="absolute left-0 bottom-full mb-2 z-20 w-[560px] bg-white rounded-xl shadow-xl border border-gray-100 p-5">
+                                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 w-[min(560px,calc(100vw-2rem))] max-h-[80vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-100 p-5">
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text(
                                             "aspect_ratio",
                                             language.value,
                                         )}
                                     </div>
-                                    <div class="grid grid-cols-7 gap-2 mb-5">
+                                    <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
                                         {RATIOS.map((r) => (
                                             <button
                                                 key={r.value}
