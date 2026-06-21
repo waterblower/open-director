@@ -1,4 +1,4 @@
-import { useRef } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 
 export default function ImageGridEditor() {
@@ -71,6 +71,36 @@ export default function ImageGridEditor() {
         const file = (e.currentTarget as HTMLInputElement).files?.[0];
         if (file) loadFile(file);
     }
+
+    useEffect(() => {
+        function onPaste(e: ClipboardEvent) {
+            const file = Array.from(e.clipboardData?.items ?? [])
+                .find((item) => item.type.startsWith("image/"))
+                ?.getAsFile();
+            if (file) loadFile(file);
+        }
+        window.addEventListener("paste", onPaste);
+        return () => window.removeEventListener("paste", onPaste);
+    }, []);
+
+    useEffect(() => {
+        function onKeyDown(e: KeyboardEvent) {
+            if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "c") {
+                return;
+            }
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            e.preventDefault();
+            canvas.toBlob((blob) => {
+                if (!blob) return;
+                navigator.clipboard.write([
+                    new ClipboardItem({ [blob.type]: blob }),
+                ]);
+            });
+        }
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, []);
 
     function download() {
         const canvas = canvasRef.current;
@@ -245,7 +275,8 @@ export default function ImageGridEditor() {
                             <path d="m21 15-5-5L5 21" />
                         </svg>
                         <span class="text-sm text-gray-500">
-                            Click to select an image, or drag one here
+                            Click to select an image, drag one here, or paste
+                            from clipboard
                         </span>
                     </div>
                 )}
