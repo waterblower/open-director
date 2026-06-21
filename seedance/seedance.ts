@@ -644,6 +644,7 @@ export class SeedanceClient {
     async postForm<T>(path: string, form: FormData) {
         // Do NOT set Content-Type — the browser/runtime must set it with the boundary
         const res = await this.fetchRaw(path, { method: "POST", body: form });
+        if (res instanceof Error) return res;
         return this.parseResponse(res);
     }
 
@@ -653,20 +654,29 @@ export class SeedanceClient {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
+        if (res instanceof Error) return res;
         return this.parseResponse(res);
     }
 
     async get(path: string) {
         const res = await this.fetchRaw(path, { method: "GET" });
+        if (res instanceof Error) return res;
         return this.parseResponse(res);
     }
 
     async delete<T>(path: string) {
         const res = await this.fetchRaw(path, { method: "DELETE" });
+        if (res instanceof Error) return res;
         return this.parseResponse(res);
     }
 
-    async fetchRaw(path: string, init: RequestInit): Promise<Response> {
+    /**
+     * Perform the request, returning an Error instead of throwing on transport
+     * failures (DNS / connection refused / network drop, or the 30-min timeout
+     * aborting). Callers can then record a failed generation rather than letting
+     * the rejection unwind the whole request.
+     */
+    async fetchRaw(path: string, init: RequestInit): Promise<Response | Error> {
         const url = `${this.baseUrl}${path}`;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 1000 * 60 * 30); // 30 minutes
@@ -680,6 +690,20 @@ export class SeedanceClient {
                 },
                 signal: controller.signal,
             });
+        } catch (err) {
+            if (controller.signal.aborted) {
+                return new SeedanceError(
+                    0,
+                    "timeout",
+                    `Request to ${path} timed out`,
+                );
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            return new SeedanceError(
+                0,
+                "network_error",
+                `Request to ${path} failed: ${message}`,
+            );
         } finally {
             clearTimeout(timer);
         }
@@ -687,16 +711,39 @@ export class SeedanceClient {
 
     async parseResponse(res: Response): Promise<unknown | Error> {
         const requestId = res.headers.get("x-request-id") ?? undefined;
-        const body = await res.json();
+
+        // Read the body as text once, then try to parse it — so a non-JSON
+        // body (HTML error page, gateway error, empty response) becomes an
+        // Error instead of throwing out of `res.json()`.
+        const text = await res.text().catch(() => "");
+        let body: unknown;
+        if (text) {
+            try {
+                body = JSON.parse(text);
+            } catch {
+                body = undefined;
+            }
+        }
+        // deno-lint-ignore no-explicit-any
+        const b = body as any;
 
         if (!res.ok) {
-            const code = body?.error?.code ?? body?.code ?? String(res.status);
-            const message = body?.error?.message ?? body?.message ??
+            const code = b?.error?.code ?? b?.code ?? String(res.status);
+            const message = b?.error?.message ?? b?.message ?? text ??
                 res.statusText;
             return new SeedanceError(res.status, code, message, requestId);
         }
 
-        return body as unknown;
+        if (body === undefined) {
+            return new SeedanceError(
+                res.status,
+                "invalid_response",
+                text ? "Response was not valid JSON" : "Empty response body",
+                requestId,
+            );
+        }
+
+        return body;
     }
 }
 

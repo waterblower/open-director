@@ -17,11 +17,20 @@ import {
     getGenerationById,
     listDownloadedGenerations,
     listPendingGenerations,
+    listQueuedWithoutTask,
     markDownloaded,
     recordContentHash,
     recordTaskStatus,
+    updateGeneration,
 } from "./db.ts";
-import type { Task } from "./seedance/seedance.ts";
+import { SeedanceError, type Task } from "./seedance/seedance.ts";
+
+/**
+ * How long a generation may sit "queued" with no Seedance task id before we
+ * treat it as a failed creation. Long enough not to race a submission still in
+ * flight (the create's network call holds the row in this state briefly).
+ */
+const QUEUED_GRACE_MS = 5 * 60 * 1000;
 import { global_event_bus } from "./trpc/router.ts";
 import { getStoredProjectPath } from "./kv.ts";
 import { sha256Hex } from "./utils.ts";
@@ -45,7 +54,20 @@ export async function check_and_download(): Promise<void | Error> {
             try {
                 const task = await seedance_client.getTask(gen.task_id);
                 if (task instanceof Error) {
-                    console.error(`get task ${gen.task_id} failed:`, task);
+                    // 404 → Seedance has no such task (never persisted / purged):
+                    // terminal, so mark failed and stop polling it. Other errors
+                    // (network, 5xx) are transient — log and retry next pass.
+                    if (task instanceof SeedanceError && task.status === 404) {
+                        const e = updateGeneration(db, {
+                            id: gen.id,
+                            status: "failed",
+                            failed_reason:
+                                `Seedance 未找到任务 ${gen.task_id}（任务不存在）`,
+                        });
+                        if (e instanceof Error) console.error(e);
+                    } else {
+                        console.error(`get task ${gen.task_id} failed:`, task);
+                    }
                     continue;
                 }
 
@@ -117,7 +139,33 @@ export async function check_and_download(): Promise<void | Error> {
             }
         }
 
-        // 4. Re-run the loop every 5 seconds.
+        // 4. Fail stuck "queued" rows that never got a Seedance task id — the
+        //    create call failed (or the process died) before submission. Past
+        //    the grace period there's no task to query, so they can never make
+        //    progress; mark them failed so they leave the active list.
+        const stuck = listQueuedWithoutTask(db);
+        for (const gen of stuck) {
+            try {
+                const ageMs = Date.now() - Date.parse(gen.created_at);
+                if (ageMs <= QUEUED_GRACE_MS) continue; // still being submitted
+
+                console.log(
+                    `failing stuck queued generation ${gen.id} (never submitted)`,
+                );
+                const err = updateGeneration(db, {
+                    id: gen.id,
+                    status: "failed",
+                    failed_reason: "创建任务失败：未提交到 Seedance（无 task id）",
+                });
+                if (err instanceof Error) {
+                    console.error(`fail stuck generation ${gen.id}:`, err);
+                }
+            } catch (err) {
+                console.error(`healing queued generation ${gen.id} failed:`, err);
+            }
+        }
+
+        // 5. Re-run the loop every 5 seconds.
         await delay(5000);
     }
 }

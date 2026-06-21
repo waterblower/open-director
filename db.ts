@@ -99,7 +99,7 @@ export async function getDatabase(project_root?: string) {
 export const GenerationRowSchema = z.object({
     id: z.ulid(),
     created_at: z.iso.datetime(),
-    status: z.enum(["running", "succeeded", "failed", "queued"]),
+    status: z.enum(["queued", "running", "succeeded", "failed"]),
     request_json: jsonColumn(CreateTaskRequestSchema),
     task_id: z.string().nullable().optional(),
     task_json: jsonColumn(TaskSchema).nullable().optional(),
@@ -282,6 +282,22 @@ export function listPendingGenerations(db: DatabaseSync) {
            AND (status IS NULL OR status != 'failed')`,
     ).all();
     return z.array(z.object({ id: z.string(), task_id: z.string() }))
+        .parse(rows);
+}
+
+/**
+ * Queued generations that never received a Seedance task id — i.e. the create
+ * call failed (or the process died) before submission completed. Returned with
+ * `created_at` so the caller can apply an age grace period before failing them,
+ * avoiding a race with a generation that's still mid-submission (briefly queued
+ * with a null task id).
+ */
+export function listQueuedWithoutTask(db: DatabaseSync) {
+    const rows = db.prepare(
+        `SELECT id, created_at FROM Generations
+         WHERE status = 'queued' AND task_id IS NULL`,
+    ).all();
+    return z.array(z.object({ id: z.string(), created_at: z.string() }))
         .parse(rows);
 }
 
