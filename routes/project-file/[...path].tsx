@@ -1,5 +1,6 @@
 import { define } from "../../utils.ts";
-import { resolveInProject_deprecated } from "../../project.ts";
+import { getStoredProjectPath } from "../../kv.ts";
+import { resolveInProject } from "../../project.ts";
 
 const CONTENT_TYPES: Record<string, string> = {
     mp4: "video/mp4",
@@ -51,6 +52,10 @@ function limitedStream(
 // Supports HTTP Range requests so <video> can play/seek.
 export const handler = define.handlers({
     async GET(ctx) {
+        const projectRoot = await getStoredProjectPath();
+        if (!projectRoot) {
+            return new Response("No project open", { status: 404 });
+        }
         // Fresh decodes path params, but fall back to a decoded form just in
         // case the raw value is still percent-encoded.
         const candidates = [ctx.params.path];
@@ -63,9 +68,9 @@ export const handler = define.handlers({
         let size = 0;
         let ext = "";
         for (const rel of candidates) {
-            const abs = await resolveInProject_deprecated(rel);
-            if (!abs) {
-                throw new Error("Path not found");
+            const abs = await resolveInProject(projectRoot, rel);
+            if (abs instanceof Error) {
+                return new Response("Forbidden", { status: 403 });
             }
             try {
                 const stat = await Deno.stat(abs);

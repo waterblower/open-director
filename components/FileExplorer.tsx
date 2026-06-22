@@ -983,7 +983,7 @@ function Node(
                     <Node
                         key={child.name}
                         entry={child}
-                        path={`${path}/${child.name}`}
+                        path={path ? `${path}/${child.name}` : child.name}
                         depth={depth + 1}
                         tree={tree}
                         callbacks={callbacks}

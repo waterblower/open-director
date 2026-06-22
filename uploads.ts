@@ -12,6 +12,7 @@
  */
 import { join } from "@std/path";
 import { ContentItem } from "./seedance/seedance.ts";
+import { resolveInProject } from "./project.ts";
 
 /** Project-relative uploads dir. Forward slashes — also used to build URLs. */
 const UPLOADS_DIR = ".open-director/uploads";
@@ -76,7 +77,8 @@ export async function storeDataUrl(
     const ext = MIME_EXT[mime.toLowerCase()] ?? "bin";
     const name = `${hash}.${ext}`;
 
-    const dir = join(projectRoot, UPLOADS_DIR);
+    const dir = await resolveInProject(projectRoot, UPLOADS_DIR);
+    if (dir instanceof Error) throw dir;
     await Deno.mkdir(dir, { recursive: true });
     const abs = join(dir, name);
     try {

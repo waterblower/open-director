@@ -5,13 +5,12 @@
  * type safety. Never import the router implementation into the client.
  */
 import { z } from "zod";
-import { join } from "@std/path";
+import { basename, join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
 import {
     loadFileExplorerState,
     pickProjectFolder,
     resolveInProject,
-    resolveInProject_deprecated,
 } from "../project.ts";
 import {
     archiveGeneration,
@@ -142,7 +141,9 @@ async function buildVideoList(
     projectRoot: string,
     scope: VideoListScope,
 ): Promise<VideoListItem[]> {
-    const dir = `${projectRoot}/${VIDEOS_DIR}`;
+    const resolvedDir = await resolveInProject(projectRoot, VIDEOS_DIR);
+    if (resolvedDir instanceof Error) throw resolvedDir;
+    const dir = resolvedDir;
     // Creates the dir if missing; a no-op (no throw) when it already exists.
     await Deno.mkdir(dir, { recursive: true });
 
@@ -248,7 +249,10 @@ export const appRouter = router({
         .input(z.object({ project_root: z.string(), path: z.string() }))
         .query(async ({ input }) => {
             if (!db) return null;
-            const target = resolveInProject(input.project_root, input.path);
+            const target = await resolveInProject(
+                input.project_root,
+                input.path,
+            );
             if (target instanceof Error) return null;
             let bytes: Uint8Array;
             try {
@@ -265,7 +269,7 @@ export const appRouter = router({
     readDir: publicProcedure
         .input(z.object({ projectRoot: z.string(), path: z.string() }))
         .query(async (opts): Promise<DirEntry[]> => {
-            const target = resolveInProject(
+            const target = await resolveInProject(
                 opts.input.projectRoot,
                 opts.input.path,
             );
@@ -295,7 +299,7 @@ export const appRouter = router({
         // paints fully expanded on first render.
         const childrenByPath: Record<string, DirEntry[]> = {};
         for (const rel of expanded) {
-            const target = resolveInProject(rootPath, rel);
+            const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
                 throw target;
             }
@@ -313,10 +317,12 @@ export const appRouter = router({
     openInDefaultApp: publicProcedure
         .input(z.string())
         .mutation(async (opts): Promise<{ ok: boolean }> => {
-            const target = await resolveInProject_deprecated(opts.input);
-            if (!target) {
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) {
                 return { ok: false };
             }
+            const target = await resolveInProject(projectRoot, opts.input);
+            if (target instanceof Error) throw target;
             const command = Deno.build.os === "windows"
                 ? new Deno.Command("cmd", { args: ["/c", "start", "", target] })
                 : Deno.build.os === "darwin"
@@ -340,13 +346,14 @@ export const appRouter = router({
         .input(z.object({ src: z.string(), destDir: z.string() }))
         .mutation(async (opts): Promise<{ dest: string }> => {
             const { src, destDir } = opts.input;
-            const srcAbs = await resolveInProject_deprecated(src);
-            const destDirAbs = await resolveInProject_deprecated(destDir);
-            if (!srcAbs || !destDirAbs) {
-                throw new Error("Invalid source or destination path");
-            }
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) throw new Error("Project not initialized");
+            const srcAbs = await resolveInProject(projectRoot, src);
+            const destDirAbs = await resolveInProject(projectRoot, destDir);
+            if (srcAbs instanceof Error) throw srcAbs;
+            if (destDirAbs instanceof Error) throw destDirAbs;
 
-            const base = src.split("/").pop();
+            const base = basename(srcAbs);
             if (!base) throw new Error("Invalid source path");
 
             await Deno.mkdir(destDirAbs, { recursive: true });
@@ -378,11 +385,12 @@ export const appRouter = router({
             const dest = dir ? `${dir}/${name}` : name;
             if (dest === path) return { path };
 
-            const srcAbs = await resolveInProject_deprecated(path);
-            const destAbs = await resolveInProject_deprecated(dest);
-            if (!srcAbs || !destAbs) {
-                throw new Error("Invalid source or destination path");
-            }
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) throw new Error("Project not initialized");
+            const srcAbs = await resolveInProject(projectRoot, path);
+            const destAbs = await resolveInProject(projectRoot, dest);
+            if (srcAbs instanceof Error) throw srcAbs;
+            if (destAbs instanceof Error) throw destAbs;
             if (await exists(destAbs)) {
                 throw new Error(`已存在同名文件：${name}`);
             }
@@ -487,7 +495,8 @@ export const appRouter = router({
             if (!projectDir) {
                 throw new Error("Project not initialized");
             }
-            const dir = join(projectDir, ".open-director");
+            const dir = await resolveInProject(projectDir, ".open-director");
+            if (dir instanceof Error) throw dir;
             await Deno.mkdir(dir, { recursive: true });
             await Deno.writeTextFile(
                 join(dir, "file-explorer.json"),

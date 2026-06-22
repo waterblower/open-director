@@ -1,6 +1,5 @@
-import { join } from "@std/path";
+import { basename, dirname, isAbsolute, relative, resolve } from "@std/path";
 import { z } from "zod";
-import { getStoredProjectPath } from "./kv.ts";
 
 const FileExplorerStateSchema = z.object({
     expanded: z.array(z.string()).default([]),
@@ -8,6 +7,16 @@ const FileExplorerStateSchema = z.object({
 });
 
 type FileExplorerState = z.infer<typeof FileExplorerStateSchema>;
+
+/**
+ * Older explorer builds stored root children as `/name`. They were intended
+ * to be project-relative, so remove only legacy leading forward slashes.
+ * Drive-letter paths and UNC paths remain absolute and will still be rejected
+ * by `resolveInProject`.
+ */
+function migrateExplorerPath(path: string): string {
+    return path.replace(/^\/+/, "");
+}
 
 const WINDOWS_FOLDER_PICKER_SCRIPT = String.raw`
 Add-Type -TypeDefinition @"
@@ -171,21 +180,70 @@ if ($path) {
 }
 `;
 
-/**
- * Resolve a project-relative path to an absolute one, rejecting traversal.
- * @deprecated
- */
-export async function resolveInProject_deprecated(sub: string) {
-    if (sub.includes("..")) throw new Error("Path may not contain '..'");
-    const root = await getStoredProjectPath();
-    return sub ? `${root}/${sub}` : root;
+/** Whether `target` is `root` itself or one of its descendants. */
+function isInside(root: string, target: string): boolean {
+    const rel = relative(root, target);
+    if (rel === "") return true;
+    return !isAbsolute(rel) && rel.split(/[\\/]/, 1)[0] !== "..";
 }
 
-export function resolveInProject(projectRoot: string, path: string) {
-    if (path.includes("..")) {
-        return new Error("Path may not contain '..'");
+/**
+ * Resolve `target` through its nearest existing ancestor. This catches a
+ * symlink/junction that redirects either an existing target or the parent of a
+ * target that is about to be created.
+ */
+async function resolveFromExistingAncestor(target: string): Promise<string> {
+    let probe = target;
+    const missingSegments: string[] = [];
+
+    while (true) {
+        try {
+            const existing = await Deno.realPath(probe);
+            return resolve(existing, ...missingSegments);
+        } catch (err) {
+            if (!(err instanceof Deno.errors.NotFound)) throw err;
+            const parent = dirname(probe);
+            if (parent === probe) throw err;
+            missingSegments.unshift(basename(probe));
+            probe = parent;
+        }
     }
-    return join(projectRoot, path);
+}
+
+/**
+ * Resolve a project-relative path while enforcing canonical containment.
+ *
+ * Absolute inputs and lexical traversal outside `projectRoot` are rejected.
+ * Existing symlinks/junctions are resolved before a second containment check,
+ * so reads and writes cannot escape through a link inside the project.
+ */
+export async function resolveInProject(
+    projectRoot: string,
+    path: string,
+): Promise<string | Error> {
+    if (!projectRoot) return new Error("Project root is not configured");
+    if (isAbsolute(path)) {
+        return new Error("Path must be relative to the project root");
+    }
+
+    try {
+        const lexicalRoot = resolve(projectRoot);
+        const lexicalTarget = resolve(lexicalRoot, path);
+        if (!isInside(lexicalRoot, lexicalTarget)) {
+            return new Error("Path is outside the project root");
+        }
+
+        const canonicalRoot = await Deno.realPath(lexicalRoot);
+        const canonicalTarget = await resolveFromExistingAncestor(
+            lexicalTarget,
+        );
+        if (!isInside(canonicalRoot, canonicalTarget)) {
+            return new Error("Path resolves outside the project root");
+        }
+        return canonicalTarget;
+    } catch (err) {
+        return err instanceof Error ? err : new Error(String(err));
+    }
 }
 
 /**
@@ -247,9 +305,12 @@ export async function loadFileExplorerState(
 ): Promise<FileExplorerState | Error> {
     let text: string;
     try {
-        text = await Deno.readTextFile(
-            join(projectRootPath, ".open-director", "file-explorer.json"),
+        const statePath = await resolveInProject(
+            projectRootPath,
+            ".open-director/file-explorer.json",
         );
+        if (statePath instanceof Error) return statePath;
+        text = await Deno.readTextFile(statePath);
     } catch (err) {
         if (err instanceof Deno.errors.NotFound) {
             return { expanded: [], selected: null };
@@ -265,5 +326,11 @@ export async function loadFileExplorerState(
     }
 
     const parsed = FileExplorerStateSchema.safeParse(json);
-    return parsed.success ? parsed.data : parsed.error;
+    if (!parsed.success) return parsed.error;
+    return {
+        expanded: [...new Set(parsed.data.expanded.map(migrateExplorerPath))],
+        selected: parsed.data.selected == null
+            ? null
+            : migrateExplorerPath(parsed.data.selected),
+    };
 }

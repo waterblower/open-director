@@ -1,7 +1,8 @@
 import { Head } from "fresh/runtime";
 import { define } from "../utils.ts";
 import { seedance_client } from "../seedance_client.ts";
-import { resolveInProject_deprecated } from "../project.ts";
+import { getStoredProjectPath } from "../kv.ts";
+import { resolveInProject } from "../project.ts";
 import { VIDEOS_DIR } from "../trpc/router.ts";
 import type { Task, TaskStatus } from "../seedance/seedance.ts";
 
@@ -60,7 +61,11 @@ function fmtTime(unixSec: number): string {
 }
 
 export default define.page(async function Debug() {
-    const projectDir = await resolveInProject_deprecated(VIDEOS_DIR);
+    const projectRoot = await getStoredProjectPath();
+    const projectDir = projectRoot
+        ? await resolveInProject(projectRoot, VIDEOS_DIR)
+        : null;
+    if (projectDir instanceof Error) throw projectDir;
     if (!projectDir) {
         return (
             <div style="font: 14px/1.6 ui-sans-serif, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #6b7280; gap: 8px;">
