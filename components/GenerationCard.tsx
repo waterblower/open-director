@@ -123,7 +123,9 @@ export function GenerationCard(
         if (detail.value || detailLoading.value) return;
         detailLoading.value = true;
         try {
-            detail.value = await trpc.getGenerationDetail.query(generation.id);
+            detail.value = await trpc.open.getGenerationDetail.query(
+                generation.id,
+            );
         } catch (err) {
             console.error(err);
         } finally {
@@ -254,7 +256,7 @@ export function GenerationCard(
                             // Fetch the (potentially large) request only now,
                             // not when the grid loads.
                             try {
-                                const req = await trpc.getGenerationRequest
+                                const req = await trpc.open.getGenerationRequest
                                     .query(generation.id);
                                 if (req) {
                                     reusePrompt.value = req;

@@ -69,7 +69,7 @@ export function GenerationsGrid(
         reactedLoading.value = true;
         (async () => {
             try {
-                const rows = await trpc.listReactedGenerations.query({
+                const rows = await trpc.open.listReactedGenerations.query({
                     project_root: projectRoot,
                 });
                 if (!cancelled) {
@@ -171,7 +171,7 @@ export function GenerationsGrid(
         reason?: string,
     ) => {
         if (!projectRoot) return;
-        await trpc.setGenerationReaction.mutate({
+        await trpc.open.setGenerationReaction.mutate({
             project_root: projectRoot,
             id: video.id,
             reaction,
@@ -186,7 +186,7 @@ export function GenerationsGrid(
 
     const handleClearReaction = async (video: GeneratedVideo) => {
         if (!projectRoot) return;
-        await trpc.clearGenerationReaction.mutate({
+        await trpc.open.clearGenerationReaction.mutate({
             project_root: projectRoot,
             id: video.id,
         });

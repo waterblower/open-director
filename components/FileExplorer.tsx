@@ -637,7 +637,7 @@ function FilePromptDetailsModal(
     useEffect(() => {
         (async () => {
             try {
-                detail.value = await trpc.getGenerationDetail.query(
+                detail.value = await trpc.open.getGenerationDetail.query(
                     generationId,
                 );
             } catch (err) {

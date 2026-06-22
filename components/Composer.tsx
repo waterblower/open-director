@@ -1154,7 +1154,7 @@ export function Composer(props: {
                                         dataUrl: await toDataUrl(a.url),
                                     })),
                                 );
-                                const gen_p = trpc.generate.mutate({
+                                const gen_p = trpc.open.generate.mutate({
                                     model: model.value,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,

@@ -4,7 +4,9 @@ import type { ComponentChildren } from "preact";
 import { get_text, language, trpc } from "../trpc/client.ts";
 
 /** The MCP server info returned by the `getMcpServerInfo` tRPC query. */
-type McpServerInfo = Awaited<ReturnType<typeof trpc.getMcpServerInfo.query>>;
+type McpServerInfo = Awaited<
+    ReturnType<typeof trpc.open.getMcpServerInfo.query>
+>;
 
 export function McpInfoModal(props: { onClose: () => void }) {
     const { onClose } = props;
@@ -28,8 +30,8 @@ export function McpInfoModal(props: { onClose: () => void }) {
         (async () => {
             try {
                 const [serverInfo, dir] = await Promise.all([
-                    trpc.getMcpServerInfo.query(),
-                    trpc.getProjectDir.query(),
+                    trpc.open.getMcpServerInfo.query(),
+                    trpc.open.getProjectDir.query(),
                 ]);
                 info.value = serverInfo;
                 projectDir.value = dir;

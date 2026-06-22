@@ -221,23 +221,6 @@ async function buildVideoList(
 }
 
 export const appRouter = router({
-    listGenerations: publicProcedure.query(() => {
-        if (!db) {
-            throw new Error("Database not initialized");
-        }
-        const generations = listGenerations(db);
-        return generations;
-    }),
-
-    // The active project folder (absolute path).
-    getProjectDir: publicProcedure.query(async () => {
-        const projectDir = await getStoredProjectPath();
-        if (!projectDir) {
-            return null;
-        }
-        return projectDir;
-    }),
-
     // Open a native OS folder picker, switch the active project to the chosen
     // folder, and persist it (Deno KV) so the next launch reopens it. Returns
     // the new path, or null if the user cancelled. The client should reload
@@ -249,23 +232,12 @@ export const appRouter = router({
         reopenDb(); // point the generations DB at the new project
         return { path };
     }),
-    // List generated videos in `<project>/.project/generations` as Task-like
-    // objects. Creates the directory if it doesn't exist yet.
-    listGeneratedVideos: publicProcedure.input(z.object({
-        project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, "active")),
 
     // Archived generations for the same project, in the same shape — shown in
     // the grid's "Archived" tab.
     listArchivedGenerations: publicProcedure.input(z.object({
         project_root: z.string(),
     })).query(({ input }) => buildVideoList(input.project_root, "archived")),
-
-    // Liked/disliked generations for the same project, in the same shape —
-    // shown in the grid's "Liked & disliked" tab.
-    listReactedGenerations: publicProcedure.input(z.object({
-        project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, "reacted")),
 
     // Look up a generation by a project file's content — hashes the file at
     // `path` and matches it against recorded video hashes, so a copy or
@@ -422,239 +394,6 @@ export const appRouter = router({
             return { path: dest };
         }),
 
-    // Create a Seedance generation task and log it — the single round trip the
-    // composer makes. Attachments arrive as data URLs (the browser inlines its
-    // blob: bytes); the API call + key live server-side. task_checker later
-    // polls + downloads the result, keyed by the same task id.
-    generate: publicProcedure
-        .input(z.object({
-            model: z.enum([
-                "doubao-seedance-2-0-260128",
-                "doubao-seedance-2-0-fast-260128",
-                "doubao-seedance-2-0-mini-260615",
-            ]),
-            prompt: z.string(),
-            attachments: z.array(z.object({
-                kind: z.enum(["image", "video", "audio"]),
-                dataUrl: z.string(),
-            })),
-            ratio: z.enum([
-                "16:9",
-                "9:16",
-                "1:1",
-                "4:3",
-                "3:4",
-                "21:9",
-                "adaptive",
-            ]),
-            resolution: z.enum(["1080p", "720p", "480p"]),
-            durationMode: z.enum(["seconds", "smart"]),
-            duration: z.number(),
-            audio: z.boolean(),
-        }))
-        .mutation(async (opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const {
-                prompt,
-                attachments,
-                ratio,
-                durationMode,
-                duration,
-                audio,
-                resolution,
-                model,
-            } = opts.input;
-
-            // Assemble the multimodal content: optional text, then each
-            // attachment as a typed reference.
-            const content: ContentItem[] = [];
-            if (prompt) content.push({ type: "text", text: prompt });
-            for (const att of attachments) {
-                if (att.kind === "image") {
-                    content.push({
-                        type: "image_url",
-                        image_url: { url: att.dataUrl },
-                        role: "reference_image",
-                    });
-                } else if (att.kind === "video") {
-                    content.push({
-                        type: "video_url",
-                        video_url: { url: att.dataUrl },
-                        role: "reference_video",
-                    });
-                } else {
-                    content.push({
-                        type: "audio_url",
-                        audio_url: { url: att.dataUrl },
-                        role: "reference_audio",
-                    });
-                }
-            }
-
-            // The outbound request keeps attachments inline as data URLs —
-            // Seedance can't reach our local `/project-file` server. The stored
-            // request swaps each data URL for a content-addressed file reference
-            // so the DB row stays small (see uploads.ts).
-            const request: CreateTaskRequest = {
-                model,
-                content,
-                generate_audio: audio,
-                resolution,
-                ratio,
-                ...(durationMode === "seconds" ? { duration } : {}),
-            };
-            const projectRoot = await getStoredProjectPath();
-            if (!projectRoot) {
-                throw new Error("Project not initialized");
-            }
-            const storedRequest: CreateTaskRequest = {
-                ...request,
-                content: await externalizeAttachments(projectRoot, content),
-            };
-
-            const generation = createGeneration(db, storedRequest);
-            if (generation instanceof Error) {
-                throw generation;
-            }
-            console.log("generation_created");
-            await global_event_bus.put({
-                type: "generation_created",
-                gen: generation,
-            });
-
-            const created = await seedance_client.generate(request);
-            if (created instanceof Error) {
-                console.error(created);
-                const err = updateGeneration(db, {
-                    id: generation.id,
-                    failed_reason: created.message,
-                    status: "failed",
-                });
-                if (err instanceof Error) {
-                    throw err;
-                }
-                const gen = getGenerationById(db, generation.id);
-                if (gen instanceof Error) {
-                    throw gen;
-                }
-
-                return gen;
-            }
-
-            console.log("task created", created);
-            const err = updateGeneration(db, {
-                id: generation.id,
-                task_id: created.id,
-            });
-            if (err instanceof Error) {
-                throw err;
-            }
-
-            const task = await seedance_client.getTask(created.id);
-            if (task instanceof Error) {
-                throw task;
-            }
-            const err2 = updateGeneration(db, {
-                id: generation.id,
-                task_json: task,
-            });
-            if (err2 instanceof Error) {
-                throw err2;
-            }
-
-            console.log("task", task);
-
-            // Logging failure shouldn't fail the request — the task is created.
-            const recordErr = recordGeneration(db, {
-                taskId: created.id,
-                requestJson: JSON.stringify(storedRequest),
-                createdAt: new Date().toISOString(),
-                status: task.status,
-                task,
-            });
-            if (recordErr) {
-                console.error(recordErr);
-            }
-            const gen = getGenerationById(db, generation.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            return gen;
-        }),
-
-    // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).
-    getGenerationById: publicProcedure
-        .input(z.string())
-        .query((opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const gen = getGenerationById(db, opts.input);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            return gen;
-        }),
-
-    // Read the generation log by Seedance task id.
-    getGenerationByTaskId: publicProcedure
-        .input(z.string())
-        .query((opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            return getGenerationByTaskId(db, opts.input);
-        }),
-
-    // Full generation row (request + polled task) by ULID id or task id,
-    // fetched on demand when the user opens a generation's details modal.
-    getGenerationDetail: publicProcedure
-        .input(z.string())
-        .query((opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const result = getGenerationDetail(db, opts.input);
-            if (result instanceof Error) {
-                throw result;
-            }
-            return result;
-        }),
-
-    // The create request for a generation (by ULID id or task id), fetched on
-    // demand when the user clicks "reuse prompt" — kept out of the list payload.
-    getGenerationRequest: publicProcedure
-        .input(z.string())
-        .query((opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const result = getGenerationRequest(db, opts.input);
-            if (result instanceof Error) {
-                throw result;
-            }
-            return result;
-        }),
-
-    // A generation's like/dislike (and reason), by ULID id or task id. Used
-    // by callers that show a generation's details outside the grid (so they
-    // don't already have it from a list query).
-    getGenerationReaction: publicProcedure
-        .input(z.object({ project_root: z.string(), id: z.string() }))
-        .query((opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const gen = getGenerationDetail(db, opts.input.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            if (!gen) return null;
-            return getGenerationReaction(db, gen.id);
-        }),
-
     // Archive a generation (by ULID id or task id) — hides it from the grid
     // without deleting its DB row or video file.
     archiveGeneration: publicProcedure
@@ -717,95 +456,6 @@ export const appRouter = router({
             return { ok: true };
         }),
 
-    // Like or dislike a generation (by ULID id or task id), with an optional
-    // reason. Reacting again — even with the opposite reaction — replaces
-    // whatever reaction was stored before.
-    setGenerationReaction: publicProcedure
-        .input(z.object({
-            project_root: z.string(),
-            id: z.string(),
-            reaction: z.enum(["liked", "disliked"]),
-            reason: z.string().optional(),
-        }))
-        .mutation(async (opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const activeRoot = await getStoredProjectPath();
-            if (activeRoot !== opts.input.project_root) {
-                throw new Error(
-                    "project_root is not the active project",
-                );
-            }
-
-            const gen = getGenerationDetail(db, opts.input.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            if (!gen) {
-                throw new Error(`No generation with id ${opts.input.id}`);
-            }
-            const err = setGenerationReaction(
-                db,
-                gen.id,
-                opts.input.reaction,
-                opts.input.reason,
-            );
-            if (err instanceof Error) {
-                throw err;
-            }
-            return { ok: true };
-        }),
-
-    // Remove a generation's like/dislike (by ULID id or task id).
-    clearGenerationReaction: publicProcedure
-        .input(z.object({ project_root: z.string(), id: z.string() }))
-        .mutation(async (opts) => {
-            if (!db) {
-                throw new Error("Database not initialized");
-            }
-            const activeRoot = await getStoredProjectPath();
-            if (activeRoot !== opts.input.project_root) {
-                throw new Error(
-                    "project_root is not the active project",
-                );
-            }
-
-            const gen = getGenerationDetail(db, opts.input.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            if (!gen) {
-                throw new Error(`No generation with id ${opts.input.id}`);
-            }
-            const err = clearGenerationReaction(db, gen.id);
-            if (err instanceof Error) {
-                throw err;
-            }
-            return { ok: true };
-        }),
-
-    // Everything the GUI's MCP info modal shows: server identity, protocol
-    // version, and the tool catalog exactly as advertised over `tools/list`.
-    // The endpoint URL itself is derived client-side from `location.origin`
-    // since the server doesn't know which host/port the browser used.
-    getMcpServerInfo: publicProcedure.query(async () => {
-        // Dynamic import avoids a router -> MCP server -> router module cycle.
-        // The MCP catalog itself is generated from this router at runtime.
-        const {
-            listMcpTools,
-            MCP_PROTOCOL_VERSION,
-            MCP_SERVER_INFO,
-        } = await import("../mcp/server.ts");
-        return {
-            name: MCP_SERVER_INFO.name,
-            version: MCP_SERVER_INFO.version,
-            protocolVersion: MCP_PROTOCOL_VERSION,
-            endpointPath: "/mcp",
-            tools: listMcpTools(),
-        };
-    }),
-
     // Whether a Seedance API key is configured, plus a masked preview for the
     // settings modal. The full key is never sent to the client.
     getApiKeyStatus: publicProcedure.query(async () => {
@@ -854,6 +504,357 @@ export const appRouter = router({
             yield event;
         }
     }),
+
+    // Open APIs are available for both agents and the GUI.
+    open: {
+        // Create a Seedance generation task and log it — the single round trip the
+        // composer makes. Attachments arrive as data URLs (the browser inlines its
+        // blob: bytes); the API call + key live server-side. task_checker later
+        // polls + downloads the result, keyed by the same task id.
+        generate: publicProcedure
+            .input(z.object({
+                model: z.enum([
+                    "doubao-seedance-2-0-260128",
+                    "doubao-seedance-2-0-fast-260128",
+                    "doubao-seedance-2-0-mini-260615",
+                ]),
+                prompt: z.string(),
+                attachments: z.array(z.object({
+                    kind: z.enum(["image", "video", "audio"]),
+                    dataUrl: z.string(),
+                })),
+                ratio: z.enum([
+                    "16:9",
+                    "9:16",
+                    "1:1",
+                    "4:3",
+                    "3:4",
+                    "21:9",
+                    "adaptive",
+                ]),
+                resolution: z.enum(["1080p", "720p", "480p"]),
+                durationMode: z.enum(["seconds", "smart"]),
+                duration: z.number(),
+                audio: z.boolean(),
+            }))
+            .mutation(async (opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const {
+                    prompt,
+                    attachments,
+                    ratio,
+                    durationMode,
+                    duration,
+                    audio,
+                    resolution,
+                    model,
+                } = opts.input;
+
+                // Assemble the multimodal content: optional text, then each
+                // attachment as a typed reference.
+                const content: ContentItem[] = [];
+                if (prompt) content.push({ type: "text", text: prompt });
+                for (const att of attachments) {
+                    if (att.kind === "image") {
+                        content.push({
+                            type: "image_url",
+                            image_url: { url: att.dataUrl },
+                            role: "reference_image",
+                        });
+                    } else if (att.kind === "video") {
+                        content.push({
+                            type: "video_url",
+                            video_url: { url: att.dataUrl },
+                            role: "reference_video",
+                        });
+                    } else {
+                        content.push({
+                            type: "audio_url",
+                            audio_url: { url: att.dataUrl },
+                            role: "reference_audio",
+                        });
+                    }
+                }
+
+                // The outbound request keeps attachments inline as data URLs —
+                // Seedance can't reach our local `/project-file` server. The stored
+                // request swaps each data URL for a content-addressed file reference
+                // so the DB row stays small (see uploads.ts).
+                const request: CreateTaskRequest = {
+                    model,
+                    content,
+                    generate_audio: audio,
+                    resolution,
+                    ratio,
+                    ...(durationMode === "seconds" ? { duration } : {}),
+                };
+                const projectRoot = await getStoredProjectPath();
+                if (!projectRoot) {
+                    throw new Error("Project not initialized");
+                }
+                const storedRequest: CreateTaskRequest = {
+                    ...request,
+                    content: await externalizeAttachments(projectRoot, content),
+                };
+
+                const generation = createGeneration(db, storedRequest);
+                if (generation instanceof Error) {
+                    throw generation;
+                }
+                console.log("generation_created");
+                await global_event_bus.put({
+                    type: "generation_created",
+                    gen: generation,
+                });
+
+                const created = await seedance_client.generate(request);
+                if (created instanceof Error) {
+                    console.error(created);
+                    const err = updateGeneration(db, {
+                        id: generation.id,
+                        failed_reason: created.message,
+                        status: "failed",
+                    });
+                    if (err instanceof Error) {
+                        throw err;
+                    }
+                    const gen = getGenerationById(db, generation.id);
+                    if (gen instanceof Error) {
+                        throw gen;
+                    }
+
+                    return gen;
+                }
+
+                console.log("task created", created);
+                const err = updateGeneration(db, {
+                    id: generation.id,
+                    task_id: created.id,
+                });
+                if (err instanceof Error) {
+                    throw err;
+                }
+
+                const task = await seedance_client.getTask(created.id);
+                if (task instanceof Error) {
+                    throw task;
+                }
+                const err2 = updateGeneration(db, {
+                    id: generation.id,
+                    task_json: task,
+                });
+                if (err2 instanceof Error) {
+                    throw err2;
+                }
+
+                console.log("task", task);
+
+                // Logging failure shouldn't fail the request — the task is created.
+                const recordErr = recordGeneration(db, {
+                    taskId: created.id,
+                    requestJson: JSON.stringify(storedRequest),
+                    createdAt: new Date().toISOString(),
+                    status: task.status,
+                    task,
+                });
+                if (recordErr) {
+                    console.error(recordErr);
+                }
+                const gen = getGenerationById(db, generation.id);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                return gen;
+            }),
+
+        // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).
+        getGenerationById: publicProcedure
+            .input(z.string())
+            .query((opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const gen = getGenerationById(db, opts.input);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                return gen;
+            }),
+
+        // Read the generation log by Seedance task id.
+        getGenerationByTaskId: publicProcedure
+            .input(z.string())
+            .query((opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                return getGenerationByTaskId(db, opts.input);
+            }),
+
+        // Full generation row (request + polled task) by ULID id or task id,
+        // fetched on demand when the user opens a generation's details modal.
+        getGenerationDetail: publicProcedure
+            .input(z.string())
+            .query((opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const result = getGenerationDetail(db, opts.input);
+                if (result instanceof Error) {
+                    throw result;
+                }
+                return result;
+            }),
+
+        // The create request for a generation (by ULID id or task id), fetched on
+        // demand when the user clicks "reuse prompt" — kept out of the list payload.
+        getGenerationRequest: publicProcedure
+            .input(z.string())
+            .query((opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const result = getGenerationRequest(db, opts.input);
+                if (result instanceof Error) {
+                    throw result;
+                }
+                return result;
+            }),
+
+        // A generation's like/dislike (and reason), by ULID id or task id. Used
+        // by callers that show a generation's details outside the grid (so they
+        // don't already have it from a list query).
+        getGenerationReaction: publicProcedure
+            .input(z.object({ project_root: z.string(), id: z.string() }))
+            .query((opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const gen = getGenerationDetail(db, opts.input.id);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                if (!gen) return null;
+                return getGenerationReaction(db, gen.id);
+            }),
+        listGenerations: publicProcedure.query(() => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const generations = listGenerations(db);
+            return generations;
+        }),
+
+        // Liked/disliked generations for the same project, in the same shape —
+        // shown in the grid's "Liked & disliked" tab.
+        listReactedGenerations: publicProcedure.input(z.object({
+            project_root: z.string(),
+        })).query(({ input }) => buildVideoList(input.project_root, "reacted")),
+
+        // List generated videos in `<project>/.project/generations` as Task-like
+        // objects. Creates the directory if it doesn't exist yet.
+        listGeneratedVideos: publicProcedure.input(z.object({
+            project_root: z.string(),
+        })).query(({ input }) => buildVideoList(input.project_root, "active")),
+
+        // The active project folder (absolute path).
+        getProjectDir: publicProcedure.query(async () => {
+            const projectDir = await getStoredProjectPath();
+            if (!projectDir) {
+                return null;
+            }
+            return projectDir;
+        }),
+        // Like or dislike a generation (by ULID id or task id), with an optional
+        // reason. Reacting again — even with the opposite reaction — replaces
+        // whatever reaction was stored before.
+        setGenerationReaction: publicProcedure
+            .input(z.object({
+                project_root: z.string(),
+                id: z.string(),
+                reaction: z.enum(["liked", "disliked"]),
+                reason: z.string().optional(),
+            }))
+            .mutation(async (opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const activeRoot = await getStoredProjectPath();
+                if (activeRoot !== opts.input.project_root) {
+                    throw new Error(
+                        "project_root is not the active project",
+                    );
+                }
+
+                const gen = getGenerationDetail(db, opts.input.id);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                if (!gen) {
+                    throw new Error(`No generation with id ${opts.input.id}`);
+                }
+                const err = setGenerationReaction(
+                    db,
+                    gen.id,
+                    opts.input.reaction,
+                    opts.input.reason,
+                );
+                if (err instanceof Error) {
+                    throw err;
+                }
+                return { ok: true };
+            }),
+
+        // Remove a generation's like/dislike (by ULID id or task id).
+        clearGenerationReaction: publicProcedure
+            .input(z.object({ project_root: z.string(), id: z.string() }))
+            .mutation(async (opts) => {
+                if (!db) {
+                    throw new Error("Database not initialized");
+                }
+                const activeRoot = await getStoredProjectPath();
+                if (activeRoot !== opts.input.project_root) {
+                    throw new Error(
+                        "project_root is not the active project",
+                    );
+                }
+
+                const gen = getGenerationDetail(db, opts.input.id);
+                if (gen instanceof Error) {
+                    throw gen;
+                }
+                if (!gen) {
+                    throw new Error(`No generation with id ${opts.input.id}`);
+                }
+                const err = clearGenerationReaction(db, gen.id);
+                if (err instanceof Error) {
+                    throw err;
+                }
+                return { ok: true };
+            }),
+        // Everything the GUI's MCP info modal shows: server identity, protocol
+        // version, and the tool catalog exactly as advertised over `tools/list`.
+        // The endpoint URL itself is derived client-side from `location.origin`
+        // since the server doesn't know which host/port the browser used.
+        getMcpServerInfo: publicProcedure.query(async () => {
+            // Dynamic import avoids a router -> MCP server -> router module cycle.
+            // The MCP catalog itself is generated from this router at runtime.
+            const {
+                listMcpTools,
+                MCP_PROTOCOL_VERSION,
+                MCP_SERVER_INFO,
+            } = await import("../mcp/server.ts");
+            return {
+                name: MCP_SERVER_INFO.name,
+                version: MCP_SERVER_INFO.version,
+                protocolVersion: MCP_PROTOCOL_VERSION,
+                endpointPath: "/mcp",
+                tools: listMcpTools(),
+            };
+        }),
+    },
 });
 
 // Export type only — never import the router implementation into the client.

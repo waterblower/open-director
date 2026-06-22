@@ -12,7 +12,7 @@ import {
 
 /** The full generation row returned by the details endpoint. */
 export type GenerationDetail = Awaited<
-    ReturnType<typeof trpc.getGenerationDetail.query>
+    ReturnType<typeof trpc.open.getGenerationDetail.query>
 >;
 
 /** Human-readable elapsed time, e.g. "1m 23s" or "12s". */
@@ -56,7 +56,7 @@ export function GenerationDetailModal(props: {
         nextReason: string,
         projectRoot: string,
     ) => {
-        await trpc.setGenerationReaction.mutate({
+        await trpc.open.setGenerationReaction.mutate({
             project_root: projectRoot,
             id: gen.id,
             reaction: nextReaction,
@@ -70,7 +70,7 @@ export function GenerationDetailModal(props: {
         gen: GeneratedVideo,
         projectRoot: string,
     ) => {
-        await trpc.clearGenerationReaction.mutate({
+        await trpc.open.clearGenerationReaction.mutate({
             project_root: projectRoot,
             id: gen.id,
         });

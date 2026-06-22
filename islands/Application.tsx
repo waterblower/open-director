@@ -138,7 +138,7 @@ export default function Application() {
                 generated_videos.value = new Map();
                 return;
             }
-            const vids = await trpc.listGeneratedVideos.query({
+            const vids = await trpc.open.listGeneratedVideos.query({
                 project_root: root,
             });
             generated_videos.value = new Map(vids.map((v) => [v.id, v]));
