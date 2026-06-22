@@ -33,6 +33,12 @@ as Dropbox or Google Drive or even git to version control their assets.
 Plus, because Open Director is local. Your local coding agent such as Claude
 Code, Codex or OpenClaw can drive it through the MCP interface.
 
+Every tRPC query and mutation is exposed automatically as an MCP tool using the
+same procedure name and Zod-derived input schema. A tRPC subscription is also
+exposed as a tool that waits for and returns its next event. Adding a new tRPC
+procedure therefore adds the corresponding MCP tool without a second,
+hand-written registration.
+
 Sharing is also just sharing a folder/zip, instead of a URL that other people
 have to register an account to have any meaningful access.
 

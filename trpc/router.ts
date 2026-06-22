@@ -36,11 +36,6 @@ import {
 } from "../db.ts";
 import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
 import { externalizeAttachments } from "../uploads.ts";
-import {
-    listMcpTools,
-    MCP_PROTOCOL_VERSION,
-    MCP_SERVER_INFO,
-} from "../mcp/server.ts";
 import type {
     ContentItem,
     CreateTaskRequest,
@@ -794,7 +789,14 @@ export const appRouter = router({
     // version, and the tool catalog exactly as advertised over `tools/list`.
     // The endpoint URL itself is derived client-side from `location.origin`
     // since the server doesn't know which host/port the browser used.
-    getMcpServerInfo: publicProcedure.query(() => {
+    getMcpServerInfo: publicProcedure.query(async () => {
+        // Dynamic import avoids a router -> MCP server -> router module cycle.
+        // The MCP catalog itself is generated from this router at runtime.
+        const {
+            listMcpTools,
+            MCP_PROTOCOL_VERSION,
+            MCP_SERVER_INFO,
+        } = await import("../mcp/server.ts");
         return {
             name: MCP_SERVER_INFO.name,
             version: MCP_SERVER_INFO.version,

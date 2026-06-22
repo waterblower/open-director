@@ -1,30 +1,13 @@
 /**
  * MCP server exposed over HTTP from the same Fresh backend process.
  *
- * Implements the Model Context Protocol as plain JSON-RPC 2.0 (stateless,
- * Streamable-HTTP compatible) so editors like Claude Code / Codex can drive
- * Open Director's video generation. The HTTP plumbing lives in
- * `routes/mcp.ts`; this module is transport-agnostic — feed it a parsed
- * JSON-RPC payload and it returns the response payload (or null for
- * notification-only messages).
- *
- * Tools reuse the existing app internals: the tRPC `generate` procedure (so a
- * generation created here shows up in the GUI and is polled/downloaded by the
- * same `check_and_download` loop), the generations DB, and the Seedance client.
+ * The tool catalog is derived from `appRouter`, so every tRPC procedure is
+ * automatically available to MCP clients without maintaining a second API
+ * registry. The HTTP plumbing lives in `routes/mcp.ts`; this module is
+ * transport-agnostic and handles parsed JSON-RPC payloads.
  */
 import { z } from "zod";
-import { join } from "@std/path";
-import { appRouter, VIDEOS_DIR } from "../trpc/router.ts";
-import {
-    db,
-    getGenerationDetail,
-    listGenerations,
-    updateGeneration,
-} from "../db.ts";
-import { seedance_client } from "../seedance_client.ts";
-import { getStoredProjectPath } from "../kv.ts";
-import { estimateCost } from "../seedance/pricing.ts";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import { appRouter } from "../trpc/router.ts";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "open-director", version: "0.1.0" } as const;
@@ -34,363 +17,196 @@ export const MCP_PROTOCOL_VERSION = PROTOCOL_VERSION;
 /** The `serverInfo` this server advertises in `initialize`. */
 export const MCP_SERVER_INFO = SERVER_INFO;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+type ProcedureType = "query" | "mutation" | "subscription";
+type JsonSchema = Record<string, unknown>;
 
-/** Require an open project (the generations DB is project-scoped). */
-function requireDb(): NonNullable<typeof db> {
-    if (!db) {
-        throw new Error(
-            "No project is open in Open Director. Open a project in the app first.",
-        );
-    }
-    return db;
+interface RuntimeProcedure {
+    _def: {
+        type: ProcedureType;
+        inputs: readonly unknown[];
+        meta?: unknown;
+    };
 }
-
-/**
- * Forward-slash form of an absolute path, for paths returned to MCP clients.
- * Windows accepts "/" in paths just as well as "\", and this sidesteps any
- * client/renderer that treats a literal "\." (e.g. before a dotfile like
- * `.open-director`) as a Markdown escape sequence and silently drops it.
- */
-function toPortablePath(p: string): string {
-    return p.replaceAll("\\", "/");
-}
-
-/** Concatenated text of a request's text content items. */
-function promptOf(req: CreateTaskRequest): string {
-    return req.content
-        .filter((c): c is { type: "text"; text: string } => c.type === "text")
-        .map((c) => c.text)
-        .join("\n")
-        .trim();
-}
-
-interface ReferenceInput {
-    kind: "image" | "video" | "audio";
-    url: string;
-    /** Absolute local file path, when `url` is one of our own
-     * `/project-file/...` references and a project is open; null for
-     * external URLs or data URLs that somehow weren't externalized. */
-    path: string | null;
-}
-
-/** Reference image/video/audio attachments on a request, in prompt order. */
-function referenceInputsOf(
-    req: CreateTaskRequest,
-    projectRoot: string | null,
-): ReferenceInput[] {
-    const refs = req.content.flatMap((c): Omit<ReferenceInput, "path">[] => {
-        if (c.type === "image_url") {
-            return [{ kind: "image", url: c.image_url.url }];
-        }
-        if (c.type === "video_url") {
-            return [{ kind: "video", url: c.video_url.url }];
-        }
-        if (c.type === "audio_url") {
-            return [{ kind: "audio", url: c.audio_url.url }];
-        }
-        return [];
-    });
-    return refs.map((ref) => ({
-        ...ref,
-        path: projectRoot && ref.url.startsWith("/project-file/")
-            ? toPortablePath(
-                join(projectRoot, ref.url.replace(/^\/project-file\//, "")),
-            )
-            : null,
-    }));
-}
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-// ---------------------------------------------------------------------------
-// Tools
-// ---------------------------------------------------------------------------
 
 interface Tool {
     name: string;
     description: string;
     /** JSON Schema advertised via tools/list. */
-    inputSchema: Record<string, unknown>;
-    /** Run the tool; the returned string becomes a text content block. */
-    handler: (args: unknown) => Promise<string>;
+    inputSchema: JsonSchema;
+    /** Converts the MCP argument object to the tRPC procedure's input. */
+    inputOf: (args: unknown) => unknown;
+    type: ProcedureType;
 }
 
-const GenerateInput = z.object({
-    prompt: z.string().min(1),
-    model: z.enum([
-        "doubao-seedance-2-0-260128",
-        "doubao-seedance-2-0-fast-260128",
-        "doubao-seedance-2-0-mini-260615",
-    ]).default("doubao-seedance-2-0-260128"),
-    resolution: z.enum(["480p", "720p", "1080p"]).default("720p"),
-    ratio: z.enum(["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"])
-        .default("adaptive"),
-    duration: z.number().int().positive().optional(),
-    generate_audio: z.boolean().default(true),
-});
+function withoutDialect(schema: JsonSchema): JsonSchema {
+    const { $schema: _dialect, ...rest } = schema;
+    return rest;
+}
 
-const IdInput = z.object({ id: z.string().min(1) });
-const ListInput = z.object({
-    limit: z.number().int().min(1).max(100).default(20),
-});
+function zodInputSchema(input: unknown): JsonSchema | null {
+    try {
+        return withoutDialect(
+            z.toJSONSchema(input as z.ZodType, { io: "input" }) as JsonSchema,
+        );
+    } catch {
+        // tRPC accepts parsers other than Zod. Such a parser can still be
+        // called through MCP, but there is no generic way to infer its JSON
+        // Schema, so advertise an open argument object.
+        return null;
+    }
+}
 
-const TOOLS: Tool[] = [
-    {
-        name: "generate_video",
-        description:
-            "Generate a video with Seedance from a text prompt. Returns the " +
-            "generation id and task id; the video is polled and downloaded " +
-            "automatically — use get_generation to check status and get the " +
-            "file path.",
+function inputContract(inputs: readonly unknown[]): Pick<
+    Tool,
+    "inputSchema" | "inputOf"
+> {
+    if (inputs.length === 0) {
+        return {
+            inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+            },
+            inputOf: () => undefined,
+        };
+    }
+
+    const schemas = inputs.map(zodInputSchema);
+    if (schemas.some((schema) => schema == null)) {
+        return {
+            inputSchema: { type: "object", additionalProperties: true },
+            inputOf: (args) => args,
+        };
+    }
+
+    const knownSchemas = schemas as JsonSchema[];
+    const allObjects = knownSchemas.every((schema) => schema.type === "object");
+
+    if (allObjects) {
+        return {
+            inputSchema: knownSchemas.length === 1
+                ? knownSchemas[0]
+                : { type: "object", allOf: knownSchemas },
+            inputOf: (args) => args,
+        };
+    }
+
+    // MCP tool arguments must be an object, while tRPC procedures may accept
+    // scalar inputs. Wrap those values under `input` at the protocol boundary.
+    const valueSchema = knownSchemas.length === 1
+        ? knownSchemas[0]
+        : { allOf: knownSchemas };
+    return {
         inputSchema: {
             type: "object",
-            properties: {
-                prompt: { type: "string", description: "Text prompt." },
-                model: {
-                    type: "string",
-                    enum: [
-                        "doubao-seedance-2-0-260128",
-                        "doubao-seedance-2-0-fast-260128",
-                        "doubao-seedance-2-0-mini-260615",
-                    ],
-                    description: "Seedance model id. Defaults to 2.0.",
-                },
-                resolution: {
-                    type: "string",
-                    enum: ["480p", "720p", "1080p"],
-                    description: "Output resolution. Defaults to 720p.",
-                },
-                ratio: {
-                    type: "string",
-                    enum: [
-                        "16:9",
-                        "9:16",
-                        "1:1",
-                        "4:3",
-                        "3:4",
-                        "21:9",
-                        "adaptive",
-                    ],
-                    description: "Aspect ratio. Defaults to adaptive.",
-                },
-                duration: {
-                    type: "integer",
-                    description:
-                        "Duration in whole seconds. Omit to let the model decide.",
-                },
-                generate_audio: {
-                    type: "boolean",
-                    description:
-                        "Generate a synced audio track. Defaults to true.",
-                },
-            },
-            required: ["prompt"],
+            properties: { input: valueSchema },
+            required: ["input"],
+            additionalProperties: false,
         },
-        handler: async (raw) => {
-            requireDb();
-            const a = GenerateInput.parse(raw);
-            const caller = appRouter.createCaller({});
-            const gen = await caller.generate({
-                model: a.model,
-                prompt: a.prompt,
-                attachments: [],
-                ratio: a.ratio,
-                resolution: a.resolution,
-                durationMode: a.duration != null ? "seconds" : "smart",
-                duration: a.duration ?? 0,
-                audio: a.generate_audio,
-            });
-            return JSON.stringify(
-                {
-                    id: gen.id,
-                    task_id: gen.task_id ?? null,
-                    status: gen.status,
-                    failed_reason: gen.failed_reason ?? null,
-                },
-                null,
-                2,
-            );
-        },
-    },
-    {
-        name: "list_generations",
-        description:
-            "List recent generations in the open project (newest first), with " +
-            "their status and prompt.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                limit: {
-                    type: "integer",
-                    minimum: 1,
-                    maximum: 100,
-                    description: "Max rows to return. Defaults to 20.",
-                },
-            },
-        },
-        handler: (raw) => {
-            const d = requireDb();
-            const { limit } = ListInput.parse(raw);
-            const rows = listGenerations(d).slice(0, limit);
-            const generations = rows.map((r) => ({
-                id: r.id,
-                task_id: r.task_id ?? null,
-                status: r.status,
-                created_at: r.created_at,
-                prompt: promptOf(r.request_json),
-            }));
-            return Promise.resolve(
-                JSON.stringify(
-                    { count: generations.length, generations },
-                    null,
-                    2,
-                ),
-            );
-        },
-    },
-    {
-        name: "get_generation",
-        description:
-            "Get the full status of one generation by its id or task id: live " +
-            "status, downloaded video file path, reference image/video/audio " +
-            "inputs (with local file paths), token usage and rough cost.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "string",
-                    description:
-                        "The generation id (ULID) or Seedance task id.",
-                },
-            },
-            required: ["id"],
-        },
-        handler: async (raw) => {
-            const d = requireDb();
-            const { id } = IdInput.parse(raw);
-            const row = getGenerationDetail(d, id);
-            if (row instanceof Error) throw row;
-            if (!row) throw new Error(`No generation found for "${id}".`);
+        inputOf: (args) =>
+            args && typeof args === "object" && "input" in args
+                ? (args as { input: unknown }).input
+                : undefined,
+    };
+}
 
-            // Poll Seedance live when still in flight so the status is fresh.
-            let task = row.task_json ?? null;
-            let status: string = row.status;
-            if ((status === "queued" || status === "running") && row.task_id) {
-                const live = await seedance_client.getTask(row.task_id);
-                if (!(live instanceof Error)) {
-                    task = live;
-                    status = live.status ?? status;
-                }
-            }
+function procedureDescription(
+    path: string,
+    type: ProcedureType,
+    meta: unknown,
+): string {
+    if (
+        meta && typeof meta === "object" && "description" in meta &&
+        typeof (meta as { description?: unknown }).description === "string"
+    ) {
+        return (meta as { description: string }).description;
+    }
 
-            // Local file path, if the result has been downloaded to the project.
-            const projectRoot = await getStoredProjectPath();
-            let videoPath: string | null = null;
-            if (row.task_id && projectRoot) {
-                const p = join(projectRoot, VIDEOS_DIR, `${row.task_id}.mp4`);
-                try {
-                    await Deno.stat(p);
-                    videoPath = p;
-                } catch {
-                    // Not downloaded yet.
-                }
-            }
+    const readableName = path
+        .replaceAll(".", " ")
+        .replaceAll("_", " ")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .toLowerCase();
 
-            const totalTokens = task?.usage?.total_tokens ?? null;
-            const cost = totalTokens != null
-                ? estimateCost(totalTokens, row.request_json)
-                : null;
-            const elapsed = task?.created_at != null && task.updated_at != null
-                ? task.updated_at - task.created_at
-                : null;
+    if (type === "subscription") {
+        return `Wait for and return the next ${readableName} event from the tRPC subscription.`;
+    }
+    if (type === "mutation") {
+        return `Run the ${readableName} tRPC mutation. This operation may change backend state.`;
+    }
+    return `Run the ${readableName} tRPC query.`;
+}
 
-            // Reference images/video/audio attached to the prompt, with a
-            // local file path alongside the stored `/project-file/...` url
-            // when it's one of ours — so a local agent can read the bytes
-            // directly instead of having to know this server's origin.
-            const references = referenceInputsOf(row.request_json, projectRoot);
-
-            return JSON.stringify(
-                {
-                    id: row.id,
-                    task_id: row.task_id ?? null,
-                    status,
-                    prompt: promptOf(row.request_json),
-                    reference_inputs: references,
-                    failed_reason: row.failed_reason ?? null,
-                    video_path: videoPath,
-                    remote_video_url: task?.content?.video_url ?? null,
-                    elapsed_seconds: elapsed,
-                    total_tokens: totalTokens,
-                    estimated_cost: cost
-                        ? { rmb: round2(cost.rmb), usd: round2(cost.usd) }
-                        : null,
-                },
-                null,
-                2,
-            );
-        },
-    },
-    {
-        name: "cancel_generation",
-        description:
-            "Cancel a queued or running generation by its id or task id.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "string",
-                    description:
-                        "The generation id (ULID) or Seedance task id.",
-                },
-            },
-            required: ["id"],
-        },
-        handler: async (raw) => {
-            const d = requireDb();
-            const { id } = IdInput.parse(raw);
-            const row = getGenerationDetail(d, id);
-            if (row instanceof Error) throw row;
-            if (!row) throw new Error(`No generation found for "${id}".`);
-            if (!row.task_id) {
-                throw new Error(
-                    "This generation was never submitted (no task id); nothing to cancel.",
-                );
-            }
-            const res = await seedance_client.cancelTask(row.task_id);
-            if (res instanceof Error) throw res;
-            // Mark terminal so the poller stops and the GUI shows the reason.
-            const upErr = updateGeneration(d, {
-                id: row.id,
-                status: "failed",
-                failed_reason: "已取消 (cancelled via MCP)",
-            });
-            if (upErr instanceof Error) throw upErr;
-            return JSON.stringify(
-                {
-                    id: row.id,
-                    task_id: row.task_id,
-                    status: res.status,
-                    message: "Cancelled.",
-                },
-                null,
-                2,
-            );
-        },
-    },
-];
-
-/** Tool metadata (name, description, input schema) without the handler, for
- * display in the GUI's MCP info modal — exactly what `tools/list` returns. */
-export function listMcpTools() {
-    return TOOLS.map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema,
+function buildTools(): Tool[] {
+    const procedures = appRouter._def.procedures as Record<
+        string,
+        RuntimeProcedure
+    >;
+    return Object.entries(procedures).map(([path, procedure]) => ({
+        name: path,
+        description: procedureDescription(
+            path,
+            procedure._def.type,
+            procedure._def.meta,
+        ),
+        ...inputContract(procedure._def.inputs),
+        type: procedure._def.type,
     }));
+}
+
+const TOOLS = buildTools();
+const TOOL_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
+
+/** Tool metadata exactly as advertised over `tools/list`. */
+export function listMcpTools() {
+    return TOOLS.map(({ name, description, inputSchema }) => ({
+        name,
+        description,
+        inputSchema,
+    }));
+}
+
+async function callTrpcProcedure(tool: Tool, args: unknown): Promise<unknown> {
+    const caller = appRouter.createCaller({});
+    let target: unknown = caller;
+    for (const segment of tool.name.split(".")) {
+        target = (target as Record<string, unknown>)[segment];
+    }
+    if (typeof target !== "function") {
+        throw new Error(`Unable to resolve tRPC procedure: ${tool.name}`);
+    }
+
+    const result = await (target as (input?: unknown) => Promise<unknown>)(
+        tool.inputOf(args),
+    );
+
+    if (tool.type !== "subscription") return result;
+    if (!isAsyncIterable(result)) {
+        throw new Error(
+            `tRPC subscription "${tool.name}" did not return an async iterable.`,
+        );
+    }
+
+    // MCP tools are request/response, so one call consumes one subscription
+    // item. Agents can call the tool again to wait for the following event.
+    const iterator = result[Symbol.asyncIterator]();
+    try {
+        const next = await iterator.next();
+        return next.done ? null : next.value;
+    } finally {
+        await iterator.return?.();
+    }
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+    return value != null &&
+        typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] ===
+            "function";
+}
+
+function resultText(result: unknown): string {
+    const json = JSON.stringify(result, null, 2);
+    return json ?? "null";
 }
 
 // ---------------------------------------------------------------------------
@@ -429,34 +245,50 @@ export async function handleMcpPayload(
     if (Array.isArray(payload)) {
         const out: JsonRpcResponse[] = [];
         for (const msg of payload) {
-            const r = await handleSingle(msg);
-            if (r) out.push(r);
+            const response = await handleSingle(msg);
+            if (response) out.push(response);
         }
         return out.length ? out : null;
     }
     return handleSingle(payload);
 }
 
-// deno-lint-ignore no-explicit-any
-async function handleSingle(msg: any): Promise<JsonRpcResponse | null> {
-    const isNotification = msg == null || msg.id === undefined;
-    const id: JsonRpcId = isNotification ? null : msg.id;
+async function handleSingle(msg: unknown): Promise<JsonRpcResponse | null> {
+    if (!msg || typeof msg !== "object") {
+        return rpcError(null, -32600, "Invalid Request");
+    }
 
-    if (!msg || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
+    const request = msg as {
+        jsonrpc?: unknown;
+        id?: unknown;
+        method?: unknown;
+        params?: {
+            protocolVersion?: unknown;
+            name?: unknown;
+            arguments?: unknown;
+        };
+    };
+    const isNotification = request.id === undefined;
+    const id: JsonRpcId = typeof request.id === "string" ||
+            typeof request.id === "number" || request.id === null
+        ? request.id
+        : null;
+
+    if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
         return isNotification ? null : rpcError(id, -32600, "Invalid Request");
     }
 
-    switch (msg.method) {
+    switch (request.method) {
         case "initialize":
             return rpcResult(id, {
-                protocolVersion: typeof msg.params?.protocolVersion === "string"
-                    ? msg.params.protocolVersion
-                    : PROTOCOL_VERSION,
+                protocolVersion:
+                    typeof request.params?.protocolVersion === "string"
+                        ? request.params.protocolVersion
+                        : PROTOCOL_VERSION,
                 capabilities: { tools: { listChanged: false } },
                 serverInfo: SERVER_INFO,
             });
 
-        // Acknowledgement-only notifications — no response.
         case "notifications/initialized":
         case "notifications/cancelled":
             return null;
@@ -465,29 +297,28 @@ async function handleSingle(msg: any): Promise<JsonRpcResponse | null> {
             return rpcResult(id, {});
 
         case "tools/list":
-            return rpcResult(id, {
-                tools: TOOLS.map((t) => ({
-                    name: t.name,
-                    description: t.description,
-                    inputSchema: t.inputSchema,
-                })),
-            });
+            return rpcResult(id, { tools: listMcpTools() });
 
         case "tools/call": {
-            const name = msg.params?.name;
-            const tool = TOOLS.find((t) => t.name === name);
+            const name = request.params?.name;
+            const tool = typeof name === "string"
+                ? TOOL_BY_NAME.get(name)
+                : undefined;
             if (!tool) {
-                return rpcError(id, -32602, `Unknown tool: ${name}`);
+                return rpcError(id, -32602, `Unknown tool: ${String(name)}`);
             }
             try {
-                const text = await tool.handler(msg.params?.arguments ?? {});
+                const result = await callTrpcProcedure(
+                    tool,
+                    request.params?.arguments ?? {},
+                );
                 return rpcResult(id, {
-                    content: [{ type: "text", text }],
+                    content: [{ type: "text", text: resultText(result) }],
                     isError: false,
                 });
             } catch (err) {
-                // Tool failures are reported as a tool result (isError), not a
-                // protocol-level error, so the model can read the message.
+                // Tool failures are a tool result (not a protocol-level
+                // error), so the model can read and react to the message.
                 const message = err instanceof Error
                     ? err.message
                     : String(err);
@@ -501,6 +332,6 @@ async function handleSingle(msg: any): Promise<JsonRpcResponse | null> {
         default:
             return isNotification
                 ? null
-                : rpcError(id, -32601, `Method not found: ${msg.method}`);
+                : rpcError(id, -32601, `Method not found: ${request.method}`);
     }
 }
