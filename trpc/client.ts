@@ -179,6 +179,7 @@ const TEXTS = {
     dislike: { English: "Dislike", Chinese: "点踩" },
     remove_like: { English: "Remove like", Chinese: "取消点赞" },
     remove_dislike: { English: "Remove dislike", Chinese: "取消点踩" },
+    reaction_reason: { English: "Reason", Chinese: "原因" },
     why_do_you_like_it: {
         English: "Why do you like it? (optional)",
         Chinese: "为什么喜欢它？（可选）",

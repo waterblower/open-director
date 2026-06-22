@@ -1,5 +1,5 @@
 import { useSignal } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { estimateCost } from "../seedance/pricing.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
@@ -43,12 +43,36 @@ export function GenerationDetailModal(props: {
 }) {
     const { generation, detail, loading, onClose, projectRoot } = props;
 
-    // Reason editor: set when the user picks a new (or switched) reaction
-    // and hasn't confirmed it yet. Clicking an already-active reaction skips
-    // this and clears the reaction directly instead.
-    const reactionKind = useSignal<Reaction | null>(null);
+    const savedReaction = useSignal<Reaction | null>(
+        generation.reaction ?? null,
+    );
+    const savedReason = useSignal(generation.reason ?? "");
+    // Reason editor: set when the user picks a new (or switched) reaction.
+    const pendingReaction = useSignal<Reaction | null>(null);
     const reasonText = useSignal("");
     const reactionBusy = useSignal(false);
+    const reactionRevision = useRef(0);
+
+    // The file-explorer entry point does not carry reaction data in its grid
+    // item, so fetch the persisted value while using the prop as an immediate
+    // initial value. The revision prevents a late fetch from overwriting a
+    // reaction the user just submitted in this modal.
+    useEffect(() => {
+        const revision = ++reactionRevision.current;
+        savedReaction.value = generation.reaction ?? null;
+        savedReason.value = generation.reason ?? "";
+        trpc.open.getGenerationReaction.query({
+            project_root: projectRoot,
+            id: generation.id,
+        }).then((stored) => {
+            if (reactionRevision.current !== revision) return;
+            savedReaction.value = stored?.reaction ?? null;
+            savedReason.value = stored?.reason ?? "";
+        }).catch((err) => console.error(err));
+        return () => {
+            reactionRevision.current++;
+        };
+    }, [generation.id, generation.reaction, generation.reason, projectRoot]);
 
     const onReact = async (
         gen: GeneratedVideo,
@@ -62,8 +86,9 @@ export function GenerationDetailModal(props: {
             reaction: nextReaction,
             reason: nextReason,
         });
-        reactionKind.value = nextReaction;
-        reasonText.value = nextReason;
+        reactionRevision.current++;
+        savedReaction.value = nextReaction;
+        savedReason.value = nextReason;
         return { reaction: nextReaction, reason: nextReason };
     };
     const onClearReaction = async (
@@ -74,8 +99,9 @@ export function GenerationDetailModal(props: {
             project_root: projectRoot,
             id: gen.id,
         });
-        reactionKind.value = null;
-        reasonText.value = "";
+        reactionRevision.current++;
+        savedReaction.value = null;
+        savedReason.value = "";
     };
 
     // Close on Escape, like a native dialog.
@@ -88,7 +114,7 @@ export function GenerationDetailModal(props: {
     }, [onClose]);
 
     const pickReaction = (reaction: Reaction) => {
-        if (generation.reaction === reaction) {
+        if (savedReaction.value === reaction) {
             if (reactionBusy.value) return;
             reactionBusy.value = true;
             onClearReaction(generation, projectRoot)
@@ -97,20 +123,20 @@ export function GenerationDetailModal(props: {
             return;
         }
         reasonText.value = "";
-        reactionKind.value = reaction;
+        pendingReaction.value = reaction;
     };
 
     const confirmReaction = async () => {
-        if (!reactionKind.value || reactionBusy.value) return;
+        if (!pendingReaction.value || reactionBusy.value) return;
         reactionBusy.value = true;
         try {
             await onReact(
                 generation,
-                reactionKind.value,
+                pendingReaction.value,
                 reasonText.value.trim(),
                 projectRoot,
             );
-            reactionKind.value = null;
+            pendingReaction.value = null;
         } catch (err) {
             console.error(err);
         } finally {
@@ -464,7 +490,7 @@ export function GenerationDetailModal(props: {
                             </>
                         )}
 
-                    {/* Reaction: like/dislike + the stored reason, if any. */}
+                    {/* Reaction: like/dislike + an always-visible reason. */}
                     <div>
                         <div class="flex items-center gap-2 mb-1.5">
                             <button
@@ -472,17 +498,17 @@ export function GenerationDetailModal(props: {
                                 disabled={reactionBusy.value}
                                 onClick={() => pickReaction("liked")}
                                 class={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50 ${
-                                    generation.reaction === "liked"
+                                    savedReaction.value === "liked"
                                         ? "bg-indigo-500 text-white"
                                         : "bg-gray-800/70 text-gray-300 hover:bg-gray-800"
                                 }`}
                             >
                                 <LikeIcon
                                     class="size-4"
-                                    filled={generation.reaction === "liked"}
+                                    filled={savedReaction.value === "liked"}
                                 />
                                 {get_text(
-                                    generation.reaction === "liked"
+                                    savedReaction.value === "liked"
                                         ? "remove_like"
                                         : "like",
                                     language.value,
@@ -493,38 +519,39 @@ export function GenerationDetailModal(props: {
                                 disabled={reactionBusy.value}
                                 onClick={() => pickReaction("disliked")}
                                 class={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50 ${
-                                    generation.reaction === "disliked"
+                                    savedReaction.value === "disliked"
                                         ? "bg-indigo-500 text-white"
                                         : "bg-gray-800/70 text-gray-300 hover:bg-gray-800"
                                 }`}
                             >
                                 <DislikeIcon
                                     class="size-4"
-                                    filled={generation.reaction === "disliked"}
+                                    filled={savedReaction.value === "disliked"}
                                 />
                                 {get_text(
-                                    generation.reaction === "disliked"
+                                    savedReaction.value === "disliked"
                                         ? "remove_dislike"
                                         : "dislike",
                                     language.value,
                                 )}
                             </button>
                         </div>
-                        {generation.reaction && generation.reason && (
-                            <div class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-300 [overflow-wrap:anywhere]">
-                                {generation.reason}
-                            </div>
-                        )}
+                        <div class="text-[11px] text-gray-400 mb-1.5">
+                            {get_text("reaction_reason", language.value)}
+                        </div>
+                        <div class="min-h-11 whitespace-pre-wrap rounded-lg bg-gray-800/70 p-3 text-sm text-gray-300 [overflow-wrap:anywhere]">
+                            {savedReason.value}
+                        </div>
                     </div>
                 </div>
             </div>
-            {reactionKind.value && (
+            {pendingReaction.value && (
                 <div
                     class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
                     onClick={(e) => {
                         e.stopPropagation();
                         if (e.target === e.currentTarget) {
-                            reactionKind.value = null;
+                            pendingReaction.value = null;
                         }
                     }}
                 >
@@ -534,7 +561,7 @@ export function GenerationDetailModal(props: {
                     >
                         <div class="text-sm font-medium text-gray-800">
                             {get_text(
-                                reactionKind.value === "liked"
+                                pendingReaction.value === "liked"
                                     ? "why_do_you_like_it"
                                     : "why_do_you_dislike_it",
                                 language.value,
@@ -550,7 +577,7 @@ export function GenerationDetailModal(props: {
                         <div class="flex justify-end gap-2">
                             <button
                                 type="button"
-                                onClick={() => reactionKind.value = null}
+                                onClick={() => pendingReaction.value = null}
                                 class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
                             >
                                 {get_text("cancel", language.value)}
@@ -562,7 +589,7 @@ export function GenerationDetailModal(props: {
                                 class="px-3 py-1.5 rounded-lg text-sm text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
                             >
                                 {get_text(
-                                    reactionKind.value === "liked"
+                                    pendingReaction.value === "liked"
                                         ? "like"
                                         : "dislike",
                                     language.value,
