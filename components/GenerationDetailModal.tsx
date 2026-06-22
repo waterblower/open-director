@@ -572,7 +572,7 @@ export function GenerationDetailModal(props: {
                             onInput={(e) =>
                                 reasonText.value = e.currentTarget.value}
                             rows={3}
-                            class="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-300"
+                            class="w-full resize rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-300"
                         />
                         <div class="flex justify-end gap-2">
                             <button
