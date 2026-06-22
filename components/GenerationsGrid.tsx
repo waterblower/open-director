@@ -2,10 +2,11 @@ import { type Signal, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
+import { GenerationTabs } from "./GenerationTabs.tsx";
 import { get_text, language, trpc } from "@/trpc/client.ts";
 
 type SortOrder = "newest" | "oldest";
-type Tab = "active" | "archived";
+export type Tab = "active" | "archived" | "liked" | "disliked";
 
 export function GenerationsGrid(
     props: {
@@ -24,6 +25,8 @@ export function GenerationsGrid(
     const tab = useSignal<Tab>("active");
     const archivedResults = useSignal<Map<string, GeneratedVideo>>(new Map());
     const archivedLoading = useSignal(false);
+    const reactedResults = useSignal<Map<string, GeneratedVideo>>(new Map());
+    const reactedLoading = useSignal(false);
 
     // Fetch the archived list on demand — only while that tab is open, and
     // again whenever the active project changes.
@@ -52,14 +55,60 @@ export function GenerationsGrid(
         };
     }, [tab.value, projectRoot]);
 
+    // Same, for the liked/disliked tabs — both draw from the same fetch
+    // (the query returns everything with a reaction) and split by `reaction`
+    // client-side below.
+    useEffect(() => {
+        if (
+            (tab.value !== "liked" && tab.value !== "disliked") ||
+            !projectRoot
+        ) {
+            return;
+        }
+        let cancelled = false;
+        reactedLoading.value = true;
+        (async () => {
+            try {
+                const rows = await trpc.listReactedGenerations.query({
+                    project_root: projectRoot,
+                });
+                if (!cancelled) {
+                    reactedResults.value = new Map(
+                        rows.map((v) => [v.id, v]),
+                    );
+                }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                if (!cancelled) reactedLoading.value = false;
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [tab.value, projectRoot]);
+
     if (results.value.size === 0 && !projectRoot) return null;
 
-    const currentResults = tab.value === "archived" ? archivedResults : results;
+    const isReactionTab = tab.value === "liked" || tab.value === "disliked";
+    const currentResults = tab.value === "archived"
+        ? archivedResults
+        : isReactionTab
+        ? reactedResults
+        : results;
+
+    // The liked/disliked tabs share one fetch (everything with a reaction)
+    // and split by `reaction` here.
+    const visible = isReactionTab
+        ? [...currentResults.value.values()].filter((g) =>
+            g.reaction === tab.value
+        )
+        : [...currentResults.value.values()];
 
     // created_at is an ISO-8601 UTC string, so it sorts lexicographically.
     // `dir` flips ascending (oldest first) ↔ descending (newest first).
     const dir = order.value === "newest" ? -1 : 1;
-    const generations = [...currentResults.value.values()].toSorted((a, b) =>
+    const generations = visible.toSorted((a, b) =>
         dir * a.created_at.localeCompare(b.created_at)
     );
 
@@ -93,34 +142,68 @@ export function GenerationsGrid(
         }
     };
 
+    // Applies a generation update (new reaction, or reaction cleared) to
+    // every map it's currently shown in, plus the reacted map (added to it
+    // when reacting, removed from it when cleared) — keeping all three tabs
+    // consistent without refetching.
+    const applyReactionUpdate = (
+        video: GeneratedVideo,
+        updated: GeneratedVideo,
+    ) => {
+        for (const map of [results, archivedResults]) {
+            if (!map.value.has(video.id)) continue;
+            const next = new Map(map.value);
+            next.set(video.id, updated);
+            map.value = next;
+        }
+        const nextReacted = new Map(reactedResults.value);
+        if (updated.reaction) {
+            nextReacted.set(video.id, updated);
+        } else {
+            nextReacted.delete(video.id);
+        }
+        reactedResults.value = nextReacted;
+    };
+
+    const handleReact = async (
+        video: GeneratedVideo,
+        reaction: "liked" | "disliked",
+        reason?: string,
+    ) => {
+        if (!projectRoot) return;
+        await trpc.setGenerationReaction.mutate({
+            project_root: projectRoot,
+            id: video.id,
+            reaction,
+            reason,
+        });
+        applyReactionUpdate(video, {
+            ...video,
+            reaction,
+            reason: reason ?? null,
+        });
+    };
+
+    const handleClearReaction = async (video: GeneratedVideo) => {
+        if (!projectRoot) return;
+        await trpc.clearGenerationReaction.mutate({
+            project_root: projectRoot,
+            id: video.id,
+        });
+        applyReactionUpdate(video, {
+            ...video,
+            reaction: undefined,
+            reason: undefined,
+        });
+    };
+
     return (
         <div
             class="absolute inset-0 overflow-y-auto p-3"
             style={{ paddingBottom: `${bottomInset.value}px` }}
         >
             <div class="sticky top-0 z-10 flex items-center justify-between gap-2 pb-2">
-                <div class="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
-                    {(
-                        [["active", "active_generations"], [
-                            "archived",
-                            "archived_generations",
-                        ]] as const
-                    )
-                        .map(([value, textId]) => (
-                            <button
-                                key={value}
-                                type="button"
-                                onClick={() => tab.value = value}
-                                class={`px-3 py-1.5 ${
-                                    tab.value === value
-                                        ? "bg-indigo-500 text-white"
-                                        : "text-gray-600 hover:bg-gray-50"
-                                }`}
-                            >
-                                {get_text(textId, language.value)}
-                            </button>
-                        ))}
-                </div>
+                <GenerationTabs tab={tab} />
 
                 <div class="inline-flex overflow-hidden rounded-lg border border-gray-200 bg-white text-sm shadow-sm">
                     {(
@@ -153,6 +236,18 @@ export function GenerationsGrid(
                 </div>
             )}
 
+            {isReactionTab && !reactedLoading.value &&
+                generations.length === 0 && (
+                <div class="text-center text-sm text-gray-400 py-10">
+                    {get_text(
+                        tab.value === "liked"
+                            ? "no_liked_generations"
+                            : "no_disliked_generations",
+                        language.value,
+                    )}
+                </div>
+            )}
+
             {/* auto-fill keeps items ≥240px wide, collapsing to a single column on narrow screens */}
             <div class="grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-1.5">
                 {tab.value === "active" && generating.value && (
@@ -170,6 +265,8 @@ export function GenerationsGrid(
                         reusePrompt={reusePrompt}
                         archived={tab.value === "archived"}
                         onArchiveToggle={handleArchiveToggle}
+                        onReact={handleReact}
+                        onClearReaction={handleClearReaction}
                     />
                 ))}
             </div>

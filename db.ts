@@ -87,6 +87,13 @@ export async function getDatabase(project_root?: string) {
             generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
         );
 
+        CREATE TABLE IF NOT EXISTS GenerationReactions (
+            generation_id TEXT PRIMARY KEY REFERENCES Generations(id),
+            reaction      TEXT NOT NULL CHECK (reaction IN ('liked', 'disliked')),
+            reason        TEXT,
+            created_at    TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS ContentHashes (
             generation_id TEXT UNIQUE REFERENCES Generations(id),
             content_hash  TEXT UNIQUE
@@ -479,6 +486,83 @@ export function listArchivedGenerationIds(db: DatabaseSync): string[] {
     ).all();
     return z.array(ArchivedGenerationRowSchema).parse(rows)
         .map((row) => row.generation_id);
+}
+
+/** A row of the `GenerationReactions` table. */
+export const GenerationReactionRowSchema = z.object({
+    generation_id: z.ulid(),
+    reaction: z.enum(["liked", "disliked"]),
+    reason: z.string().nullable().optional(),
+    created_at: z.iso.datetime(),
+});
+
+export type GenerationReaction = z.infer<typeof GenerationReactionRowSchema>;
+
+/**
+ * Like or dislike a generation by its ULID `id`, with an optional reason.
+ * Upserts — reacting again (even with a different reaction) replaces the
+ * previous one rather than erroring.
+ */
+export function setGenerationReaction(
+    db: DatabaseSync,
+    generationId: string,
+    reaction: "liked" | "disliked",
+    reason?: string | null,
+): void | Error {
+    try {
+        db.prepare(
+            `INSERT INTO GenerationReactions
+                 (generation_id, reaction, reason, created_at)
+             VALUES (:generation_id, :reaction, :reason, :created_at)
+             ON CONFLICT(generation_id) DO UPDATE SET
+                 reaction = excluded.reaction,
+                 reason = excluded.reason,
+                 created_at = excluded.created_at`,
+        ).run({
+            generation_id: generationId,
+            reaction,
+            reason: reason ?? null,
+            created_at: new Date().toISOString(),
+        });
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+/** Remove a generation's like/dislike. A no-op if it had none. */
+export function clearGenerationReaction(
+    db: DatabaseSync,
+    generationId: string,
+): void | Error {
+    try {
+        db.prepare(
+            `DELETE FROM GenerationReactions WHERE generation_id = :generation_id`,
+        ).run({ generation_id: generationId });
+    } catch (err) {
+        return err as Error;
+    }
+}
+
+/** All reactions, keyed by generation ULID id. */
+export function listGenerationReactions(
+    db: DatabaseSync,
+): Map<string, { reaction: "liked" | "disliked"; reason: string | null }> {
+    const rows = db.prepare(
+        "SELECT generation_id, reaction, reason FROM GenerationReactions",
+    ).all();
+    const parsed = z.array(
+        GenerationReactionRowSchema.pick({
+            generation_id: true,
+            reaction: true,
+            reason: true,
+        }),
+    ).parse(rows);
+    return new Map(
+        parsed.map((r) => [
+            r.generation_id,
+            { reaction: r.reaction, reason: r.reason ?? null },
+        ]),
+    );
 }
 
 /** A row of the `ContentHashes` table. */

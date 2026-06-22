@@ -15,6 +15,7 @@ import {
 } from "../project.ts";
 import {
     archiveGeneration,
+    clearGenerationReaction,
     createGeneration,
     db,
     Generation,
@@ -24,9 +25,11 @@ import {
     getGenerationIdByContentHash,
     getGenerationRequest,
     listArchivedGenerationIds,
+    listGenerationReactions,
     listGenerations,
     recordGeneration,
     reopenDb,
+    setGenerationReaction,
     unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
@@ -126,16 +129,22 @@ type VideoListItem = {
     has_request: boolean;
     url?: string;
     failed_reason?: string;
+    reaction?: "liked" | "disliked";
+    reason?: string | null;
 };
 
+/** Which slice of generations a grid tab is asking for. */
+type VideoListScope = "active" | "archived" | "reacted";
+
 /**
- * Build the Task-like video list for `projectRoot`, either the active
- * (non-archived) set or the archived set, depending on `archived`. Creates
- * the videos directory if it doesn't exist yet.
+ * Build the Task-like video list for `projectRoot`, scoped to the active
+ * (non-archived) set, the archived set, or the set with a like/dislike
+ * reaction — depending on `scope`. Creates the videos directory if it
+ * doesn't exist yet.
  */
 async function buildVideoList(
     projectRoot: string,
-    archived: boolean,
+    scope: VideoListScope,
 ): Promise<VideoListItem[]> {
     const dir = `${projectRoot}/${VIDEOS_DIR}`;
     // Creates the dir if missing; a no-op (no throw) when it already exists.
@@ -145,13 +154,21 @@ async function buildVideoList(
     const rows = listGenerations(db);
     const rowById = new Map(rows.map((r) => [r.task_id, r]));
     const archivedIds = new Set(listArchivedGenerationIds(db));
+    const reactions = listGenerationReactions(db);
     const onDisk = new Set<string>();
+
+    // Whether a row (by its ULID id) belongs in this scope.
+    const included = (id: string) =>
+        scope === "reacted"
+            ? reactions.has(id)
+            : archivedIds.has(id) === (scope === "archived");
 
     const videos: VideoListItem[] = [];
 
     // 1. Video files on disk — these are the succeeded, downloaded outputs.
     //    Merge in any matching log row; if there's none, fall back to the
-    //    file alone. A file with no log row can never be archived.
+    //    file alone. A file with no log row can never be archived or
+    //    reacted to (there's no ULID id to key on).
     for await (const entry of Deno.readDir(dir)) {
         if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
         const taskId = entry.name.replace(VIDEO_EXT, "");
@@ -161,7 +178,7 @@ async function buildVideoList(
 
         const row = rowById.get(taskId);
         if (!row) {
-            if (archived) continue;
+            if (scope !== "active") continue;
             videos.push({
                 status: "succeeded",
                 id: taskId,
@@ -171,13 +188,16 @@ async function buildVideoList(
             });
             continue;
         }
-        if (archivedIds.has(row.id) !== archived) continue;
+        if (!included(row.id)) continue;
+        const reaction = reactions.get(row.id);
         videos.push({
             status: "succeeded",
             id: taskId,
             url: localUrl,
             created_at: row.created_at,
             has_request: row.request_json != null,
+            reaction: reaction?.reaction,
+            reason: reaction?.reason,
         });
     }
 
@@ -186,7 +206,8 @@ async function buildVideoList(
     //    whatever status we last recorded.
     for (const row of rows) {
         if (row.task_id && onDisk.has(row.task_id)) continue;
-        if (archivedIds.has(row.id) !== archived) continue;
+        if (!included(row.id)) continue;
+        const reaction = reactions.get(row.id);
         videos.push({
             status: row.status,
             // Not-yet-submitted generations have no task_id; key on the
@@ -195,6 +216,8 @@ async function buildVideoList(
             created_at: row.created_at,
             has_request: row.request_json != null,
             failed_reason: row.failed_reason ?? undefined,
+            reaction: reaction?.reaction,
+            reason: reaction?.reason,
         });
     }
 
@@ -234,13 +257,19 @@ export const appRouter = router({
     // objects. Creates the directory if it doesn't exist yet.
     listGeneratedVideos: publicProcedure.input(z.object({
         project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, false)),
+    })).query(({ input }) => buildVideoList(input.project_root, "active")),
 
     // Archived generations for the same project, in the same shape — shown in
     // the grid's "Archived" tab.
     listArchivedGenerations: publicProcedure.input(z.object({
         project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, true)),
+    })).query(({ input }) => buildVideoList(input.project_root, "archived")),
+
+    // Liked/disliked generations for the same project, in the same shape —
+    // shown in the grid's "Liked & disliked" tab.
+    listReactedGenerations: publicProcedure.input(z.object({
+        project_root: z.string(),
+    })).query(({ input }) => buildVideoList(input.project_root, "reacted")),
 
     // Look up a generation by a project file's content — hashes the file at
     // `path` and matches it against recorded video hashes, so a copy or
@@ -669,6 +698,74 @@ export const appRouter = router({
                 throw new Error(`No generation with id ${opts.input.id}`);
             }
             const err = unarchiveGeneration(db, gen.id);
+            if (err instanceof Error) {
+                throw err;
+            }
+            return { ok: true };
+        }),
+
+    // Like or dislike a generation (by ULID id or task id), with an optional
+    // reason. Reacting again — even with the opposite reaction — replaces
+    // whatever reaction was stored before.
+    setGenerationReaction: publicProcedure
+        .input(z.object({
+            project_root: z.string(),
+            id: z.string(),
+            reaction: z.enum(["liked", "disliked"]),
+            reason: z.string().optional(),
+        }))
+        .mutation(async (opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const activeRoot = await getStoredProjectPath();
+            if (activeRoot !== opts.input.project_root) {
+                throw new Error(
+                    "project_root is not the active project",
+                );
+            }
+
+            const gen = getGenerationDetail(db, opts.input.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            if (!gen) {
+                throw new Error(`No generation with id ${opts.input.id}`);
+            }
+            const err = setGenerationReaction(
+                db,
+                gen.id,
+                opts.input.reaction,
+                opts.input.reason,
+            );
+            if (err instanceof Error) {
+                throw err;
+            }
+            return { ok: true };
+        }),
+
+    // Remove a generation's like/dislike (by ULID id or task id).
+    clearGenerationReaction: publicProcedure
+        .input(z.object({ project_root: z.string(), id: z.string() }))
+        .mutation(async (opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const activeRoot = await getStoredProjectPath();
+            if (activeRoot !== opts.input.project_root) {
+                throw new Error(
+                    "project_root is not the active project",
+                );
+            }
+
+            const gen = getGenerationDetail(db, opts.input.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            if (!gen) {
+                throw new Error(`No generation with id ${opts.input.id}`);
+            }
+            const err = clearGenerationReaction(db, gen.id);
             if (err instanceof Error) {
                 throw err;
             }

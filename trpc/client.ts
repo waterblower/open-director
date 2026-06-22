@@ -175,15 +175,37 @@ const TEXTS = {
     view_details: { English: "View details", Chinese: "查看详情" },
     archive: { English: "Archive", Chinese: "归档" },
     restore: { English: "Restore", Chinese: "还原" },
+    like: { English: "Like", Chinese: "点赞" },
+    dislike: { English: "Dislike", Chinese: "点踩" },
+    remove_like: { English: "Remove like", Chinese: "取消点赞" },
+    remove_dislike: { English: "Remove dislike", Chinese: "取消点踩" },
+    why_do_you_like_it: {
+        English: "Why do you like it? (optional)",
+        Chinese: "为什么喜欢它？（可选）",
+    },
+    why_do_you_dislike_it: {
+        English: "Why do you dislike it? (optional)",
+        Chinese: "为什么不喜欢它？（可选）",
+    },
 
     // GenerationsGrid
     newest_first: { English: "Newest first", Chinese: "最新在前" },
     oldest_first: { English: "Oldest first", Chinese: "最早在前" },
     active_generations: { English: "Active", Chinese: "进行中" },
     archived_generations: { English: "Archived", Chinese: "已归档" },
+    liked_generations: { English: "Liked", Chinese: "点赞" },
+    disliked_generations: { English: "Disliked", Chinese: "点踩" },
     no_archived_generations: {
         English: "No archived generations",
         Chinese: "暂无归档",
+    },
+    no_liked_generations: {
+        English: "No liked generations",
+        Chinese: "暂无点赞的生成",
+    },
+    no_disliked_generations: {
+        English: "No disliked generations",
+        Chinese: "暂无点踩的生成",
     },
 
     // GenerationDetailModal

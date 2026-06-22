@@ -7,6 +7,8 @@ import {
     GenerationDetailModal,
 } from "./GenerationDetailModal.tsx";
 
+export type Reaction = "liked" | "disliked";
+
 export type GeneratedVideo = {
     id: string;
     status: string;
@@ -16,6 +18,10 @@ export type GeneratedVideo = {
     has_request: boolean;
     url?: string;
     failed_reason?: string;
+    /** Current like/dislike, if any. */
+    reaction?: Reaction;
+    /** Optional reason the user gave when reacting. */
+    reason?: string | null;
 };
 
 export function GenerationCard(
@@ -30,9 +36,26 @@ export function GenerationCard(
          * both live in the owning grid — this component holds no list state
          * and knows nothing of the backend call). */
         onArchiveToggle: (generation: GeneratedVideo) => Promise<void>;
+        /** Sets (or switches) this generation's reaction, with an optional
+         * reason — called after the reason modal is confirmed. */
+        onReact: (
+            generation: GeneratedVideo,
+            reaction: Reaction,
+            reason?: string,
+        ) => Promise<void>;
+        /** Clears this generation's reaction (the like/dislike button toggles
+         * this when clicked while already active). */
+        onClearReaction: (generation: GeneratedVideo) => Promise<void>;
     },
 ) {
-    const { generation, reusePrompt, archived, onArchiveToggle } = props;
+    const {
+        generation,
+        reusePrompt,
+        archived,
+        onArchiveToggle,
+        onReact,
+        onClearReaction,
+    } = props;
     const url = generation.url;
     const isPending = generation.status === "running" ||
         generation.status === "queued";
@@ -44,6 +67,12 @@ export function GenerationCard(
     const detailOpen = useSignal(false);
     const detailLoading = useSignal(false);
     const archiveBusy = useSignal(false);
+    // Reason modal: set when the user picks a new (or switched) reaction and
+    // hasn't confirmed it yet. Clicking an already-active reaction skips this
+    // and clears the reaction directly instead.
+    const reasonModal = useSignal<Reaction | null>(null);
+    const reasonText = useSignal("");
+    const reactionBusy = useSignal(false);
 
     const toggleArchive = async () => {
         if (archiveBusy.value) return;
@@ -54,6 +83,37 @@ export function GenerationCard(
             console.error(err);
         } finally {
             archiveBusy.value = false;
+        }
+    };
+
+    const pickReaction = (reaction: Reaction) => {
+        if (generation.reaction === reaction) {
+            // Already reacted this way — clicking again removes it.
+            if (reactionBusy.value) return;
+            reactionBusy.value = true;
+            onClearReaction(generation)
+                .catch((err) => console.error(err))
+                .finally(() => reactionBusy.value = false);
+            return;
+        }
+        reasonText.value = "";
+        reasonModal.value = reaction;
+    };
+
+    const confirmReaction = async () => {
+        if (!reasonModal.value || reactionBusy.value) return;
+        reactionBusy.value = true;
+        try {
+            await onReact(
+                generation,
+                reasonModal.value,
+                reasonText.value.trim() || undefined,
+            );
+            reasonModal.value = null;
+        } catch (err) {
+            console.error(err);
+        } finally {
+            reactionBusy.value = false;
         }
     };
 
@@ -242,6 +302,82 @@ export function GenerationCard(
                         </span>
                     </div>
                 )}
+                {!isPending && (
+                    <div class="relative">
+                        <button
+                            type="button"
+                            aria-label={get_text(
+                                generation.reaction === "liked"
+                                    ? "remove_like"
+                                    : "like",
+                                language.value,
+                            )}
+                            draggable={false}
+                            disabled={reactionBusy.value}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                e.currentTarget.blur();
+                                pickReaction("liked");
+                            }}
+                            class={`peer size-8 rounded-full flex items-center justify-center backdrop-blur-sm disabled:opacity-50 ${
+                                generation.reaction === "liked"
+                                    ? "bg-indigo-500 hover:bg-indigo-600 text-white"
+                                    : "bg-black/55 hover:bg-black/80 text-white"
+                            }`}
+                        >
+                            <LikeIcon
+                                class="size-4"
+                                filled={generation.reaction === "liked"}
+                            />
+                        </button>
+                        <span class="pointer-events-none absolute left-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
+                            {get_text(
+                                generation.reaction === "liked"
+                                    ? "remove_like"
+                                    : "like",
+                                language.value,
+                            )}
+                        </span>
+                    </div>
+                )}
+                {!isPending && (
+                    <div class="relative">
+                        <button
+                            type="button"
+                            aria-label={get_text(
+                                generation.reaction === "disliked"
+                                    ? "remove_dislike"
+                                    : "dislike",
+                                language.value,
+                            )}
+                            draggable={false}
+                            disabled={reactionBusy.value}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                e.currentTarget.blur();
+                                pickReaction("disliked");
+                            }}
+                            class={`peer size-8 rounded-full flex items-center justify-center backdrop-blur-sm disabled:opacity-50 ${
+                                generation.reaction === "disliked"
+                                    ? "bg-indigo-500 hover:bg-indigo-600 text-white"
+                                    : "bg-black/55 hover:bg-black/80 text-white"
+                            }`}
+                        >
+                            <DislikeIcon
+                                class="size-4"
+                                filled={generation.reaction === "disliked"}
+                            />
+                        </button>
+                        <span class="pointer-events-none absolute left-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-gray-900/90 px-2 py-1 text-[11px] text-white opacity-0 peer-hover:opacity-100 transition-opacity">
+                            {get_text(
+                                generation.reaction === "disliked"
+                                    ? "remove_dislike"
+                                    : "dislike",
+                                language.value,
+                            )}
+                        </span>
+                    </div>
+                )}
                 <div class="relative">
                     <button
                         type="button"
@@ -283,6 +419,60 @@ export function GenerationCard(
                     loading={detailLoading.value}
                     onClose={() => detailOpen.value = false}
                 />
+            )}
+            {reasonModal.value && (
+                <div
+                    class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (e.target === e.currentTarget) {
+                            reasonModal.value = null;
+                        }
+                    }}
+                >
+                    <div
+                        class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div class="text-sm font-medium text-gray-800">
+                            {get_text(
+                                reasonModal.value === "liked"
+                                    ? "why_do_you_like_it"
+                                    : "why_do_you_dislike_it",
+                                language.value,
+                            )}
+                        </div>
+                        <textarea
+                            value={reasonText.value}
+                            onInput={(e) =>
+                                reasonText.value = e.currentTarget.value}
+                            rows={3}
+                            class="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                        <div class="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => reasonModal.value = null}
+                                class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+                            >
+                                {get_text("cancel", language.value)}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={reactionBusy.value}
+                                onClick={confirmReaction}
+                                class="px-3 py-1.5 rounded-lg text-sm text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
+                            >
+                                {get_text(
+                                    reasonModal.value === "liked"
+                                        ? "like"
+                                        : "dislike",
+                                    language.value,
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
@@ -371,6 +561,39 @@ function InfoIcon(props: { class?: string }) {
             <circle cx="12" cy="12" r="10" />
             <path d="M12 16v-4" />
             <path d="M12 8h.01" />
+        </svg>
+    );
+}
+
+function LikeIcon(props: { class?: string; filled?: boolean }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill={props.filled ? "currentColor" : "none"}
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z" />
+        </svg>
+    );
+}
+
+function DislikeIcon(props: { class?: string; filled?: boolean }) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill={props.filled ? "currentColor" : "none"}
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <path d="M17 14V2" />
+            <path d="M9 18.12 10 14H4.17a2 2 0 0 1-2-2.4l1.62-8A2 2 0 0 1 5.79 2H17a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.5l-3.51 6.04a1 1 0 0 1-1.78-.04L9 18.12Z" />
         </svg>
     );
 }
