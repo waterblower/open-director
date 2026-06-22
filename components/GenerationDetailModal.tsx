@@ -2,8 +2,13 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
 import { estimateCost } from "../seedance/pricing.ts";
-import { get_text, Language, language, type trpc } from "../trpc/client.ts";
-import type { GeneratedVideo } from "./GenerationCard.tsx";
+import { get_text, Language, language, trpc } from "../trpc/client.ts";
+import {
+    DislikeIcon,
+    type GeneratedVideo,
+    LikeIcon,
+    type Reaction,
+} from "./GenerationCard.tsx";
 
 /** The full generation row returned by the details endpoint. */
 export type GenerationDetail = Awaited<
@@ -30,12 +35,47 @@ function promptText(req: CreateTaskRequest | null | undefined): string {
 }
 
 export function GenerationDetailModal(props: {
+    projectRoot: string;
     generation: GeneratedVideo;
     detail: GenerationDetail | null;
     loading: boolean;
     onClose: () => void;
 }) {
-    const { generation, detail, loading, onClose } = props;
+    const { generation, detail, loading, onClose, projectRoot } = props;
+
+    // Reason editor: set when the user picks a new (or switched) reaction
+    // and hasn't confirmed it yet. Clicking an already-active reaction skips
+    // this and clears the reaction directly instead.
+    const reasonModal = useSignal<Reaction | null>(null);
+    const reasonText = useSignal("");
+    const reactionBusy = useSignal(false);
+
+    const onReact = async (
+        gen: GeneratedVideo,
+        nextReaction: Reaction,
+        nextReason: string,
+        projectRoot: string,
+    ) => {
+        await trpc.setGenerationReaction.mutate({
+            project_root: projectRoot,
+            id: gen.id,
+            reaction: nextReaction,
+            reason: nextReason,
+        });
+        reasonModal.value = nextReaction;
+        reasonText.value = nextReason;
+    };
+    const onClearReaction = async (
+        gen: GeneratedVideo,
+        projectRoot: string,
+    ) => {
+        await trpc.clearGenerationReaction.mutate({
+            project_root: projectRoot,
+            id: gen.id,
+        });
+        reasonModal.value = null;
+        reasonText.value = "";
+    };
 
     // Close on Escape, like a native dialog.
     useEffect(() => {
@@ -45,6 +85,37 @@ export function GenerationDetailModal(props: {
         globalThis.addEventListener("keydown", onKeyDown);
         return () => globalThis.removeEventListener("keydown", onKeyDown);
     }, [onClose]);
+
+    const pickReaction = (reaction: Reaction) => {
+        if (generation.reaction === reaction) {
+            if (reactionBusy.value) return;
+            reactionBusy.value = true;
+            onClearReaction(generation, projectRoot)
+                .catch((err) => console.error(err))
+                .finally(() => reactionBusy.value = false);
+            return;
+        }
+        reasonText.value = "";
+        reasonModal.value = reaction;
+    };
+
+    const confirmReaction = async () => {
+        if (!reasonModal.value || reactionBusy.value) return;
+        reactionBusy.value = true;
+        try {
+            await onReact(
+                generation,
+                reasonModal.value,
+                reasonText.value.trim(),
+                projectRoot,
+            );
+            reasonModal.value = null;
+        } catch (err) {
+            console.error(err);
+        } finally {
+            reactionBusy.value = false;
+        }
+    };
 
     const url = generation.url;
     const req = detail?.request_json ?? null;
@@ -391,8 +462,115 @@ export function GenerationDetailModal(props: {
                                 </p>
                             </>
                         )}
+
+                    {/* Reaction: like/dislike + the stored reason, if any. */}
+                    <div>
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <button
+                                type="button"
+                                disabled={reactionBusy.value}
+                                onClick={() => pickReaction("liked")}
+                                class={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50 ${
+                                    generation.reaction === "liked"
+                                        ? "bg-indigo-500 text-white"
+                                        : "bg-gray-800/70 text-gray-300 hover:bg-gray-800"
+                                }`}
+                            >
+                                <LikeIcon
+                                    class="size-4"
+                                    filled={generation.reaction === "liked"}
+                                />
+                                {get_text(
+                                    generation.reaction === "liked"
+                                        ? "remove_like"
+                                        : "like",
+                                    language.value,
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={reactionBusy.value}
+                                onClick={() => pickReaction("disliked")}
+                                class={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm disabled:opacity-50 ${
+                                    generation.reaction === "disliked"
+                                        ? "bg-indigo-500 text-white"
+                                        : "bg-gray-800/70 text-gray-300 hover:bg-gray-800"
+                                }`}
+                            >
+                                <DislikeIcon
+                                    class="size-4"
+                                    filled={generation.reaction === "disliked"}
+                                />
+                                {get_text(
+                                    generation.reaction === "disliked"
+                                        ? "remove_dislike"
+                                        : "dislike",
+                                    language.value,
+                                )}
+                            </button>
+                        </div>
+                        {generation.reaction && generation.reason && (
+                            <div class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-300 [overflow-wrap:anywhere]">
+                                {generation.reason}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
+            {reasonModal.value && (
+                <div
+                    class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (e.target === e.currentTarget) {
+                            reasonModal.value = null;
+                        }
+                    }}
+                >
+                    <div
+                        class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div class="text-sm font-medium text-gray-800">
+                            {get_text(
+                                reasonModal.value === "liked"
+                                    ? "why_do_you_like_it"
+                                    : "why_do_you_dislike_it",
+                                language.value,
+                            )}
+                        </div>
+                        <textarea
+                            value={reasonText.value}
+                            onInput={(e) =>
+                                reasonText.value = e.currentTarget.value}
+                            rows={3}
+                            class="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-300"
+                        />
+                        <div class="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => reasonModal.value = null}
+                                class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+                            >
+                                {get_text("cancel", language.value)}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={reactionBusy.value}
+                                onClick={confirmReaction}
+                                class="px-3 py-1.5 rounded-lg text-sm text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
+                            >
+                                {get_text(
+                                    reasonModal.value === "liked"
+                                        ? "like"
+                                        : "dislike",
+                                    language.value,
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

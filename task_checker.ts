@@ -155,13 +155,17 @@ export async function check_and_download(): Promise<void | Error> {
                 const err = updateGeneration(db, {
                     id: gen.id,
                     status: "failed",
-                    failed_reason: "创建任务失败：未提交到 Seedance（无 task id）",
+                    failed_reason:
+                        "创建任务失败：未提交到 Seedance（无 task id）",
                 });
                 if (err instanceof Error) {
                     console.error(`fail stuck generation ${gen.id}:`, err);
                 }
             } catch (err) {
-                console.error(`healing queued generation ${gen.id} failed:`, err);
+                console.error(
+                    `healing queued generation ${gen.id} failed:`,
+                    err,
+                );
             }
         }
 

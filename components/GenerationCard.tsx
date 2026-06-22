@@ -26,6 +26,7 @@ export type GeneratedVideo = {
 
 export function GenerationCard(
     props: {
+        projectRoot: string;
         generation: GeneratedVideo;
         /** Set to this generation's request when its reuse button is clicked. */
         reusePrompt: Signal<CreateTaskRequest | null>;
@@ -414,6 +415,7 @@ export function GenerationCard(
             </div>
             {detailOpen.value && (
                 <GenerationDetailModal
+                    projectRoot={props.projectRoot}
                     generation={generation}
                     detail={detail.value}
                     loading={detailLoading.value}
@@ -565,7 +567,7 @@ function InfoIcon(props: { class?: string }) {
     );
 }
 
-function LikeIcon(props: { class?: string; filled?: boolean }) {
+export function LikeIcon(props: { class?: string; filled?: boolean }) {
     return (
         <svg
             class={props.class ?? "size-4"}
@@ -581,7 +583,7 @@ function LikeIcon(props: { class?: string; filled?: boolean }) {
     );
 }
 
-function DislikeIcon(props: { class?: string; filled?: boolean }) {
+export function DislikeIcon(props: { class?: string; filled?: boolean }) {
     return (
         <svg
             class={props.class ?? "size-4"}

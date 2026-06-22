@@ -23,6 +23,7 @@ import {
     getGenerationByTaskId,
     getGenerationDetail,
     getGenerationIdByContentHash,
+    getGenerationReaction,
     getGenerationRequest,
     listArchivedGenerationIds,
     listGenerationReactions,
@@ -640,6 +641,23 @@ export const appRouter = router({
                 throw result;
             }
             return result;
+        }),
+
+    // A generation's like/dislike (and reason), by ULID id or task id. Used
+    // by callers that show a generation's details outside the grid (so they
+    // don't already have it from a list query).
+    getGenerationReaction: publicProcedure
+        .input(z.object({ project_root: z.string(), id: z.string() }))
+        .query((opts) => {
+            if (!db) {
+                throw new Error("Database not initialized");
+            }
+            const gen = getGenerationDetail(db, opts.input.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            if (!gen) return null;
+            return getGenerationReaction(db, gen.id);
         }),
 
     // Archive a generation (by ULID id or task id) — hides it from the grid

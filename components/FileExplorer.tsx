@@ -535,10 +535,11 @@ export function FileExplorer(props: {
                 </>
             )}
 
-            {promptModal.value && (
+            {promptModal.value && projectData.value && (
                 <FilePromptDetailsModal
                     generationId={promptModal.value.generationId}
                     path={promptModal.value.path}
+                    projectRoot={projectData.value.rootPath}
                     onClose={() => promptModal.value = null}
                 />
             )}
@@ -622,9 +623,14 @@ function projectFileUrl(rel: string): string {
  * file actually clicked (which may be a renamed copy), not the original.
  */
 function FilePromptDetailsModal(
-    props: { generationId: string; path: string; onClose: () => void },
+    props: {
+        generationId: string;
+        path: string;
+        projectRoot: string;
+        onClose: () => void;
+    },
 ) {
-    const { generationId, path, onClose } = props;
+    const { generationId, path, projectRoot, onClose } = props;
     const detail = useSignal<GenerationDetail | null>(null);
     const loading = useSignal(true);
 
@@ -653,6 +659,7 @@ function FilePromptDetailsModal(
 
     return (
         <GenerationDetailModal
+            projectRoot={projectRoot}
             generation={generation}
             detail={detail.value}
             loading={loading.value}

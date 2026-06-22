@@ -543,6 +543,22 @@ export function clearGenerationReaction(
     }
 }
 
+/** A generation's like/dislike (and reason, if any), or null if unreacted. */
+export function getGenerationReaction(
+    db: DatabaseSync,
+    generationId: string,
+): { reaction: "liked" | "disliked"; reason: string | null } | null {
+    const row = db.prepare(
+        "SELECT reaction, reason FROM GenerationReactions WHERE generation_id = ?",
+    ).get(generationId);
+    if (row === undefined) return null;
+    const parsed = GenerationReactionRowSchema.pick({
+        reaction: true,
+        reason: true,
+    }).parse(row);
+    return { reaction: parsed.reaction, reason: parsed.reason ?? null };
+}
+
 /** All reactions, keyed by generation ULID id. */
 export function listGenerationReactions(
     db: DatabaseSync,

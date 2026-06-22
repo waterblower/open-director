@@ -69,7 +69,9 @@ export function estimateCost(
     const rates = RMB_PER_MILLION[request.model] ??
         RMB_PER_MILLION["doubao-seedance-2-0-260128"];
     // Fall back to the SD rates if 1080p isn't a listed scenario for the model.
-    const tier = request.resolution === "1080p" && rates.hd ? rates.hd : rates.sd;
+    const tier = request.resolution === "1080p" && rates.hd
+        ? rates.hd
+        : rates.sd;
     const hasVideoInput = request.content.some((c) => c.type === "video_url");
     const rate = hasVideoInput ? tier.withVideo : tier.noVideo;
     const rmb = (totalTokens / 1_000_000) * rate;

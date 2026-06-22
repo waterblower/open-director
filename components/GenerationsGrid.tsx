@@ -258,8 +258,9 @@ export function GenerationsGrid(
                         </div>
                     </div>
                 )}
-                {generations.map((generation) => (
+                {projectRoot && generations.map((generation) => (
                     <GenerationCard
+                        projectRoot={projectRoot}
                         key={generation.id}
                         generation={generation}
                         reusePrompt={reusePrompt}
