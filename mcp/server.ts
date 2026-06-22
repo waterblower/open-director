@@ -1,16 +1,18 @@
 /**
  * MCP server exposed over HTTP from the same Fresh backend process.
  *
- * The tool catalog is derived from `appRouter`, so every tRPC procedure is
- * automatically available to MCP clients without maintaining a second API
- * registry. The HTTP plumbing lives in `routes/mcp.ts`; this module is
- * transport-agnostic and handles parsed JSON-RPC payloads.
+ * The tool catalog is derived from `appRouter.open`, so every tRPC procedure
+ * in that namespace is automatically available to MCP clients without
+ * maintaining a second API registry. Procedures outside `open` stay private
+ * to the application. The HTTP plumbing lives in `routes/mcp.ts`; this module
+ * is transport-agnostic and handles parsed JSON-RPC payloads.
  */
 import { z } from "zod";
 import { appRouter } from "../trpc/router.ts";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "open-director", version: "0.1.0" } as const;
+const OPEN_PROCEDURE_PREFIX = "open.";
 
 /** The protocol version this server advertises in `initialize`. */
 export const MCP_PROTOCOL_VERSION = PROTOCOL_VERSION;
@@ -138,20 +140,22 @@ function procedureDescription(
 }
 
 function buildTools(): Tool[] {
-    const procedures = appRouter._def.procedures as Record<
+    const procedures = appRouter._def.procedures as unknown as Record<
         string,
         RuntimeProcedure
     >;
-    return Object.entries(procedures).map(([path, procedure]) => ({
-        name: path,
-        description: procedureDescription(
-            path,
-            procedure._def.type,
-            procedure._def.meta,
-        ),
-        ...inputContract(procedure._def.inputs),
-        type: procedure._def.type,
-    }));
+    return Object.entries(procedures)
+        .filter(([path]) => path.startsWith(OPEN_PROCEDURE_PREFIX))
+        .map(([path, procedure]) => ({
+            name: path,
+            description: procedureDescription(
+                path,
+                procedure._def.type,
+                procedure._def.meta,
+            ),
+            ...inputContract(procedure._def.inputs),
+            type: procedure._def.type,
+        }));
 }
 
 const TOOLS = buildTools();
