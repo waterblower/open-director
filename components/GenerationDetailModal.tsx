@@ -46,7 +46,7 @@ export function GenerationDetailModal(props: {
     // Reason editor: set when the user picks a new (or switched) reaction
     // and hasn't confirmed it yet. Clicking an already-active reaction skips
     // this and clears the reaction directly instead.
-    const reasonModal = useSignal<Reaction | null>(null);
+    const reactionKind = useSignal<Reaction | null>(null);
     const reasonText = useSignal("");
     const reactionBusy = useSignal(false);
 
@@ -62,8 +62,9 @@ export function GenerationDetailModal(props: {
             reaction: nextReaction,
             reason: nextReason,
         });
-        reasonModal.value = nextReaction;
+        reactionKind.value = nextReaction;
         reasonText.value = nextReason;
+        return { reaction: nextReaction, reason: nextReason };
     };
     const onClearReaction = async (
         gen: GeneratedVideo,
@@ -73,7 +74,7 @@ export function GenerationDetailModal(props: {
             project_root: projectRoot,
             id: gen.id,
         });
-        reasonModal.value = null;
+        reactionKind.value = null;
         reasonText.value = "";
     };
 
@@ -96,20 +97,20 @@ export function GenerationDetailModal(props: {
             return;
         }
         reasonText.value = "";
-        reasonModal.value = reaction;
+        reactionKind.value = reaction;
     };
 
     const confirmReaction = async () => {
-        if (!reasonModal.value || reactionBusy.value) return;
+        if (!reactionKind.value || reactionBusy.value) return;
         reactionBusy.value = true;
         try {
             await onReact(
                 generation,
-                reasonModal.value,
+                reactionKind.value,
                 reasonText.value.trim(),
                 projectRoot,
             );
-            reasonModal.value = null;
+            reactionKind.value = null;
         } catch (err) {
             console.error(err);
         } finally {
@@ -517,13 +518,13 @@ export function GenerationDetailModal(props: {
                     </div>
                 </div>
             </div>
-            {reasonModal.value && (
+            {reactionKind.value && (
                 <div
                     class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4"
                     onClick={(e) => {
                         e.stopPropagation();
                         if (e.target === e.currentTarget) {
-                            reasonModal.value = null;
+                            reactionKind.value = null;
                         }
                     }}
                 >
@@ -533,7 +534,7 @@ export function GenerationDetailModal(props: {
                     >
                         <div class="text-sm font-medium text-gray-800">
                             {get_text(
-                                reasonModal.value === "liked"
+                                reactionKind.value === "liked"
                                     ? "why_do_you_like_it"
                                     : "why_do_you_dislike_it",
                                 language.value,
@@ -549,7 +550,7 @@ export function GenerationDetailModal(props: {
                         <div class="flex justify-end gap-2">
                             <button
                                 type="button"
-                                onClick={() => reasonModal.value = null}
+                                onClick={() => reactionKind.value = null}
                                 class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
                             >
                                 {get_text("cancel", language.value)}
@@ -561,7 +562,7 @@ export function GenerationDetailModal(props: {
                                 class="px-3 py-1.5 rounded-lg text-sm text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
                             >
                                 {get_text(
-                                    reasonModal.value === "liked"
+                                    reactionKind.value === "liked"
                                         ? "like"
                                         : "dislike",
                                     language.value,
