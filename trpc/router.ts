@@ -530,7 +530,7 @@ export const appRouter = router({
                 prompt: z.string(),
                 attachments: z.array(z.object({
                     kind: z.enum(["image", "video", "audio"]),
-                    dataUrl: z.string(),
+                    dataUrlOrFilePath: z.string(),
                 })),
                 ratio: z.enum([
                     "16:9",
@@ -562,26 +562,29 @@ export const appRouter = router({
                 } = opts.input;
 
                 // Assemble the multimodal content: optional text, then each
-                // attachment as a typed reference.
+                // attachment as a typed reference. A client may send either an
+                // inline data URL or a filesystem path; resolveToDataUrl inlines
+                // the latter so the rest of the pipeline only deals with data URLs.
                 const content: ContentItem[] = [];
                 if (prompt) content.push({ type: "text", text: prompt });
                 for (const att of attachments) {
+                    const url = await resolveToDataUrl(att.dataUrlOrFilePath);
                     if (att.kind === "image") {
                         content.push({
                             type: "image_url",
-                            image_url: { url: att.dataUrl },
+                            image_url: { url },
                             role: "reference_image",
                         });
                     } else if (att.kind === "video") {
                         content.push({
                             type: "video_url",
-                            video_url: { url: att.dataUrl },
+                            video_url: { url },
                             role: "reference_video",
                         });
                     } else {
                         content.push({
                             type: "audio_url",
-                            audio_url: { url: att.dataUrl },
+                            audio_url: { url },
                             role: "reference_audio",
                         });
                     }
@@ -883,3 +886,48 @@ import {
         await delay(10000);
     }
 })();
+
+/** Map a file extension to a mime type, for inlining file-path attachments. */
+const EXT_MIME: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    mkv: "video/x-matroska",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+};
+
+/** Base64-encode bytes in chunks (avoids blowing the call stack on big files). */
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+}
+
+/**
+ * Resolve an attachment reference to an inline `data:` URL. A value that's
+ * already a data URL is returned unchanged; anything else is treated as a
+ * filesystem path whose bytes are read and base64-encoded (its mime is guessed
+ * from the extension). Lets a client pass either form — the GUI inlines its
+ * blob: bytes as a data URL, while an agent can just point at a file on disk.
+ */
+export async function resolveToDataUrl(
+    dataUrlOrFilePath: string,
+): Promise<string> {
+    if (dataUrlOrFilePath.startsWith("data:")) return dataUrlOrFilePath;
+    const bytes = await Deno.readFile(dataUrlOrFilePath);
+    const ext = dataUrlOrFilePath.split(".").pop()?.toLowerCase() ?? "";
+    const mime = EXT_MIME[ext] ?? "application/octet-stream";
+    return `data:${mime};base64,${bytesToBase64(bytes)}`;
+}

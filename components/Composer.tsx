@@ -1151,7 +1151,9 @@ export function Composer(props: {
                                 const atts = await Promise.all(
                                     attachments.value.map(async (a) => ({
                                         kind: a.kind,
-                                        dataUrl: await toDataUrl(a.url),
+                                        dataUrlOrFilePath: await toDataUrl(
+                                            a.url,
+                                        ),
                                     })),
                                 );
                                 const gen_p = trpc.open.generate.mutate({
