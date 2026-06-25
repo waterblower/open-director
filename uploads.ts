@@ -38,9 +38,11 @@ const MIME_EXT: Record<string, string> = {
 /** Parse a `data:<mime>;base64,<payload>` URL into its mime type and bytes. */
 function parseDataUrl(
     dataUrl: string,
-): { mime: string; bytes: Uint8Array } | null {
+): { mime: string; bytes: Uint8Array } | Error {
     const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
-    if (!match) return null;
+    if (!match) {
+        return new Error(`${dataUrl} is invalid data URL`);
+    }
     const mime = match[1] || "application/octet-stream";
     const isBase64 = Boolean(match[2]);
     const payload = match[3];
@@ -64,9 +66,11 @@ function toHex(bytes: Uint8Array): string {
 export async function storeDataUrl(
     projectRoot: string,
     dataUrl: string,
-): Promise<string | null> {
+) {
     const parsed = parseDataUrl(dataUrl);
-    if (!parsed) return null;
+    if (parsed instanceof Error) {
+        return parsed;
+    }
     const { mime, bytes } = parsed;
 
     const digest = await crypto.subtle.digest(
@@ -107,7 +111,11 @@ export async function externalizeAttachments(
                 item.image_url.url.startsWith("data:")
             ) {
                 const url = await storeDataUrl(projectRoot, item.image_url.url);
-                return url ? { ...item, image_url: { url } } : item;
+                if (url instanceof Error) {
+                    console.error(url);
+                    return item;
+                }
+                return { ...item, image_url: { url } };
             }
             if (
                 item.type === "video_url" &&
@@ -121,7 +129,11 @@ export async function externalizeAttachments(
                 item.audio_url.url.startsWith("data:")
             ) {
                 const url = await storeDataUrl(projectRoot, item.audio_url.url);
-                return url ? { ...item, audio_url: { url } } : item;
+                if (url instanceof Error) {
+                    console.error(url);
+                    return item;
+                }
+                return { ...item, audio_url: { url } };
             }
             return item;
         }),
