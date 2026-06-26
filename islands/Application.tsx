@@ -2,7 +2,13 @@ import { Signal, signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
-import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
+import {
+    loadConfig,
+    loadProjectData,
+    readDir,
+    ShowOpenDirectorDir,
+    trpc,
+} from "../trpc/client.ts";
 import { GenerationsGrid } from "../components/GenerationsGrid.tsx";
 import type { GeneratedVideo } from "../components/GenerationCard.tsx";
 import {
@@ -108,6 +114,12 @@ export default function Application() {
         })();
     }, []);
 
+    // Load machine-level config (e.g. whether to show `.open-director`) once on
+    // mount, so the first project listing is filtered with the saved choice.
+    useEffect(() => {
+        loadConfig();
+    }, []);
+
     // Load the current project (if any) once on mount.
     useEffect(() => {
         (async () => {
@@ -123,6 +135,27 @@ export default function Application() {
             projectData.value = data;
         })();
     }, []);
+
+    // Re-fetch the project listing when the `.open-director` visibility toggles
+    // (the filter is applied at fetch time). The ref guard skips the initial
+    // run so we don't reload before a project is even open.
+    const showOpenDirInit = useRef(false);
+    useSignalEffect(() => {
+        const _show = ShowOpenDirectorDir.value; // subscribe to changes
+        if (!showOpenDirInit.current) {
+            showOpenDirInit.current = true;
+            return;
+        }
+        (async () => {
+            if (!projectData.value) return;
+            const data = await loadProjectData();
+            if (data instanceof Error) {
+                console.error(data);
+                return;
+            }
+            if (data) projectData.value = data;
+        })();
+    });
 
     // Reload the generations grid whenever the active project changes: on the
     // initial load and when the user picks a different folder in the file

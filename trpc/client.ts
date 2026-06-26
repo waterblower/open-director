@@ -28,8 +28,41 @@ export const trpc = createTRPCClient<AppRouter>({
 /** OS junk files that should never be shown in the explorer. */
 const HIDDEN_NAMES = new Set([".DS_Store"]);
 
+/** Open Director's own data folder, hidden in the explorer by default. */
+const OPEN_DIRECTORY_NAME = ".open-director";
+
+/**
+ * Whether to show the `.open-director` data folder in the explorer. Loaded from
+ * KV by `loadConfig()` on startup and toggled via `setShowOpenDirectorDir`; the
+ * tree re-filters once the project listing is reloaded.
+ */
+export const ShowOpenDirectorDir: Signal<boolean> = signal<boolean>(false);
+
+/** Load the current value from KV (machine-level config). */
+export async function loadConfig(): Promise<void> {
+    try {
+        ShowOpenDirectorDir.value = await trpc.getShowOpenDirectorDir.query();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+/** Toggle showing `.open-director`, persisting the choice to KV. */
+export async function setShowOpenDirectorDir(next: boolean): Promise<void> {
+    ShowOpenDirectorDir.value = next;
+    try {
+        await trpc.setShowOpenDirectorDir.mutate(next);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
 function notHidden(entry: { name: string }): boolean {
-    return !HIDDEN_NAMES.has(entry.name);
+    if (HIDDEN_NAMES.has(entry.name)) return false;
+    if (entry.name === OPEN_DIRECTORY_NAME && !ShowOpenDirectorDir.value) {
+        return false;
+    }
+    return true;
 }
 
 /** Read the (non-recursive) entries of `path` within the given project root. */
@@ -152,6 +185,15 @@ const TEXTS = {
     cancel: { English: "Cancel", Chinese: "取消" },
     saving: { English: "Saving…", Chinese: "保存中…" },
     save: { English: "Save", Chinese: "保存" },
+    show_open_directory: {
+        English: "Show .open-director folder",
+        Chinese: "显示 .open-director 文件夹",
+    },
+    show_open_directory_hint: {
+        English:
+            "Reveal Open Director's internal data folder in the file explorer.",
+        Chinese: "在文件浏览器中显示 Open Director 的内部数据文件夹。",
+    },
     language_label: { English: "Language", Chinese: "语言" },
 
     // McpInfoModal

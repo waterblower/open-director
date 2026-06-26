@@ -574,6 +574,19 @@ export const appRouter = router({
             return { hasKey: true, masked: maskKey(key) };
         }),
 
+    // Whether the explorer shows the project's `.open-director` data folder.
+    getShowOpenDirectorDir: publicProcedure.query(() =>
+        getShowOpenDirectorDir()
+    ),
+
+    // Toggle showing the `.open-director` folder; persisted machine-level in KV.
+    setShowOpenDirectorDir: publicProcedure
+        .input(z.boolean())
+        .mutation(async (opts) => {
+            await setShowOpenDirectorDir(opts.input);
+            return { value: opts.input };
+        }),
+
     saveExplorerState: publicProcedure
         .input(z.object({
             expanded: z.array(z.string()),
@@ -963,8 +976,10 @@ export type AppRouter = typeof appRouter;
 
 import { delay } from "@std/async";
 import {
+    getShowOpenDirectorDir,
     getStoredApiKey,
     getStoredProjectPath,
+    setShowOpenDirectorDir,
     setStoredApiKey,
     setStoredProjectPath,
 } from "../kv.ts";

@@ -1,6 +1,12 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
-import { get_text, language, trpc } from "../trpc/client.ts";
+import {
+    get_text,
+    language,
+    setShowOpenDirectorDir,
+    ShowOpenDirectorDir,
+    trpc,
+} from "../trpc/client.ts";
 
 export function SettingsModal(props: {
     /** Called after the modal is dismissed or a key is saved. */
@@ -127,6 +133,36 @@ export function SettingsModal(props: {
                             </p>
                         )}
                     </div>
+
+                    {
+                        /* Toggle showing the .open-director data folder. Applies
+                    immediately (persisted to KV) — independent of Save. */
+                    }
+                    <label class="flex items-start gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={ShowOpenDirectorDir.value}
+                            onChange={(e) =>
+                                setShowOpenDirectorDir(
+                                    (e.target as HTMLInputElement).checked,
+                                )}
+                            class="mt-0.5 size-4 accent-indigo-500 cursor-pointer"
+                        />
+                        <span class="text-sm">
+                            <span class="font-medium text-gray-700">
+                                {get_text(
+                                    "show_open_directory",
+                                    language.value,
+                                )}
+                            </span>
+                            <span class="block text-[11px] text-gray-500">
+                                {get_text(
+                                    "show_open_directory_hint",
+                                    language.value,
+                                )}
+                            </span>
+                        </span>
+                    </label>
 
                     <div class="flex justify-end gap-2 pt-1">
                         <button

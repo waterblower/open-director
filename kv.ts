@@ -16,6 +16,7 @@ const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
 const PROJECT_PATH_KEY = ["config", "project_path"] as const;
 const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
+const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
 
 /** The previously-chosen project folder, or null if one was never picked. */
 export async function getStoredProjectPath(): Promise<string | null> {
@@ -37,6 +38,20 @@ export async function getStoredApiKey(): Promise<string | null> {
 /** Persist the Seedance API key (machine-level, shared across projects). */
 export async function setStoredApiKey(key: string): Promise<void> {
     await kv.set(SEEDANCE_API_KEY, key);
+}
+
+/**
+ * Whether the file explorer should show the project's `.open-director` folder
+ * (Open Director's own data dir). Hidden by default.
+ */
+export async function getShowOpenDirectorDir(): Promise<boolean> {
+    const res = await kv.get<boolean>(SHOW_OPEN_DIRECTORY_KEY);
+    return res.value ?? false;
+}
+
+/** Persist whether to show the `.open-director` folder in the explorer. */
+export async function setShowOpenDirectorDir(value: boolean): Promise<void> {
+    await kv.set(SHOW_OPEN_DIRECTORY_KEY, value);
 }
 
 /** A single KV entry, flattened for display. */
