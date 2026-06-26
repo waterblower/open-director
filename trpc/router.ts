@@ -86,6 +86,24 @@ async function exists(path: string): Promise<boolean> {
     }
 }
 
+/**
+ * A non-clobbering file name within `destDirAbs`: returns `base` if it's free,
+ * otherwise appends " (n)" before the extension until an unused name is found.
+ */
+async function availableName(
+    destDirAbs: string,
+    base: string,
+): Promise<string> {
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : "";
+    let name = base;
+    for (let n = 1; await exists(join(destDirAbs, name)); n++) {
+        name = `${stem} (${n})${ext}`;
+    }
+    return name;
+}
+
 interface DirEntry {
     name: string;
     isDirectory: boolean;
@@ -341,11 +359,18 @@ export const appRouter = router({
         }),
 
     // Copy a project file into a project directory (both paths relative to the
-    // project root). Used when dragging a generated video onto a folder.
+    // project root). Used when dragging a generated video onto a folder. An
+    // optional `name` overrides the destination base name (the grid prompts for
+    // one when dropping a video); a name without an extension keeps the
+    // source's. Never clobbers — a taken name gets " (n)" appended.
     copyIntoDir: publicProcedure
-        .input(z.object({ src: z.string(), destDir: z.string() }))
+        .input(z.object({
+            src: z.string(),
+            destDir: z.string(),
+            name: z.string().optional(),
+        }))
         .mutation(async (opts): Promise<{ dest: string }> => {
-            const { src, destDir } = opts.input;
+            const { src, destDir, name } = opts.input;
             const projectRoot = await getStoredProjectPath();
             if (!projectRoot) throw new Error("Project not initialized");
             const srcAbs = await resolveInProject(projectRoot, src);
@@ -353,22 +378,74 @@ export const appRouter = router({
             if (srcAbs instanceof Error) throw srcAbs;
             if (destDirAbs instanceof Error) throw destDirAbs;
 
-            const base = basename(srcAbs);
-            if (!base) throw new Error("Invalid source path");
+            const srcBase = basename(srcAbs);
+            if (!srcBase) throw new Error("Invalid source path");
 
-            await Deno.mkdir(destDirAbs, { recursive: true });
-
-            // Don't clobber: if the name is taken, append " (n)" before the ext.
-            const dot = base.lastIndexOf(".");
-            const stem = dot > 0 ? base.slice(0, dot) : base;
-            const ext = dot > 0 ? base.slice(dot) : "";
-            let name = base;
-            for (let n = 1; await exists(`${destDirAbs}/${name}`); n++) {
-                name = `${stem} (${n})${ext}`;
+            let base = srcBase;
+            if (name) {
+                if (name.includes("/") || name.includes("\\")) {
+                    throw new Error("Invalid name");
+                }
+                const srcDot = srcBase.lastIndexOf(".");
+                const srcExt = srcDot > 0 ? srcBase.slice(srcDot) : "";
+                base = name.includes(".") ? name : name + srcExt;
             }
 
-            await Deno.copyFile(srcAbs, `${destDirAbs}/${name}`);
-            return { dest: `${destDir}/${name}` };
+            await Deno.mkdir(destDirAbs, { recursive: true });
+            const finalName = await availableName(destDirAbs, base);
+            await Deno.copyFile(srcAbs, join(destDirAbs, finalName));
+            return { dest: destDir ? `${destDir}/${finalName}` : finalName };
+        }),
+
+    // Write bytes dropped from the OS file system into a project directory.
+    // Browsers expose dragged-in files only as blobs (no real path), so the
+    // client sends the content as a base64 data URL and we decode it here.
+    // `destDir` and the returned path are relative to the project root.
+    importFile: publicProcedure
+        .input(z.object({
+            destDir: z.string(),
+            name: z.string(),
+            dataUrl: z.string(),
+        }))
+        .mutation(async (opts): Promise<{ dest: string }> => {
+            const { destDir, name, dataUrl } = opts.input;
+            if (!name || name.includes("/") || name.includes("\\")) {
+                throw new Error("Invalid name");
+            }
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) throw new Error("Project not initialized");
+            const destDirAbs = await resolveInProject(projectRoot, destDir);
+            if (destDirAbs instanceof Error) throw destDirAbs;
+
+            const comma = dataUrl.indexOf(",");
+            if (!dataUrl.startsWith("data:") || comma === -1) {
+                throw new Error("Invalid data URL");
+            }
+            const bytes = Uint8Array.from(
+                atob(dataUrl.slice(comma + 1)),
+                (c) => c.charCodeAt(0),
+            );
+
+            await Deno.mkdir(destDirAbs, { recursive: true });
+            const finalName = await availableName(destDirAbs, name);
+            await Deno.writeFile(join(destDirAbs, finalName), bytes);
+            return { dest: destDir ? `${destDir}/${finalName}` : finalName };
+        }),
+
+    // Delete a project file or directory (relative to the project root).
+    // Directories are removed recursively. The project root ("") is never
+    // deletable — resolveInProject also keeps the target inside the project.
+    deleteFile: publicProcedure
+        .input(z.object({ path: z.string() }))
+        .mutation(async (opts): Promise<{ ok: boolean }> => {
+            const { path } = opts.input;
+            if (!path) throw new Error("Cannot delete the project root");
+            const projectRoot = await getStoredProjectPath();
+            if (!projectRoot) throw new Error("Project not initialized");
+            const target = await resolveInProject(projectRoot, path);
+            if (target instanceof Error) throw target;
+            await Deno.remove(target, { recursive: true });
+            return { ok: true };
         }),
 
     // Rename a project file/dir in place. `path` is the existing entry (relative

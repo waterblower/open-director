@@ -119,7 +119,18 @@ const TEXTS = {
     },
     copy: { English: "Copy", Chinese: "复制" },
     rename: { English: "Rename", Chinese: "重命名" },
+    delete: { English: "Delete", Chinese: "删除" },
     prompt_details: { English: "Prompt details", Chinese: "提示词详情" },
+    delete_confirm: {
+        English: "Delete this file?",
+        Chinese: "确定删除此文件？",
+    },
+    delete_folder_confirm: {
+        English: "Delete this folder?",
+        Chinese: "确定删除此文件夹？",
+    },
+    name_this_video: { English: "Name this video", Chinese: "命名视频" },
+    file_name: { English: "File name", Chinese: "文件名" },
 
     // SettingsModal
     please_enter_an_api_key: {

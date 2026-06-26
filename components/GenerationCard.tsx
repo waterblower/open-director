@@ -1,6 +1,6 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { CreateTaskRequest } from "../seedance/seedance.ts";
-import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import { get_text, language, trpc } from "../trpc/client.ts";
 import {
     type GenerationDetail,
@@ -143,6 +143,9 @@ export function GenerationCard(
             onDragStart={(e) => {
                 if (!url || !e.dataTransfer) return;
                 e.dataTransfer.setData(PROJECT_FILE_MIME, rel);
+                // Mark the drag as a grid video so the explorer prompts for a
+                // name before saving it (see constants.ts).
+                e.dataTransfer.setData(GENERATION_VIDEO_MIME, rel);
                 e.dataTransfer.effectAllowed = "copy";
 
                 // Use a small (~pointer-sized) drag image instead

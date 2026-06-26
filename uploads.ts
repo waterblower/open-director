@@ -122,7 +122,11 @@ export async function externalizeAttachments(
                 item.video_url.url.startsWith("data:")
             ) {
                 const url = await storeDataUrl(projectRoot, item.video_url.url);
-                return url ? { ...item, video_url: { url } } : item;
+                if (url instanceof Error) {
+                    console.error(url);
+                    return item;
+                }
+                return { ...item, video_url: { url } };
             }
             if (
                 item.type === "audio_url" &&

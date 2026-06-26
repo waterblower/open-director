@@ -6,7 +6,7 @@ import {
 } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
     ContentItem,

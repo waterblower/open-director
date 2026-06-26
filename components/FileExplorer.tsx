@@ -12,7 +12,7 @@ import {
     readDir,
     trpc,
 } from "../trpc/client.ts";
-import { PROJECT_FILE_MIME } from "./dnd.ts";
+import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import type { GeneratedVideo } from "./GenerationCard.tsx";
 import {
     type GenerationDetail,
@@ -71,6 +71,13 @@ export function FileExplorer(props: {
     const promptModal = useSignal<
         { generationId: string; path: string } | null
     >(
+        null,
+    );
+    // Prompt for a name before saving a video dragged in from the grid; the
+    // copy only happens once the user confirms it (see `NameVideoModal`).
+    const nameModal = useSignal<{ src: string; destDir: string } | null>(null);
+    // Confirm before deleting a file/dir from the right-click menu.
+    const deleteModal = useSignal<{ entry: FileEntry; path: string } | null>(
         null,
     );
 
@@ -171,40 +178,103 @@ export function FileExplorer(props: {
         return () => globalThis.removeEventListener("keydown", onKey);
     }, []);
 
-    const dropFile = (src: string, destDir: string) => {
-        trpc.copyIntoDir.mutate({ src, destDir })
-            .then(async ({ dest }) => {
-                // The actual (possibly de-duplicated) name the server wrote.
-                const name = dest.split("/").pop() ?? "";
-                const pd = projectData.value;
-                if (!pd) return;
-                if (destDir === "") {
-                    // Root listing lives in `rootEntries` ("" = project root).
-                    const fresh = await readDir(pd.rootPath, "");
-                    if (fresh instanceof Error) {
-                        return console.error(fresh);
-                    }
-                    // Guarantee the new file is visible even if the refresh
-                    // didn't pick it up yet.
-                    const rootEntries = fresh.some((e) => e.name === name)
-                        ? fresh
-                        : sortEntries([...fresh, {
-                            name,
-                            isDirectory: false,
-                            isFile: true,
-                            isSymlink: false,
-                        }]);
-                    projectData.value = { ...projectData.value!, rootEntries };
-                    return;
-                }
-                // Reveal the copy: expand the target dir and refresh its list.
-                projectData.value = {
-                    ...projectData.value!,
-                    expanded: new Set(projectData.value!.expanded).add(destDir),
-                };
-                loadChildren(destDir);
-            })
+    // Reveal a freshly written file at project-relative path `dest` inside
+    // `destDir` ("" = project root): refresh the target listing and, for the
+    // root, guarantee the new row shows even if the refresh hasn't caught it.
+    const revealCopy = async (dest: string, destDir: string) => {
+        const name = dest.split("/").pop() ?? "";
+        const pd = projectData.value;
+        if (!pd) return;
+        if (destDir === "") {
+            // Root listing lives in `rootEntries` ("" = project root).
+            const fresh = await readDir(pd.rootPath, "");
+            if (fresh instanceof Error) {
+                return console.error(fresh);
+            }
+            const rootEntries = fresh.some((e) => e.name === name)
+                ? fresh
+                : sortEntries([...fresh, {
+                    name,
+                    isDirectory: false,
+                    isFile: true,
+                    isSymlink: false,
+                }]);
+            projectData.value = { ...projectData.value!, rootEntries };
+            return;
+        }
+        // Expand the target dir and refresh its list.
+        projectData.value = {
+            ...projectData.value!,
+            expanded: new Set(projectData.value!.expanded).add(destDir),
+        };
+        loadChildren(destDir);
+    };
+
+    const dropFile = (src: string, destDir: string, name?: string) => {
+        trpc.copyIntoDir.mutate({ src, destDir, name })
+            .then(({ dest }) => revealCopy(dest, destDir))
             .catch((err) => console.error(err));
+    };
+
+    /** Save files dragged in from the OS into `destDir`, then reveal them. */
+    const importFiles = async (files: FileList, destDir: string) => {
+        for (const file of Array.from(files)) {
+            try {
+                const dataUrl = await fileToDataUrl(file);
+                const { dest } = await trpc.importFile.mutate({
+                    destDir,
+                    name: file.name,
+                    dataUrl,
+                });
+                await revealCopy(dest, destDir);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+    };
+
+    // Routes a drop onto a directory (path "" = project root): a grid video
+    // asks for a name first, an explorer file copies straight away, and OS
+    // files are uploaded as bytes.
+    const handleDrop = (e: DragEvent, destDir: string) => {
+        const dt = e.dataTransfer;
+        if (!dt) return;
+        const gridVideo = dt.getData(GENERATION_VIDEO_MIME);
+        if (gridVideo) {
+            e.preventDefault();
+            nameModal.value = { src: gridVideo, destDir };
+            return;
+        }
+        const projectFile = dt.getData(PROJECT_FILE_MIME);
+        if (projectFile) {
+            e.preventDefault();
+            dropFile(projectFile, destDir);
+            return;
+        }
+        if (dt.files && dt.files.length > 0) {
+            e.preventDefault();
+            importFiles(dt.files, destDir);
+        }
+    };
+
+    const confirmDelete = async () => {
+        const target = deleteModal.value;
+        deleteModal.value = null;
+        if (!target) return;
+        try {
+            await trpc.deleteFile.mutate({ path: target.path });
+        } catch (err) {
+            console.error(err);
+            return;
+        }
+        // Drop the selection if it pointed at the deleted entry, then refresh
+        // the parent listing so the row disappears.
+        const slash = target.path.lastIndexOf("/");
+        const parent = slash === -1 ? "" : target.path.slice(0, slash);
+        if (projectData.value?.selected === target.path) {
+            projectData.value = { ...projectData.value, selected: null };
+        }
+        await refreshDir(parent);
     };
 
     /** Refresh a directory's listing (root listing lives in `root`). */
@@ -260,7 +330,7 @@ export function FileExplorer(props: {
         onSelect: props.onSelect,
         loadChildren,
         openMenu,
-        dropFile,
+        handleDrop,
         commitRename: commitRename(renaming, projectData, refreshDir),
         previewImage: (path, x, y) =>
             preview.value = path ? { path, x, y } : null,
@@ -349,15 +419,19 @@ export function FileExplorer(props: {
                     </div>
                 </div>
                 <div
-                    // Dropping on empty space copies into the project root.
+                    // Dropping on empty space saves into the project root —
+                    // a project file, a grid video, or files from the OS.
                     onDragOver={(e) => {
+                        const types = e.dataTransfer?.types;
                         if (
-                            !e.dataTransfer?.types.includes(PROJECT_FILE_MIME)
+                            !types ||
+                            (!types.includes(PROJECT_FILE_MIME) &&
+                                !types.includes("Files"))
                         ) {
                             return;
                         }
                         e.preventDefault();
-                        e.dataTransfer.dropEffect = "copy";
+                        e.dataTransfer!.dropEffect = "copy";
                         rootDragOver.value = true;
                     }}
                     onDragLeave={(e) => {
@@ -375,10 +449,7 @@ export function FileExplorer(props: {
                     }}
                     onDrop={(e) => {
                         rootDragOver.value = false;
-                        const src = e.dataTransfer?.getData(PROJECT_FILE_MIME);
-                        if (!src) return;
-                        e.preventDefault();
-                        dropFile(src, ""); // "" = project root
+                        handleDrop(e, ""); // "" = project root
                     }}
                     class={`flex-1 overflow-y-auto py-1.5 ${
                         rootDragOver.value
@@ -469,70 +540,25 @@ export function FileExplorer(props: {
                 </div>
             )}
 
-            {/* Right-click context menu */}
             {menu.value && (
-                <>
-                    <div
-                        class="fixed inset-0 z-40"
-                        onClick={() => menu.value = null}
-                        onContextMenu={(e) => {
-                            e.preventDefault();
-                            menu.value = null;
-                        }}
-                    />
-                    <div
-                        class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
-                        style={{
-                            left: `${menu.value.x}px`,
-                            top: `${menu.value.y}px`,
-                        }}
-                    >
-                        <button
-                            type="button"
-                            onClick={() => openInDefault(menu.value!.path)}
-                            class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                        >
-                            {get_text("open_with_default_app", language.value)}
-                        </button>
-                        {isImageFile(menu.value.entry) && (
-                            <button
-                                type="button"
-                                onClick={() => copyImage(menu.value!.path)}
-                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                            >
-                                {get_text("copy", language.value)}
-                            </button>
-                        )}
-                        {menu.value.path !== "" && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    renaming.value = menu.value!.path;
-                                    menu.value = null;
-                                }}
-                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                            >
-                                {get_text("rename", language.value)}
-                            </button>
-                        )}
-                        {menu.value.promptGenerationId.value && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    promptModal.value = {
-                                        generationId: menu.value!
-                                            .promptGenerationId.value!,
-                                        path: menu.value!.path,
-                                    };
-                                    menu.value = null;
-                                }}
-                                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
-                            >
-                                {get_text("prompt_details", language.value)}
-                            </button>
-                        )}
-                    </div>
-                </>
+                <ContextMenu
+                    menu={menu.value}
+                    onClose={() => menu.value = null}
+                    onOpenInDefault={openInDefault}
+                    onCopy={copyImage}
+                    onRename={(path) => {
+                        renaming.value = path;
+                        menu.value = null;
+                    }}
+                    onPromptDetails={(generationId, path) => {
+                        promptModal.value = { generationId, path };
+                        menu.value = null;
+                    }}
+                    onDelete={(entry, path) => {
+                        deleteModal.value = { entry, path };
+                        menu.value = null;
+                    }}
+                />
             )}
 
             {promptModal.value && projectData.value && (
@@ -544,34 +570,36 @@ export function FileExplorer(props: {
                 />
             )}
 
+            {/* Name a grid video before saving it (cancel = don't save). */}
+            {nameModal.value && (
+                <NameVideoModal
+                    initialName={nameModal.value.src.split("/").pop() ?? ""}
+                    onSave={(name) => {
+                        dropFile(
+                            nameModal.value!.src,
+                            nameModal.value!.destDir,
+                            name,
+                        );
+                        nameModal.value = null;
+                    }}
+                    onCancel={() => nameModal.value = null}
+                />
+            )}
+
+            {deleteModal.value && (
+                <DeleteConfirmModal
+                    entry={deleteModal.value.entry}
+                    onConfirm={confirmDelete}
+                    onCancel={() => deleteModal.value = null}
+                />
+            )}
+
             {/* Double-click on a video opens it here, autoplaying. */}
             {videoModal.value && (
-                <div
-                    class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) {
-                            videoModal.value = null;
-                        }
-                    }}
-                >
-                    <div class="relative w-full max-w-3xl">
-                        <button
-                            type="button"
-                            aria-label={get_text("close", language.value)}
-                            onClick={() => videoModal.value = null}
-                            class="absolute -top-9 right-0 size-8 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-sm hover:cursor-pointer transition-colors"
-                        >
-                            ✕
-                        </button>
-                        <video
-                            src={projectFileUrl(videoModal.value)}
-                            autoPlay
-                            controls
-                            playsInline
-                            class="w-full max-h-[85vh] bg-black rounded-2xl object-contain"
-                        />
-                    </div>
-                </div>
+                <VideoModal
+                    path={videoModal.value}
+                    onClose={() => videoModal.value = null}
+                />
             )}
         </>
     );
@@ -668,6 +696,262 @@ function FilePromptDetailsModal(
     );
 }
 
+/**
+ * Prompt for a file name before saving a video dragged in from the results
+ * grid. Owns its own input state so typing never re-runs the parent's render;
+ * focuses and pre-selects the name stem once on mount (like VS Code). `onSave`
+ * fires only on confirm — cancelling writes nothing.
+ */
+function NameVideoModal(
+    props: {
+        initialName: string;
+        onSave: (name: string) => void;
+        onCancel: () => void;
+    },
+) {
+    const value = useSignal(props.initialName);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        // Select the stem (before the last dot) so the extension is preserved.
+        const dot = props.initialName.lastIndexOf(".");
+        el.setSelectionRange(0, dot > 0 ? dot : props.initialName.length);
+    }, []);
+
+    const save = () => {
+        const name = value.value.trim();
+        if (name) props.onSave(name);
+    };
+
+    return (
+        <div
+            class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) props.onCancel();
+            }}
+        >
+            <div class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3">
+                <div class="text-sm font-medium text-gray-800">
+                    {get_text("name_this_video", language.value)}
+                </div>
+                <input
+                    ref={inputRef}
+                    type="text"
+                    value={value.value}
+                    onInput={(e) => value.value = e.currentTarget.value}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            save();
+                        } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            props.onCancel();
+                        }
+                    }}
+                    placeholder={get_text("file_name", language.value)}
+                    class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <div class="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        onClick={props.onCancel}
+                        class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+                    >
+                        {get_text("cancel", language.value)}
+                    </button>
+                    <button
+                        type="button"
+                        disabled={!value.value.trim()}
+                        onClick={save}
+                        class="px-3 py-1.5 rounded-lg text-sm text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50"
+                    >
+                        {get_text("save", language.value)}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Right-click context menu for a tree entry, positioned at the cursor. A
+ * full-screen backdrop closes it on any outside click. Which items show
+ * depends on the entry: copy for images, rename/delete for anything but the
+ * root, and prompt details once a matching generation has resolved.
+ */
+function ContextMenu(
+    props: {
+        menu: {
+            entry: FileEntry;
+            path: string;
+            x: number;
+            y: number;
+            promptGenerationId: Signal<string | null>;
+        };
+        onClose: () => void;
+        onOpenInDefault: (path: string) => void;
+        onCopy: (path: string) => void;
+        onRename: (path: string) => void;
+        onPromptDetails: (generationId: string, path: string) => void;
+        onDelete: (entry: FileEntry, path: string) => void;
+    },
+) {
+    const { entry, path, x, y, promptGenerationId } = props.menu;
+    return (
+        <>
+            <div
+                class="fixed inset-0 z-40"
+                onClick={props.onClose}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    props.onClose();
+                }}
+            />
+            <div
+                class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
+                style={{ left: `${x}px`, top: `${y}px` }}
+            >
+                <button
+                    type="button"
+                    onClick={() => props.onOpenInDefault(path)}
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                >
+                    {get_text("open_with_default_app", language.value)}
+                </button>
+                {isImageFile(entry) && (
+                    <button
+                        type="button"
+                        onClick={() => props.onCopy(path)}
+                        class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                    >
+                        {get_text("copy", language.value)}
+                    </button>
+                )}
+                {path !== "" && (
+                    <button
+                        type="button"
+                        onClick={() => props.onRename(path)}
+                        class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                    >
+                        {get_text("rename", language.value)}
+                    </button>
+                )}
+                {promptGenerationId.value && (
+                    <button
+                        type="button"
+                        onClick={() =>
+                            props.onPromptDetails(
+                                promptGenerationId.value!,
+                                path,
+                            )}
+                        class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
+                    >
+                        {get_text("prompt_details", language.value)}
+                    </button>
+                )}
+                {path !== "" && (
+                    <button
+                        type="button"
+                        onClick={() => props.onDelete(entry, path)}
+                        class="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50"
+                    >
+                        {get_text("delete", language.value)}
+                    </button>
+                )}
+            </div>
+        </>
+    );
+}
+
+/**
+ * Play a project video full-size in an overlay, autoplaying. Opened by
+ * double-clicking a video in the tree; closed by the ✕, Escape (via the
+ * backdrop), or clicking outside the player.
+ */
+function VideoModal(props: { path: string; onClose: () => void }) {
+    return (
+        <div
+            class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) props.onClose();
+            }}
+        >
+            <div class="relative w-full max-w-3xl">
+                <button
+                    type="button"
+                    aria-label={get_text("close", language.value)}
+                    onClick={props.onClose}
+                    class="absolute -top-9 right-0 size-8 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-sm hover:cursor-pointer transition-colors"
+                >
+                    ✕
+                </button>
+                <video
+                    src={projectFileUrl(props.path)}
+                    autoPlay
+                    controls
+                    playsInline
+                    class="w-full max-h-[85vh] bg-black rounded-2xl object-contain"
+                />
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Confirm a destructive delete of a file or directory. The message switches
+ * between the file and folder wording based on the entry; `onConfirm` runs the
+ * actual deletion, `onCancel` dismisses without touching anything.
+ */
+function DeleteConfirmModal(
+    props: {
+        entry: FileEntry;
+        onConfirm: () => void;
+        onCancel: () => void;
+    },
+) {
+    return (
+        <div
+            class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+            onClick={(e) => {
+                if (e.target === e.currentTarget) props.onCancel();
+            }}
+        >
+            <div class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3">
+                <div class="text-sm font-medium text-gray-800">
+                    {get_text(
+                        props.entry.isDirectory
+                            ? "delete_folder_confirm"
+                            : "delete_confirm",
+                        language.value,
+                    )}
+                </div>
+                <div class="text-sm text-gray-500 break-all">
+                    {props.entry.name}
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button
+                        type="button"
+                        onClick={props.onCancel}
+                        class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100"
+                    >
+                        {get_text("cancel", language.value)}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={props.onConfirm}
+                        class="px-3 py-1.5 rounded-lg text-sm text-white bg-red-600 hover:bg-red-700"
+                    >
+                        {get_text("delete", language.value)}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 interface ExplorerState {
     expanded: string[];
     selected: string | null;
@@ -699,6 +983,16 @@ function toPngBlob(blob: Blob): Promise<Blob> {
 async function fetchAsPng(url: string): Promise<Blob> {
     const blob = await (await fetch(url)).blob();
     return blob.type === "image/png" ? blob : await toPngBlob(blob);
+}
+
+/** Read a File (dragged in from the OS) as a base64 data URL for upload. */
+function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+        reader.readAsDataURL(file);
+    });
 }
 
 function ChevronIcon(props: { open: boolean }) {
@@ -766,8 +1060,9 @@ interface TreeCallbacks {
     loadChildren: (path: string) => Promise<FileEntry[] | Error>;
     /** Open the right-click context menu for an entry at the cursor. */
     openMenu: (entry: FileEntry, path: string, x: number, y: number) => void;
-    /** Copy a dragged project file into the given directory path. */
-    dropFile: (src: string, destDir: string) => void;
+    /** Handle a drop onto the given directory path (grid video, explorer
+     * file, or OS files) — see the explorer's `handleDrop`. */
+    handleDrop: (e: DragEvent, destDir: string) => void;
     /** Commit an inline rename; `name` is the new base name (no slashes). */
     commitRename: (path: string, name: string) => void;
     /** Show (path set) or hide (path null) the image hover preview at x,y. */
@@ -925,19 +1220,21 @@ function Node(
                         onMouseLeave={isPreviewable(entry)
                             ? () => callbacks.previewImage(null, 0, 0)
                             : undefined}
-                        // Directories accept dropped videos from the grid.
+                        // Directories accept dropped grid videos, explorer
+                        // files, and files from the OS.
                         onDragOver={entry.isDirectory
                             ? (e) => {
+                                const types = e.dataTransfer?.types;
                                 if (
-                                    !e.dataTransfer?.types.includes(
-                                        PROJECT_FILE_MIME,
-                                    )
+                                    !types ||
+                                    (!types.includes(PROJECT_FILE_MIME) &&
+                                        !types.includes("Files"))
                                 ) {
                                     return;
                                 }
                                 e.preventDefault();
                                 e.stopPropagation(); // don't fall to the root
-                                e.dataTransfer.dropEffect = "copy";
+                                e.dataTransfer!.dropEffect = "copy";
                                 if (tree.dragOver.value !== path) {
                                     tree.dragOver.value = path;
                                 }
@@ -952,14 +1249,9 @@ function Node(
                             : undefined}
                         onDrop={entry.isDirectory
                             ? (e) => {
-                                const src = e.dataTransfer?.getData(
-                                    PROJECT_FILE_MIME,
-                                );
                                 tree.dragOver.value = null;
-                                if (!src) return;
-                                e.preventDefault();
                                 e.stopPropagation(); // handled here, not root
-                                callbacks.dropFile(src, path);
+                                callbacks.handleDrop(e, path);
                             }
                             : undefined}
                         style={{ paddingLeft: `${depth * 14 + 12}px` }}
