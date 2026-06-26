@@ -54,7 +54,6 @@ export function FileExplorer(props: {
     const videoModal = useSignal<string | null>(null);
     const dragOver = useSignal<string | null>(null);
     const rootDragOver = useSignal(false);
-    const renaming = useSignal<string | null>(null);
 
     const menu = useSignal<
         {
@@ -74,8 +73,12 @@ export function FileExplorer(props: {
         null,
     );
     // Prompt for a name before saving a video dragged in from the grid; the
-    // copy only happens once the user confirms it (see `NameVideoModal`).
+    // copy only happens once the user confirms it (see `FileNameModal`).
     const nameModal = useSignal<{ src: string; destDir: string } | null>(null);
+    // Rename an entry from the right-click menu (modal, not in-place).
+    const renameModal = useSignal<{ entry: FileEntry; path: string } | null>(
+        null,
+    );
     // Confirm before deleting a file/dir from the right-click menu.
     const deleteModal = useSignal<{ entry: FileEntry; path: string } | null>(
         null,
@@ -257,6 +260,20 @@ export function FileExplorer(props: {
         }
     };
 
+    // Rename `path` to base name `name`, keeping the selection on the entry and
+    // refreshing its parent listing. A no-op if the name is unchanged or empty.
+    const renameEntry = async (path: string, name: string) => {
+        const oldName = path.split("/").pop() ?? "";
+        if (!name || name === oldName) return;
+        const { path: dest } = await trpc.renameFile.mutate({ path, name });
+        const slash = path.lastIndexOf("/");
+        const parent = slash === -1 ? "" : path.slice(0, slash);
+        if (projectData.value?.selected === path) {
+            projectData.value = { ...projectData.value, selected: dest };
+        }
+        await refreshDir(parent);
+    };
+
     const confirmDelete = async () => {
         const target = deleteModal.value;
         deleteModal.value = null;
@@ -296,7 +313,6 @@ export function FileExplorer(props: {
     const tree: TreeState = {
         projectData,
         dragOver,
-        renaming,
     };
 
     // Opens the context menu and, for files, checks whether their content
@@ -331,7 +347,6 @@ export function FileExplorer(props: {
         loadChildren,
         openMenu,
         handleDrop,
-        commitRename: commitRename(renaming, projectData, refreshDir),
         previewImage: (path, x, y) =>
             preview.value = path ? { path, x, y } : null,
         openInDefault,
@@ -546,8 +561,8 @@ export function FileExplorer(props: {
                     onClose={() => menu.value = null}
                     onOpenInDefault={openInDefault}
                     onCopy={copyImage}
-                    onRename={(path) => {
-                        renaming.value = path;
+                    onRename={(entry, path) => {
+                        renameModal.value = { entry, path };
                         menu.value = null;
                     }}
                     onPromptDetails={(generationId, path) => {
@@ -572,7 +587,8 @@ export function FileExplorer(props: {
 
             {/* Name a grid video before saving it (cancel = don't save). */}
             {nameModal.value && (
-                <NameVideoModal
+                <FileNameModal
+                    title={get_text("name_this_video", language.value)}
                     initialName={nameModal.value.src.split("/").pop() ?? ""}
                     onSave={(name) => {
                         dropFile(
@@ -583,6 +599,19 @@ export function FileExplorer(props: {
                         nameModal.value = null;
                     }}
                     onCancel={() => nameModal.value = null}
+                />
+            )}
+
+            {/* Rename an entry (cancel = leave it unchanged). */}
+            {renameModal.value && (
+                <FileNameModal
+                    title={get_text("rename", language.value)}
+                    initialName={renameModal.value.entry.name}
+                    onSave={(name) => {
+                        renameEntry(renameModal.value!.path, name);
+                        renameModal.value = null;
+                    }}
+                    onCancel={() => renameModal.value = null}
                 />
             )}
 
@@ -697,13 +726,15 @@ function FilePromptDetailsModal(
 }
 
 /**
- * Prompt for a file name before saving a video dragged in from the results
- * grid. Owns its own input state so typing never re-runs the parent's render;
- * focuses and pre-selects the name stem once on mount (like VS Code). `onSave`
- * fires only on confirm — cancelling writes nothing.
+ * Prompt for a file name, used both to name a video dragged in from the grid
+ * and to rename an existing entry (the `title` differs). Owns its own input
+ * state so typing never re-runs the parent's render; focuses and pre-selects
+ * the name stem once on mount (like VS Code). `onSave` fires only on confirm —
+ * cancelling changes nothing.
  */
-function NameVideoModal(
+function FileNameModal(
     props: {
+        title: string;
         initialName: string;
         onSave: (name: string) => void;
         onCancel: () => void;
@@ -735,7 +766,7 @@ function NameVideoModal(
         >
             <div class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3">
                 <div class="text-sm font-medium text-gray-800">
-                    {get_text("name_this_video", language.value)}
+                    {props.title}
                 </div>
                 <input
                     ref={inputRef}
@@ -794,7 +825,7 @@ function ContextMenu(
         onClose: () => void;
         onOpenInDefault: (path: string) => void;
         onCopy: (path: string) => void;
-        onRename: (path: string) => void;
+        onRename: (entry: FileEntry, path: string) => void;
         onPromptDetails: (generationId: string, path: string) => void;
         onDelete: (entry: FileEntry, path: string) => void;
     },
@@ -833,7 +864,7 @@ function ContextMenu(
                 {path !== "" && (
                     <button
                         type="button"
-                        onClick={() => props.onRename(path)}
+                        onClick={() => props.onRename(entry, path)}
                         class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-100"
                     >
                         {get_text("rename", language.value)}
@@ -1048,8 +1079,6 @@ interface TreeState {
     projectData: Signal<ProjectData | null>;
     /** Directory path currently hovered during a drag (for highlight). */
     dragOver: Signal<string | null>;
-    /** Path of the entry being renamed inline, or null. */
-    renaming: Signal<string | null>;
 }
 
 // Per-explorer callbacks, kept off the reactive `TreeState` data model and
@@ -1063,66 +1092,12 @@ interface TreeCallbacks {
     /** Handle a drop onto the given directory path (grid video, explorer
      * file, or OS files) — see the explorer's `handleDrop`. */
     handleDrop: (e: DragEvent, destDir: string) => void;
-    /** Commit an inline rename; `name` is the new base name (no slashes). */
-    commitRename: (path: string, name: string) => void;
     /** Show (path set) or hide (path null) the image hover preview at x,y. */
     previewImage: (path: string | null, x: number, y: number) => void;
     /** Open a file with the OS default application. */
     openInDefault: (path: string) => void;
     /** Open a video in the autoplay modal. */
     playVideo: (path: string) => void;
-}
-
-/**
- * Inline rename input, shown in place of an entry's row. Focuses on mount and
- * pre-selects the file stem (the name minus its extension) like VS Code does.
- */
-function RenameInput(
-    props: {
-        entry: FileEntry;
-        depth: number;
-        onCommit: (name: string) => void;
-        onCancel: () => void;
-    },
-) {
-    const { entry, depth } = props;
-    return (
-        <div
-            style={{ paddingLeft: `${depth * 14 + 12}px` }}
-            class="w-full flex items-center gap-1.5 pr-3 py-1 text-sm"
-        >
-            <span class="w-3.5 shrink-0" />
-            {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
-            <input
-                type="text"
-                value={entry.name}
-                ref={(el) => {
-                    if (!el) return;
-                    el.focus();
-                    // Select the stem (before the last dot) for files; for a
-                    // dotfile or directory, select the whole name.
-                    const dot = entry.isFile ? entry.name.lastIndexOf(".") : -1;
-                    el.setSelectionRange(0, dot > 0 ? dot : entry.name.length);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                        e.preventDefault();
-                        props.onCommit((e.currentTarget as HTMLInputElement)
-                            .value.trim());
-                    } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        props.onCancel();
-                    }
-                }}
-                onBlur={(e) =>
-                    props.onCommit(
-                        (e.currentTarget as HTMLInputElement).value.trim(),
-                    )}
-                class="flex-1 min-w-0 px-1 py-0 text-sm text-gray-800 bg-white border border-indigo-400 rounded outline-none focus:ring-1 focus:ring-indigo-300"
-            />
-        </div>
-    );
 }
 
 function Node(
@@ -1138,7 +1113,6 @@ function Node(
     const pd = tree.projectData.value;
     const isOpen = pd?.expanded.has(path) ?? false;
     const isActive = pd?.selected === path;
-    const isRenaming = tree.renaming.value === path;
     // Root entries live in `rootEntries`, not `childrenByPath` (keyed "" = root).
     const kids = path === "" ? pd?.rootEntries : pd?.childrenByPath[path];
 
@@ -1167,109 +1141,98 @@ function Node(
 
     return (
         <>
-            {isRenaming
-                ? (
-                    <RenameInput
-                        entry={entry}
-                        depth={depth}
-                        onCommit={(name) => callbacks.commitRename(path, name)}
-                        onCancel={() => tree.renaming.value = null}
-                    />
-                )
-                : (
-                    <button
-                        type="button"
-                        onClick={onClick}
-                        // Double-click opens files in the OS default app,
-                        // except videos which play inline in a modal
-                        // (directories just toggle via the single click).
-                        onDblClick={entry.isDirectory
-                            ? undefined
-                            : isVideoFile(entry)
-                            ? () => callbacks.playVideo(path)
-                            : () => callbacks.openInDefault(path)}
-                        onContextMenu={(e) => {
-                            e.preventDefault();
-                            callbacks.openMenu(
-                                entry,
-                                path,
-                                e.clientX,
-                                e.clientY,
-                            );
-                        }}
-                        // Image files can be dragged into the composer as a
-                        // reference attachment (carries the project path).
-                        draggable={isImageFile(entry)}
-                        onDragStart={(e) => {
-                            e.dataTransfer?.setData(PROJECT_FILE_MIME, path);
-                            if (e.dataTransfer) {
-                                e.dataTransfer.effectAllowed = "copy";
-                            }
-                            callbacks.previewImage(null, 0, 0); // hide on drag
-                        }}
-                        // Images and videos show a floating thumbnail near the
-                        // cursor (videos render their first frame, not playing).
-                        onMouseMove={isPreviewable(entry)
-                            ? (e) =>
-                                callbacks.previewImage(
-                                    path,
-                                    e.clientX,
-                                    e.clientY,
-                                )
-                            : undefined}
-                        onMouseLeave={isPreviewable(entry)
-                            ? () => callbacks.previewImage(null, 0, 0)
-                            : undefined}
-                        // Directories accept dropped grid videos, explorer
-                        // files, and files from the OS.
-                        onDragOver={entry.isDirectory
-                            ? (e) => {
-                                const types = e.dataTransfer?.types;
-                                if (
-                                    !types ||
-                                    (!types.includes(PROJECT_FILE_MIME) &&
-                                        !types.includes("Files"))
-                                ) {
-                                    return;
-                                }
-                                e.preventDefault();
-                                e.stopPropagation(); // don't fall to the root
-                                e.dataTransfer!.dropEffect = "copy";
-                                if (tree.dragOver.value !== path) {
-                                    tree.dragOver.value = path;
-                                }
-                            }
-                            : undefined}
-                        onDragLeave={entry.isDirectory
-                            ? () => {
-                                if (tree.dragOver.value === path) {
-                                    tree.dragOver.value = null;
-                                }
-                            }
-                            : undefined}
-                        onDrop={entry.isDirectory
-                            ? (e) => {
-                                tree.dragOver.value = null;
-                                e.stopPropagation(); // handled here, not root
-                                callbacks.handleDrop(e, path);
-                            }
-                            : undefined}
-                        style={{ paddingLeft: `${depth * 14 + 12}px` }}
-                        class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
-                            tree.dragOver.value === path
-                                ? "bg-indigo-100 ring-1 ring-inset ring-indigo-300"
-                                : isActive
-                                ? "bg-indigo-50 text-indigo-600"
-                                : "text-gray-700"
-                        }`}
-                    >
-                        {entry.isDirectory
-                            ? <ChevronIcon open={isOpen} />
-                            : <span class="w-3.5 shrink-0" />}
-                        {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
-                        <span class="truncate">{entry.name}</span>
-                    </button>
-                )}
+            <button
+                type="button"
+                onClick={onClick}
+                // Double-click opens files in the OS default app,
+                // except videos which play inline in a modal
+                // (directories just toggle via the single click).
+                onDblClick={entry.isDirectory
+                    ? undefined
+                    : isVideoFile(entry)
+                    ? () => callbacks.playVideo(path)
+                    : () => callbacks.openInDefault(path)}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    callbacks.openMenu(
+                        entry,
+                        path,
+                        e.clientX,
+                        e.clientY,
+                    );
+                }}
+                // Image files can be dragged into the composer as a
+                // reference attachment (carries the project path).
+                draggable={isImageFile(entry)}
+                onDragStart={(e) => {
+                    e.dataTransfer?.setData(PROJECT_FILE_MIME, path);
+                    if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = "copy";
+                    }
+                    callbacks.previewImage(null, 0, 0); // hide on drag
+                }}
+                // Images and videos show a floating thumbnail near the
+                // cursor (videos render their first frame, not playing).
+                onMouseMove={isPreviewable(entry)
+                    ? (e) =>
+                        callbacks.previewImage(
+                            path,
+                            e.clientX,
+                            e.clientY,
+                        )
+                    : undefined}
+                onMouseLeave={isPreviewable(entry)
+                    ? () => callbacks.previewImage(null, 0, 0)
+                    : undefined}
+                // Directories accept dropped grid videos, explorer
+                // files, and files from the OS.
+                onDragOver={entry.isDirectory
+                    ? (e) => {
+                        const types = e.dataTransfer?.types;
+                        if (
+                            !types ||
+                            (!types.includes(PROJECT_FILE_MIME) &&
+                                !types.includes("Files"))
+                        ) {
+                            return;
+                        }
+                        e.preventDefault();
+                        e.stopPropagation(); // don't fall to the root
+                        e.dataTransfer!.dropEffect = "copy";
+                        if (tree.dragOver.value !== path) {
+                            tree.dragOver.value = path;
+                        }
+                    }
+                    : undefined}
+                onDragLeave={entry.isDirectory
+                    ? () => {
+                        if (tree.dragOver.value === path) {
+                            tree.dragOver.value = null;
+                        }
+                    }
+                    : undefined}
+                onDrop={entry.isDirectory
+                    ? (e) => {
+                        tree.dragOver.value = null;
+                        e.stopPropagation(); // handled here, not root
+                        callbacks.handleDrop(e, path);
+                    }
+                    : undefined}
+                style={{ paddingLeft: `${depth * 14 + 12}px` }}
+                class={`w-full flex items-center gap-1.5 pr-3 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                    tree.dragOver.value === path
+                        ? "bg-indigo-100 ring-1 ring-inset ring-indigo-300"
+                        : isActive
+                        ? "bg-indigo-50 text-indigo-600"
+                        : "text-gray-700"
+                }`}
+            >
+                {entry.isDirectory
+                    ? <ChevronIcon open={isOpen} />
+                    : <span class="w-3.5 shrink-0" />}
+                {entry.isDirectory ? <FolderIcon /> : <FileIcon />}
+                <span class="truncate">{entry.name}</span>
+            </button>
             {entry.isDirectory && isOpen &&
                 kids?.map((child) => (
                     <Node
@@ -1288,32 +1251,6 @@ function Node(
 /** Sidebar width bounds, in px. */
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
-
-/**
- * Build the inline-rename commit handler, closing over the explorer's rename
- * signal, selection signal, and directory-refresh callback.
- */
-function commitRename(
-    renaming: Signal<string | null>,
-    projectData: Signal<ProjectData | null>,
-    refreshDir: (dir: string) => Promise<void>,
-) {
-    return async (path: string, name: string) => {
-        renaming.value = null;
-        const oldName = path.split("/").pop() ?? "";
-        // No change (or cleared) — nothing to do.
-        if (!name || name === oldName) return;
-
-        const { path: dest } = await trpc.renameFile.mutate({ path, name });
-        const slash = path.lastIndexOf("/");
-        const parent = slash === -1 ? "" : path.slice(0, slash);
-        // Keep the selection on the renamed entry.
-        if (projectData.value?.selected === path) {
-            projectData.value = { ...projectData.value, selected: dest };
-        }
-        await refreshDir(parent);
-    };
-}
 
 export function makeLoadChildren(projectData: Signal<ProjectData | null>) {
     return async (path: string) => {
