@@ -87,16 +87,28 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
- * A non-clobbering file name within `destDirAbs`: returns `base` if it's free,
- * otherwise appends " (n)" before the extension until an unused name is found.
+ * Pick a file name inside `destDirAbs` that doesn't already exist, so writing
+ * it won't overwrite another file. If `base` is free it's used as-is; if it's
+ * taken, a number is added before the extension — just like the OS file manager
+ * turns a second "cat.mp4" into "cat (1).mp4".
+ *
+ * e.g. with `base = "cat.mp4"`:
+ *   - nothing there yet      → "cat.mp4"
+ *   - "cat.mp4" exists       → "cat (1).mp4"
+ *   - "cat.mp4" + "(1)" both → "cat (2).mp4"
  */
 async function availableName(
     destDirAbs: string,
     base: string,
 ): Promise<string> {
+    // Split "cat.mp4" into stem "cat" and ext ".mp4" so the number goes before
+    // the extension ("cat (1).mp4", not "cat.mp4 (1)"). `dot > 0` (not >= 0)
+    // means a dotfile like ".gitignore" counts as having no extension.
     const dot = base.lastIndexOf(".");
     const stem = dot > 0 ? base.slice(0, dot) : base;
     const ext = dot > 0 ? base.slice(dot) : "";
+
+    // Keep bumping the number until we land on a name no file is using yet.
     let name = base;
     for (let n = 1; await exists(join(destDirAbs, name)); n++) {
         name = `${stem} (${n})${ext}`;
