@@ -147,7 +147,12 @@ export default function Application() {
             return;
         }
         (async () => {
-            if (!projectData.value) return;
+            // `.peek()` reads without subscribing: this effect must depend on
+            // `ShowOpenDirectorDir` ONLY. Reading `projectData.value` here would
+            // subscribe it to `projectData`, and since it also *writes*
+            // `projectData.value` below, that would self-trigger an infinite
+            // reload loop (loadProjectData firing "like crazy").
+            if (!projectData.peek()) return;
             const data = await loadProjectData();
             if (data instanceof Error) {
                 console.error(data);

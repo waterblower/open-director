@@ -1,9 +1,4 @@
-import {
-    type Signal,
-    signal,
-    useSignal,
-    useSignalEffect,
-} from "@preact/signals";
+import { type Signal, signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import {
     get_text,
@@ -106,23 +101,39 @@ export function FileExplorer(props: {
 
     const loadChildren = makeLoadChildren(projectData);
 
-    // Persist expanded dirs + selection whenever they change. The `hydrated`
-    // gate skips the initial load (set by the parent / by picking a project) so
-    // we don't immediately re-write the state we just read back.
-    const hydrated = useRef(false);
-    useSignalEffect(() => {
+    // Persist expanded dirs + selection whenever they change.
+    //
+    // `persistKey` is a derived signal of just the persisted slice. `useComputed`
+    // memoizes by value, so it only takes a new identity on a real expand/select
+    // change — not on every `projectData` mutation (children loads, fs refreshes,
+    // reloads). The key is order-independent (sorted) so a reloaded `expanded`
+    // Set that iterates in a different order doesn't look like a change.
+    const persistKey = useComputed(() => {
         const pd = projectData.value;
-        if (!pd) return;
+        if (!pd) return null;
+        const state: ExplorerState = {
+            expanded: [...pd.expanded].sort(),
+            selected: pd.selected,
+        };
+        return JSON.stringify(state);
+    });
+    // The save itself is a side effect, so it lives in a plain `useEffect` keyed
+    // on the computed value: the component re-renders on every `projectData`
+    // change (it reads `projectData.value` in render), but this only fires when
+    // `persistKey` actually changes. The `hydrated` gate skips the initial load
+    // (set by the parent / by picking a project) so we don't re-write the state
+    // we just read back.
+    const hydrated = useRef(false);
+    useEffect(() => {
+        const key = persistKey.value;
+        if (key === null) return;
         if (!hydrated.current) {
             hydrated.current = true;
             return;
         }
-        const state: ExplorerState = {
-            expanded: [...pd.expanded],
-            selected: pd.selected,
-        };
-        trpc.saveExplorerState.mutate(state).catch(console.error);
-    });
+        trpc.saveExplorerState.mutate(JSON.parse(key) as ExplorerState)
+            .catch(console.error);
+    }, [persistKey.value]);
 
     const openInDefault = (path: string) => {
         menu.value = null;
@@ -399,22 +410,18 @@ export function FileExplorer(props: {
                                 language.value,
                             )}
                             onClick={async () => {
-                                try {
-                                    const res = await trpc.pickProject.mutate();
-                                    if (!res) return;
-                                    error.value = null;
-                                    // Load the full state for the new folder.
-                                    hydrated.current = false;
-                                    const data = await loadProjectData();
-                                    if (data instanceof Error) {
-                                        console.error(data);
-                                        error.value = data.message;
-                                        return;
-                                    }
-                                    projectData.value = data;
-                                } catch (err) {
-                                    console.error(err);
+                                const res = await trpc.pickProject.mutate();
+                                if (!res) return;
+                                error.value = null;
+                                // Load the full state for the new folder.
+                                hydrated.current = false;
+                                const data = await loadProjectData();
+                                if (data instanceof Error) {
+                                    console.error(data);
+                                    error.value = data.message;
+                                    return;
                                 }
+                                projectData.value = data;
                             }}
                             class="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
                         >
