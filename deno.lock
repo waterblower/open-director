@@ -9,6 +9,7 @@
     "jsr:@fresh/core@2": "2.3.3",
     "jsr:@fresh/core@^2.3.3": "2.3.3",
     "jsr:@fresh/plugin-vite@^1.1.2": "1.1.2",
+    "jsr:@libs/qrcode@^3.0.1": "3.0.1",
     "jsr:@std/async@^1.4.0": "1.4.0",
     "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/data-structures@^1.1.0": "1.1.0",
@@ -125,6 +126,9 @@
         "npm:rollup",
         "npm:vite@^7.1.4"
       ]
+    },
+    "@libs/qrcode@3.0.1": {
+      "integrity": "33b861840fbcc0a88498c35d316153e8f82eaeb0714d6b6cf2ab0b133d44527b"
     },
     "@std/async@1.4.0": {
       "integrity": "4d70b008634f571cff9b554090d628c76141c32613aae0ff283fd5fa23d0c379",
@@ -2150,6 +2154,7 @@
       "jsr:@blowater/csp@1",
       "jsr:@fresh/core@^2.3.3",
       "jsr:@fresh/plugin-vite@^1.1.2",
+      "jsr:@libs/qrcode@^3.0.1",
       "jsr:@std/async@^1.4.0",
       "jsr:@std/path@^1.0.9",
       "jsr:@std/ulid@1",
