@@ -514,53 +514,7 @@ export function FileExplorer(props: {
                 />
             </aside>
 
-            {
-                /* Floating image hover preview, offset from the cursor and
-                clamped to stay within the viewport. */
-            }
-            {preview.value && (
-                <div
-                    class="fixed z-50 pointer-events-none rounded-lg shadow-xl border border-gray-200 bg-white p-1"
-                    style={{
-                        left: `${
-                            Math.min(
-                                preview.value.x + 16,
-                                globalThis.innerWidth - 208,
-                            )
-                        }px`,
-                        top: `${
-                            Math.max(
-                                8,
-                                Math.min(
-                                    preview.value.y + 16,
-                                    globalThis.innerHeight - 208,
-                                ),
-                            )
-                        }px`,
-                    }}
-                >
-                    {VIDEO_EXT.test(preview.value.path)
-                        ? (
-                            <video
-                                // `#t=0.1` seeks to the first frame so a poster
-                                // image shows without playing the video.
-                                src={projectFileUrl(preview.value.path) +
-                                    "#t=0.1"}
-                                preload="metadata"
-                                muted
-                                playsInline
-                                class="block max-w-48 max-h-48 object-contain rounded"
-                            />
-                        )
-                        : (
-                            <img
-                                src={projectFileUrl(preview.value.path)}
-                                alt=""
-                                class="block max-w-48 max-h-48 object-contain rounded"
-                            />
-                        )}
-                </div>
-            )}
+            {preview.value && <FilePreview preview={preview.value} />}
 
             {menu.value && (
                 <ContextMenu
@@ -815,6 +769,45 @@ function FileNameModal(
 }
 
 /**
+ * Floating image/video hover preview, offset from the cursor and clamped to
+ * stay within the viewport (previews are capped at 192px + 8px padding = 208px).
+ */
+function FilePreview(props: { preview: { path: string; x: number; y: number } }) {
+    const { path, x, y } = props.preview;
+    return (
+        <div
+            class="fixed z-50 pointer-events-none rounded-lg shadow-xl border border-gray-200 bg-white p-1"
+            style={{
+                left: `${Math.min(x + 16, globalThis.innerWidth - 208)}px`,
+                top: `${
+                    Math.max(8, Math.min(y + 16, globalThis.innerHeight - 208))
+                }px`,
+            }}
+        >
+            {VIDEO_EXT.test(path)
+                ? (
+                    <video
+                        // `#t=0.1` seeks to the first frame so a poster image
+                        // shows without playing the video.
+                        src={projectFileUrl(path) + "#t=0.1"}
+                        preload="metadata"
+                        muted
+                        playsInline
+                        class="block max-w-48 max-h-48 object-contain rounded"
+                    />
+                )
+                : (
+                    <img
+                        src={projectFileUrl(path)}
+                        alt=""
+                        class="block max-w-48 max-h-48 object-contain rounded"
+                    />
+                )}
+        </div>
+    );
+}
+
+/**
  * Right-click context menu for a tree entry, positioned at the cursor. A
  * full-screen backdrop closes it on any outside click. Which items show
  * depends on the entry: copy for images, rename/delete for anything but the
@@ -838,6 +831,28 @@ function ContextMenu(
     },
 ) {
     const { entry, path, x, y, promptGenerationId } = props.menu;
+
+    // Clamp the menu fully into the viewport (like the hover preview above):
+    // compute the position inline from the click point and the menu's size. Its
+    // height depends on how many items show, so derive it from the item count;
+    // width is clamped with a worst-case upper bound so it never spills right.
+    const margin = 8;
+    const menuWidth = 224;
+    const itemCount = 1 + // "Open with default app" — always shown
+        (isImageFile(entry) ? 1 : 0) + // Copy
+        (path !== "" ? 1 : 0) + // Rename
+        (promptGenerationId.value ? 1 : 0) + // Prompt details
+        (path !== "" ? 1 : 0); // Delete
+    const menuHeight = 8 + itemCount * 34; // ~34px/item + py-1 container padding
+    const left = Math.max(
+        margin,
+        Math.min(x, globalThis.innerWidth - menuWidth - margin),
+    );
+    const top = Math.max(
+        margin,
+        Math.min(y, globalThis.innerHeight - menuHeight - margin),
+    );
+
     return (
         <>
             <div
@@ -849,8 +864,8 @@ function ContextMenu(
                 }}
             />
             <div
-                class="fixed z-50 min-w-44 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
-                style={{ left: `${x}px`, top: `${y}px` }}
+                class="fixed z-50 min-w-44 max-h-[calc(100vh-16px)] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
+                style={{ left: `${left}px`, top: `${top}px` }}
             >
                 <button
                     type="button"
