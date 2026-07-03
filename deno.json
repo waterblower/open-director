@@ -18,6 +18,22 @@
         }
     },
     "exclude": ["**/_fresh/*"],
+    "desktop": {
+        "app": {
+            "name": "Open Director",
+            "identifier": "app.opendirector",
+            "icons": {
+                "windows": "./static/favicon.ico"
+            },
+            "deepLinks": ["open-director"]
+        },
+        "backend": "webview",
+        "output": {
+            "macos": "./_dist/OpenDirector.app",
+            "windows": "./_dist/OpenDirector",
+            "linux": "./_dist/open-director"
+        }
+    },
     "imports": {
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",

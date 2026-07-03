@@ -772,7 +772,9 @@ function FileNameModal(
  * Floating image/video hover preview, offset from the cursor and clamped to
  * stay within the viewport (previews are capped at 192px + 8px padding = 208px).
  */
-function FilePreview(props: { preview: { path: string; x: number; y: number } }) {
+function FilePreview(
+    props: { preview: { path: string; x: number; y: number } },
+) {
     const { path, x, y } = props.preview;
     return (
         <div

@@ -15,3 +15,4 @@ a.ts
 db.script.ts
 /_dist
 /.vite
+.DS_Store
