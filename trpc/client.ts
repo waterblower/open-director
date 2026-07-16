@@ -8,8 +8,8 @@
 import {
     createTRPCClient,
     httpBatchLink,
+    httpSubscriptionLink,
     splitLink,
-    unstable_httpSubscriptionLink,
 } from "@trpc/client";
 import type { AppRouter } from "./router.ts";
 import type { ProjectData } from "../components/FileExplorer.tsx";
@@ -19,7 +19,7 @@ export const trpc = createTRPCClient<AppRouter>({
     links: [
         splitLink({
             condition: (op) => op.type === "subscription",
-            true: unstable_httpSubscriptionLink({ url: "/trpc" }),
+            true: httpSubscriptionLink({ url: "/trpc" }),
             false: httpBatchLink({ url: "/trpc" }),
         }),
     ],

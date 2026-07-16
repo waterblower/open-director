@@ -63,15 +63,38 @@ endpoints.
 
 # Image/Video Harness
 
-Image/Video Harness (pattern). An Image/Video Harness is the software assembly that wraps a generative image or video model — a stateless, weakly-reasoning instrument — with the external intelligence, memory, and control it lacks, so that a loosely-specified creative intent reliably becomes a finished asset at minimum cost. Unlike an LLM harness, where the wrapped model is also the brain, an image/video harness is inherently a two-model system: a reasoning model (the agent) drives a generation model (the instrument). A system earns the name "harness" — rather than "wrapper," "client," or "UI" — only when it supplies all four of the following functions, each compensating for a specific deficiency of the generation model:
+Image/Video Harness (pattern). An Image/Video Harness is the software assembly
+that wraps a generative image or video model — a stateless, weakly-reasoning
+instrument — with the external intelligence, memory, and control it lacks, so
+that a loosely-specified creative intent reliably becomes a finished asset at
+minimum cost. Unlike an LLM harness, where the wrapped model is also the brain,
+an image/video harness is inherently a two-model system: a reasoning model (the
+agent) drives a generation model (the instrument). A system earns the name
+"harness" — rather than "wrapper," "client," or "UI" — only when it supplies all
+four of the following functions, each compensating for a specific deficiency of
+the generation model:
 
-Context persistence — defeats statelessness. The harness holds the durable specification — base prompt, locked art style, character and asset registries — so intent is declared once and silently re-applied to every call, instead of being re-typed each generation.
-Prompt synthesis — supplies the missing brain. An external reasoning model translates loose human intent into model-optimal prompts, compensating for the instrument's brittle, shallow text conditioning. This is the function that makes it a two-model system; without it you have a UI, not a harness.
-Iterative control — closes the expensive loop. The harness runs a generate → judge → regenerate cycle — evaluating output, deciding whether to retry, converging on an acceptable result — because the instrument cannot critique or correct itself and every call costs real money and time.
-Cumulative memory — improves with use. The harness externalizes learned prompt craft and reusable assets to local, persistent storage — the self-improving skill library — so the system gets measurably better the more it is used, rather than starting cold every session.
+Context persistence — defeats statelessness. The harness holds the durable
+specification — base prompt, locked art style, character and asset registries —
+so intent is declared once and silently re-applied to every call, instead of
+being re-typed each generation. Prompt synthesis — supplies the missing brain.
+An external reasoning model translates loose human intent into model-optimal
+prompts, compensating for the instrument's brittle, shallow text conditioning.
+This is the function that makes it a two-model system; without it you have a UI,
+not a harness. Iterative control — closes the expensive loop. The harness runs a
+generate → judge → regenerate cycle — evaluating output, deciding whether to
+retry, converging on an acceptable result — because the instrument cannot
+critique or correct itself and every call costs real money and time. Cumulative
+memory — improves with use. The harness externalizes learned prompt craft and
+reusable assets to local, persistent storage — the self-improving skill library
+— so the system gets measurably better the more it is used, rather than starting
+cold every session.
 
-The test: a system that provides only some of these is a generation client. A system that provides all four is a harness — and the value it captures scales with the cost of the instrument it wraps, because better prompts and fewer wasted generations matter most precisely when each generation is slow and expensive.
-
+The test: a system that provides only some of these is a generation client. A
+system that provides all four is a harness — and the value it captures scales
+with the cost of the instrument it wraps, because better prompts and fewer
+wasted generations matter most precisely when each generation is slow and
+expensive.
 
 ## Current Status
 

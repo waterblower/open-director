@@ -79,8 +79,8 @@ export default function ImageGridEditor() {
                 ?.getAsFile();
             if (file) loadFile(file);
         }
-        window.addEventListener("paste", onPaste);
-        return () => window.removeEventListener("paste", onPaste);
+        globalThis.addEventListener("paste", onPaste);
+        return () => globalThis.removeEventListener("paste", onPaste);
     }, []);
 
     useEffect(() => {
@@ -98,8 +98,8 @@ export default function ImageGridEditor() {
                 ]);
             });
         }
-        window.addEventListener("keydown", onKeyDown);
-        return () => window.removeEventListener("keydown", onKeyDown);
+        globalThis.addEventListener("keydown", onKeyDown);
+        return () => globalThis.removeEventListener("keydown", onKeyDown);
     }, []);
 
     function download() {
