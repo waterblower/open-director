@@ -48,6 +48,19 @@ export function Footbar(props: { onOpenSettings: () => void }) {
                     </span>
                 </a>
 
+                <a
+                    href="/generation_plan"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={get_text("generation_plan", language.value)}
+                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
+                >
+                    <PlanIcon />
+                    <span class="whitespace-nowrap">
+                        {get_text("generation_plan", language.value)}
+                    </span>
+                </a>
+
                 <div class="flex-1" />
 
                 <button
@@ -189,6 +202,25 @@ function GridIcon() {
         >
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+        </svg>
+    );
+}
+
+function PlanIcon() {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+        >
+            <path d="M9 5h11M9 12h11M9 19h11" />
+            <path d="m3.5 5 1 1 2-2M3.5 12l1 1 2-2M3.5 19l1 1 2-2" />
         </svg>
     );
 }

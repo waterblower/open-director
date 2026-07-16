@@ -333,6 +333,10 @@ const TEXTS = {
         English: "Image Grid Editor",
         Chinese: "图片加网格",
     },
+    generation_plan: {
+        English: "Generation Plan",
+        Chinese: "生成计划",
+    },
 };
 
 /** Look up `id`'s text in `lang`, falling back to the id itself if unknown. */
