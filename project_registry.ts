@@ -18,19 +18,7 @@ export async function registerProject(
     path: string,
     openedAt = new Date().toISOString(),
 ): Promise<ProjectRecord> {
-    return await upsertProject(kv, path, openedAt, true);
-}
-
-/**
- * Add `path` only when it is absent. Used to migrate the legacy active-path
- * setting without counting every read of that setting as another open.
- */
-export async function ensureProjectRegistered(
-    kv: Deno.Kv,
-    path: string,
-    openedAt = new Date().toISOString(),
-): Promise<ProjectRecord> {
-    return await upsertProject(kv, path, openedAt, false);
+    return await upsertProject(kv, path, openedAt);
 }
 
 /** Return every known project, most recently opened first. */
@@ -41,22 +29,26 @@ export async function listProjects(kv: Deno.Kv): Promise<ProjectRecord[]> {
     ) {
         const parsed = ProjectRecordSchema.safeParse(entry.value);
         if (!parsed.success) {
+            console.error(parsed.error)
             await kv.atomic().check(entry).delete(entry.key).commit();
             continue;
         }
         projects.push(parsed.data);
     }
-    return projects.toSorted((a, b) =>
-        b.lastOpenedAt.localeCompare(a.lastOpenedAt) ||
-        a.path.localeCompare(b.path)
-    );
+    return projects.toSorted((a, b) =>b.lastOpenedAt.localeCompare(a.lastOpenedAt));
+}
+
+/** Return the most recently opened project, or null when none exists. */
+export async function getLastOpenedProject(
+    kv: Deno.Kv,
+): Promise<ProjectRecord | null> {
+    return (await listProjects(kv))[0] ?? null;
 }
 
 async function upsertProject(
     kv: Deno.Kv,
     path: string,
     openedAt: string,
-    touchExisting: boolean,
 ): Promise<ProjectRecord> {
     const canonicalPath = await canonicalizeProjectPath(path);
     const key = projectKey(canonicalPath);
@@ -67,7 +59,6 @@ async function upsertProject(
         const entry = await kv.get<unknown>(key);
         const parsed = ProjectRecordSchema.safeParse(entry.value);
         if (parsed.success) {
-            if (!touchExisting) return parsed.data;
             const updated: ProjectRecord = {
                 path: canonicalPath,
                 firstOpenedAt: parsed.data.firstOpenedAt,

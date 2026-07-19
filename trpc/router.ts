@@ -266,7 +266,7 @@ export const appRouter = router({
     pickProject: publicProcedure.mutation(async () => {
         const path = await pickProjectFolder();
         if (!path) return null;
-        await setStoredProjectPath(path);
+        await registerProject(kv, path);
         reopenDb(); // point the generations DB at the new project
         return { path };
     }),
@@ -986,10 +986,11 @@ import {
     getShowOpenDirectorDir,
     getStoredApiKey,
     getStoredProjectPath,
+    kv,
     setShowOpenDirectorDir,
     setStoredApiKey,
-    setStoredProjectPath,
 } from "../kv.ts";
+import { registerProject } from "@/project_registry.ts";
 (async () => {
     let i = 0;
     for (;;) {

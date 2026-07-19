@@ -1,6 +1,6 @@
 import { join, resolve } from "@std/path";
 import {
-    ensureProjectRegistered,
+    getLastOpenedProject,
     listProjects,
     ProjectRecordSchema,
     registerProject,
@@ -58,6 +58,26 @@ Deno.test("project registry stores and lists every opened project", async () => 
         } finally {
             await Deno.remove(temp, { recursive: true });
         }
+    });
+});
+
+Deno.test("latest project is selected by last-opened time", async () => {
+    await withRegistry(async (kv) => {
+        const firstPath = resolve("first-latest-project");
+        const secondPath = resolve("second-latest-project");
+
+        await registerProject(kv, firstPath, "2026-01-03T00:00:00.000Z");
+        await registerProject(kv, secondPath, "2026-01-02T00:00:00.000Z");
+        assert(
+            (await getLastOpenedProject(kv))?.path === firstPath,
+            "Project with the latest lastOpenedAt was not selected",
+        );
+
+        await registerProject(kv, secondPath, "2026-01-04T00:00:00.000Z");
+        assert(
+            (await getLastOpenedProject(kv))?.path === secondPath,
+            "Reopened project did not become the latest project",
+        );
     });
 });
 
@@ -217,30 +237,5 @@ Deno.test("registration replaces invalid data at the project key", async () => {
         } finally {
             await Deno.remove(root, { recursive: true });
         }
-    });
-});
-
-Deno.test("legacy registration does not count ordinary reads as opens", async () => {
-    await withRegistry(async (kv) => {
-        const root = resolve("missing-project-for-registry-test");
-        const migrated = await ensureProjectRegistered(
-            kv,
-            root,
-            "2026-01-01T00:00:00.000Z",
-        );
-        const readAgain = await ensureProjectRegistered(
-            kv,
-            root,
-            "2026-01-04T00:00:00.000Z",
-        );
-
-        assert(
-            readAgain.path === migrated.path,
-            "Migration changed project path",
-        );
-        assert(
-            readAgain.lastOpenedAt === migrated.lastOpenedAt,
-            "A read changed the last-opened time",
-        );
     });
 });

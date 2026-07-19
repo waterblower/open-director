@@ -1,7 +1,10 @@
 import { Head } from "fresh/runtime";
 import { basename } from "@std/path";
 import { define } from "../../utils.ts";
-import { getStoredProjects } from "../../kv.ts";
+import { listProjects } from "../../project_registry.ts";
+import { kv } from "../../kv.ts";
+
+
 
 function formatOpenedAt(value: string): string {
     const date = new Date(value);
@@ -16,7 +19,7 @@ function formatOpenedAt(value: string): string {
 }
 
 export default define.page(async function ProjectsPage() {
-    const projects = await getStoredProjects();
+    const projects = await listProjects(kv);
 
     return (
         <>

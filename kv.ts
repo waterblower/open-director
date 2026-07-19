@@ -1,8 +1,9 @@
 /**
  * Deno KV — machine-level persistent config (not project-scoped).
  *
- * Used to remember the last-chosen project folder so a refresh/relaunch reopens
- * the same project. https://docs.deno.com/deploy/reference/deno_kv/
+ * Project records are ordered by their last-opened timestamp so a
+ * refresh/relaunch reopens the most recently used project.
+ * https://docs.deno.com/deploy/reference/deno_kv/
  *
  * Stored under `~/.open-director/kv.sqlite3` (`%USERPROFILE%` on Windows) so it
  * survives independent of any single project folder.
@@ -10,7 +11,7 @@
 import { homedir } from "node:os";
 import { join } from "@std/path";
 import {
-    ensureProjectRegistered,
+    getLastOpenedProject,
     listProjects,
     type ProjectRecord,
     registerProject,
@@ -18,39 +19,17 @@ import {
 
 const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
-const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
+export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
-const PROJECT_PATH_KEY = ["config", "project_path"] as const;
 const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
 
-/** The previously-chosen project folder, or null if one was never picked. */
+/** The most recently opened project folder, or null if none exists. */
 export async function getStoredProjectPath(): Promise<string | null> {
-    const res = await kv.get<string>(PROJECT_PATH_KEY);
-    return res.value;
+    return (await getLastOpenedProject(kv))?.path ?? null;
 }
 
-/** Persist the chosen folder and remember it in the permanent project list. */
-export async function setStoredProjectPath(path: string): Promise<void> {
-    const project = await registerProject(kv, path);
-    await kv.set(PROJECT_PATH_KEY, project.path);
-}
 
-/** Register a project without changing which project the UI currently shows. */
-export async function registerStoredProject(
-    path: string,
-): Promise<ProjectRecord> {
-    return await registerProject(kv, path);
-}
-
-/** Every project folder that has ever been opened, most recent first. */
-export async function getStoredProjects(): Promise<ProjectRecord[]> {
-    const activePath = (await kv.get<string>(PROJECT_PATH_KEY)).value;
-    // Existing installations only have `project_path`. Backfill the registry
-    // when its list is first requested, without counting this as another open.
-    if (activePath) await ensureProjectRegistered(kv, activePath);
-    return await listProjects(kv);
-}
 
 /** The configured Seedance API key, or null if one was never set. */
 export async function getStoredApiKey(): Promise<string | null> {
