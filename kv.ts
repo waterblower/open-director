@@ -9,6 +9,12 @@
  */
 import { homedir } from "node:os";
 import { join } from "@std/path";
+import {
+    ensureProjectRegistered,
+    listProjects,
+    type ProjectRecord,
+    registerProject,
+} from "./project_registry.ts";
 
 const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
@@ -24,9 +30,26 @@ export async function getStoredProjectPath(): Promise<string | null> {
     return res.value;
 }
 
-/** Persist the chosen project folder so the next launch reopens it. */
+/** Persist the chosen folder and remember it in the permanent project list. */
 export async function setStoredProjectPath(path: string): Promise<void> {
-    await kv.set(PROJECT_PATH_KEY, path);
+    const project = await registerProject(kv, path);
+    await kv.set(PROJECT_PATH_KEY, project.path);
+}
+
+/** Register a project without changing which project the UI currently shows. */
+export async function registerStoredProject(
+    path: string,
+): Promise<ProjectRecord> {
+    return await registerProject(kv, path);
+}
+
+/** Every project folder that has ever been opened, most recent first. */
+export async function getStoredProjects(): Promise<ProjectRecord[]> {
+    const activePath = (await kv.get<string>(PROJECT_PATH_KEY)).value;
+    // Existing installations only have `project_path`. Backfill the registry
+    // when its list is first requested, without counting this as another open.
+    if (activePath) await ensureProjectRegistered(kv, activePath);
+    return await listProjects(kv);
 }
 
 /** The configured Seedance API key, or null if one was never set. */
