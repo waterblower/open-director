@@ -18,7 +18,8 @@ import {
     TaskSchema,
     TaskStatus,
 } from "./seedance/seedance.ts";
-import { getStoredProjectPath } from "./kv.ts";
+import { getLastOpenedProject } from "./project_registry.ts";
+import { kv } from "./kv.ts";
 
 /**
  * A TEXT column holding JSON serialized from `schema`. Parses and validates it
@@ -59,11 +60,11 @@ export async function reopenDb() {
  */
 export async function getDatabase(project_root?: string) {
     if (!project_root) {
-        const projectDir = await getStoredProjectPath();
+        const projectDir = await getLastOpenedProject(kv);
         if (!projectDir) {
             return null;
         }
-        project_root = projectDir;
+        project_root = projectDir.path;
     }
 
     const dir = join(project_root, ".open-director");

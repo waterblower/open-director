@@ -32,12 +32,13 @@ import { SeedanceError, type Task } from "./seedance/seedance.ts";
  */
 const QUEUED_GRACE_MS = 5 * 60 * 1000;
 import { global_event_bus } from "./trpc/router.ts";
-import { getStoredProjectPath } from "./kv.ts";
+import { kv } from "./kv.ts";
+import { getLastOpenedProject } from "./project_registry.ts";
 import { sha256Hex } from "./utils.ts";
 
 export async function check_and_download(): Promise<void | Error> {
     for (;;) {
-        const project_path = await getStoredProjectPath();
+        const project_path = (await getLastOpenedProject(kv))?.path;
         if (!db || !project_path) {
             console.log("no project openned, waiting...");
             await delay(5000);

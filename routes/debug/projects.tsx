@@ -4,8 +4,6 @@ import { define } from "../../utils.ts";
 import { listProjects } from "../../project_registry.ts";
 import { kv } from "../../kv.ts";
 
-
-
 function formatOpenedAt(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;

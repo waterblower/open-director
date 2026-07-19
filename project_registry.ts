@@ -29,13 +29,15 @@ export async function listProjects(kv: Deno.Kv): Promise<ProjectRecord[]> {
     ) {
         const parsed = ProjectRecordSchema.safeParse(entry.value);
         if (!parsed.success) {
-            console.error(parsed.error)
+            console.error(parsed.error);
             await kv.atomic().check(entry).delete(entry.key).commit();
             continue;
         }
         projects.push(parsed.data);
     }
-    return projects.toSorted((a, b) =>b.lastOpenedAt.localeCompare(a.lastOpenedAt));
+    return projects.toSorted((a, b) =>
+        b.lastOpenedAt.localeCompare(a.lastOpenedAt)
+    );
 }
 
 /** Return the most recently opened project, or null when none exists. */

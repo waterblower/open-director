@@ -321,7 +321,7 @@ export const appRouter = router({
     // expanded directories (with their children pre-loaded) and the saved
     // selection. Returns null when no project is open.
     loadProjectData: publicProcedure.query(async () => {
-        const rootPath = await getStoredProjectPath();
+        const rootPath = (await getLastOpenedProject(kv))?.path;
         if (!rootPath) return null;
 
         const savedState = await loadFileExplorerState(rootPath);
@@ -354,7 +354,7 @@ export const appRouter = router({
     openInDefaultApp: publicProcedure
         .input(z.string())
         .mutation(async (opts): Promise<{ ok: boolean }> => {
-            const projectRoot = await getStoredProjectPath();
+            const projectRoot = (await getLastOpenedProject(kv))?.path;
             if (!projectRoot) {
                 return { ok: false };
             }
@@ -390,7 +390,7 @@ export const appRouter = router({
         }))
         .mutation(async (opts): Promise<{ dest: string }> => {
             const { src, destDir, name } = opts.input;
-            const projectRoot = await getStoredProjectPath();
+            const projectRoot = (await getLastOpenedProject(kv))?.path;
             if (!projectRoot) throw new Error("Project not initialized");
             const srcAbs = await resolveInProject(projectRoot, src);
             const destDirAbs = await resolveInProject(projectRoot, destDir);
@@ -431,7 +431,7 @@ export const appRouter = router({
             if (!name || name.includes("/") || name.includes("\\")) {
                 throw new Error("Invalid name");
             }
-            const projectRoot = await getStoredProjectPath();
+            const projectRoot = (await getLastOpenedProject(kv))?.path;
             if (!projectRoot) throw new Error("Project not initialized");
             const destDirAbs = await resolveInProject(projectRoot, destDir);
             if (destDirAbs instanceof Error) throw destDirAbs;
@@ -459,7 +459,7 @@ export const appRouter = router({
         .mutation(async (opts): Promise<{ ok: boolean }> => {
             const { path } = opts.input;
             if (!path) throw new Error("Cannot delete the project root");
-            const projectRoot = await getStoredProjectPath();
+            const projectRoot = (await getLastOpenedProject(kv))?.path;
             if (!projectRoot) throw new Error("Project not initialized");
             const target = await resolveInProject(projectRoot, path);
             if (target instanceof Error) throw target;
@@ -481,7 +481,7 @@ export const appRouter = router({
             const dest = dir ? `${dir}/${name}` : name;
             if (dest === path) return { path };
 
-            const projectRoot = await getStoredProjectPath();
+            const projectRoot = (await getLastOpenedProject(kv))?.path;
             if (!projectRoot) throw new Error("Project not initialized");
             const srcAbs = await resolveInProject(projectRoot, path);
             const destAbs = await resolveInProject(projectRoot, dest);
@@ -510,7 +510,7 @@ export const appRouter = router({
             // whichever project is active — but callers always state which
             // project they mean, so a future per-project DB can be routed to
             // without changing this procedure's contract.
-            const activeRoot = await getStoredProjectPath();
+            const activeRoot = (await getLastOpenedProject(kv))?.path;
             if (activeRoot !== opts.input.project_root) {
                 throw new Error(
                     "project_root is not the active project",
@@ -539,7 +539,7 @@ export const appRouter = router({
             if (!db) {
                 throw new Error("Database not initialized");
             }
-            const activeRoot = await getStoredProjectPath();
+            const activeRoot = (await getLastOpenedProject(kv))?.path;
             if (activeRoot !== opts.input.project_root) {
                 throw new Error(
                     "project_root is not the active project",
@@ -600,7 +600,7 @@ export const appRouter = router({
             selected: z.string().nullable(),
         }))
         .mutation(async (opts) => {
-            const projectDir = await getStoredProjectPath();
+            const projectDir = (await getLastOpenedProject(kv))?.path;
             if (!projectDir) {
                 throw new Error("Project not initialized");
             }
@@ -711,7 +711,7 @@ export const appRouter = router({
                     ratio,
                     ...(durationMode === "seconds" ? { duration } : {}),
                 };
-                const projectRoot = await getStoredProjectPath();
+                const projectRoot = (await getLastOpenedProject(kv))?.path;
                 if (!projectRoot) {
                     throw new Error("Project not initialized");
                 }
@@ -882,7 +882,7 @@ export const appRouter = router({
 
         // The active project folder (absolute path).
         getProjectDir: publicProcedure.query(async () => {
-            const projectDir = await getStoredProjectPath();
+            const projectDir = (await getLastOpenedProject(kv))?.path;
             if (!projectDir) {
                 return null;
             }
@@ -902,7 +902,7 @@ export const appRouter = router({
                 if (!db) {
                     throw new Error("Database not initialized");
                 }
-                const activeRoot = await getStoredProjectPath();
+                const activeRoot = (await getLastOpenedProject(kv))?.path;
                 if (activeRoot !== opts.input.project_root) {
                     throw new Error(
                         "project_root is not the active project",
@@ -935,7 +935,7 @@ export const appRouter = router({
                 if (!db) {
                     throw new Error("Database not initialized");
                 }
-                const activeRoot = await getStoredProjectPath();
+                const activeRoot = (await getLastOpenedProject(kv))?.path;
                 if (activeRoot !== opts.input.project_root) {
                     throw new Error(
                         "project_root is not the active project",
@@ -985,12 +985,11 @@ import { delay } from "@std/async";
 import {
     getShowOpenDirectorDir,
     getStoredApiKey,
-    getStoredProjectPath,
     kv,
     setShowOpenDirectorDir,
     setStoredApiKey,
 } from "../kv.ts";
-import { registerProject } from "@/project_registry.ts";
+import { getLastOpenedProject, registerProject } from "../project_registry.ts";
 (async () => {
     let i = 0;
     for (;;) {

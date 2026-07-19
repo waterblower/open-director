@@ -10,26 +10,12 @@
  */
 import { homedir } from "node:os";
 import { join } from "@std/path";
-import {
-    getLastOpenedProject,
-    listProjects,
-    type ProjectRecord,
-    registerProject,
-} from "./project_registry.ts";
-
 const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
 export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
 const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
-
-/** The most recently opened project folder, or null if none exists. */
-export async function getStoredProjectPath(): Promise<string | null> {
-    return (await getLastOpenedProject(kv))?.path ?? null;
-}
-
-
 
 /** The configured Seedance API key, or null if one was never set. */
 export async function getStoredApiKey(): Promise<string | null> {

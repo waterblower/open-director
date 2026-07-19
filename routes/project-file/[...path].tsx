@@ -1,5 +1,6 @@
 import { define } from "../../utils.ts";
-import { getStoredProjectPath } from "../../kv.ts";
+import { kv } from "../../kv.ts";
+import { getLastOpenedProject } from "../../project_registry.ts";
 import { resolveInProject } from "../../project.ts";
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -52,7 +53,7 @@ function limitedStream(
 // Supports HTTP Range requests so <video> can play/seek.
 export const handler = define.handlers({
     async GET(ctx) {
-        const projectRoot = await getStoredProjectPath();
+        const projectRoot = (await getLastOpenedProject(kv))?.path;
         if (!projectRoot) {
             return new Response("No project open", { status: 404 });
         }

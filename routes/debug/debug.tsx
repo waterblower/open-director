@@ -1,29 +1,7 @@
 import { Head } from "fresh/runtime";
 import { define } from "../../utils.ts";
 import { seedance_client } from "../../seedance_client.ts";
-import { getStoredProjectPath } from "../../kv.ts";
-import { resolveInProject } from "../../project.ts";
-import { VIDEOS_DIR } from "../../trpc/router.ts";
 import type { Task, TaskStatus } from "../../seedance/seedance.ts";
-
-const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
-
-/**
- * Task ids that already have a downloaded video file in the generations folder
- * (filename stem == task id). Checks the filesystem only — not the DB.
- */
-async function listDownloadedIds(dir: string): Promise<Set<string>> {
-    const ids = new Set<string>();
-    try {
-        for await (const entry of Deno.readDir(dir)) {
-            if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
-            ids.add(entry.name.replace(VIDEO_EXT, ""));
-        }
-    } catch (err) {
-        if (!(err instanceof Deno.errors.NotFound)) throw err;
-    }
-    return ids;
-}
 
 /** Fetch every task from Seedance, following pagination. */
 async function fetchAllTasks(): Promise<Task[] | Error> {
@@ -61,40 +39,7 @@ function fmtTime(unixSec: number): string {
 }
 
 export default define.page(async function Debug() {
-    const projectRoot = await getStoredProjectPath();
-    const projectDir = projectRoot
-        ? await resolveInProject(projectRoot, VIDEOS_DIR)
-        : null;
-    if (projectDir instanceof Error) throw projectDir;
-    if (!projectDir) {
-        return (
-            <div style="font: 14px/1.6 ui-sans-serif, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #6b7280; gap: 8px;">
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="40"
-                    height="40"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="M3 7a2 2 0 0 1 2-2h3l2 2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                </svg>
-                <p style="margin: 0; font-size: 16px; font-weight: 600; color: #374151;">
-                    No project open
-                </p>
-                <p style="margin: 0; font-size: 13px;">
-                    Open a project to view Seedance debug info.
-                </p>
-            </div>
-        );
-    }
-    const [result, downloaded] = await Promise.all([
-        fetchAllTasks(),
-        listDownloadedIds(projectDir),
-    ]);
+    const result = await fetchAllTasks();
 
     return (
         <>
@@ -120,14 +65,12 @@ export default define.page(async function Debug() {
 
             {result instanceof Error
                 ? <p class="err">Failed to list tasks: {result.message}</p>
-                : <TaskGroups tasks={result} downloaded={downloaded} />}
+                : <TaskGroups tasks={result} />}
         </>
     );
 });
 
-function TaskGroups(
-    { tasks, downloaded }: { tasks: Task[]; downloaded: Set<string> },
-) {
+function TaskGroups({ tasks }: { tasks: Task[] }) {
     // Group by status.
     const groups = new Map<string, Task[]>();
     for (const t of tasks) {
@@ -174,7 +117,6 @@ function TaskGroups(
                                     <th>dur</th>
                                     <th>ratio</th>
                                     <th>res</th>
-                                    <th>downloaded</th>
                                     <th>video_url</th>
                                     <th>error</th>
                                 </tr>
@@ -188,11 +130,6 @@ function TaskGroups(
                                         <td>{t.duration ?? "—"}</td>
                                         <td>{t.ratio ?? "—"}</td>
                                         <td>{t.resolution ?? "—"}</td>
-                                        <td>
-                                            {downloaded.has(t.id)
-                                                ? "yes"
-                                                : <span class="muted">no</span>}
-                                        </td>
                                         <td class="url">
                                             {t.content?.video_url
                                                 ? (
