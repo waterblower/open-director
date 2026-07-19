@@ -1,7 +1,7 @@
 import { Head } from "fresh/runtime";
 import { basename } from "@std/path";
-import { define } from "../utils.ts";
-import { getStoredProjects } from "../kv.ts";
+import { define } from "../../utils.ts";
+import { getStoredProjects } from "../../kv.ts";
 
 function formatOpenedAt(value: string): string {
     const date = new Date(value);

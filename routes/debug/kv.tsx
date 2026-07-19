@@ -1,6 +1,6 @@
 import { Head } from "fresh/runtime";
-import { define } from "../utils.ts";
-import { deleteEntry, type KvEntry, listAllEntries } from "../kv.ts";
+import { define } from "../../utils.ts";
+import { deleteEntry, type KvEntry, listAllEntries } from "../../kv.ts";
 
 type EncodedKeyPart =
     | { type: "string"; value: string }
@@ -86,7 +86,7 @@ function decodeKey(value: FormDataEntryValue | null): Deno.KvKey | null {
 function fmtKey(key: Deno.KvKey): string {
     return key
         .map((part) => typeof part === "string" ? part : JSON.stringify(part))
-        .join(" / ");
+        .join(" , ");
 }
 
 /** Pretty-print any KV value for display. */

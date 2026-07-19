@@ -1,10 +1,10 @@
 import { Head } from "fresh/runtime";
-import { define } from "../utils.ts";
-import { seedance_client } from "../seedance_client.ts";
-import { getStoredProjectPath } from "../kv.ts";
-import { resolveInProject } from "../project.ts";
-import { VIDEOS_DIR } from "../trpc/router.ts";
-import type { Task, TaskStatus } from "../seedance/seedance.ts";
+import { define } from "../../utils.ts";
+import { seedance_client } from "../../seedance_client.ts";
+import { getStoredProjectPath } from "../../kv.ts";
+import { resolveInProject } from "../../project.ts";
+import { VIDEOS_DIR } from "../../trpc/router.ts";
+import type { Task, TaskStatus } from "../../seedance/seedance.ts";
 
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
