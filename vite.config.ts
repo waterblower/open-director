@@ -2,8 +2,25 @@ import { defineConfig } from "vite";
 import { fresh } from "@fresh/plugin-vite";
 import tailwindcss from "@tailwindcss/vite";
 
+function getGitHash(): string {
+    try {
+        const result = new Deno.Command("git", {
+            args: ["rev-parse", "HEAD"],
+            stdout: "piped",
+            stderr: "null",
+        }).outputSync();
+        const hash = new TextDecoder().decode(result.stdout).trim();
+        return result.success && hash ? hash : "unknown";
+    } catch {
+        return "unknown";
+    }
+}
+
 export default defineConfig({
     plugins: [fresh(), tailwindcss()],
+    define: {
+        "import.meta.env.VITE_GIT_HASH": JSON.stringify(getGitHash()),
+    },
     server: {
         // Bind to all interfaces so other devices on the LAN (e.g. a phone on
         // the same Wi‑Fi) can reach the dev server — needed for /filedrop.

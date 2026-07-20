@@ -185,6 +185,7 @@ const TEXTS = {
     cancel: { English: "Cancel", Chinese: "取消" },
     saving: { English: "Saving…", Chinese: "保存中…" },
     save: { English: "Save", Chinese: "保存" },
+    version: { English: "Version", Chinese: "版本" },
     show_open_directory: {
         English: "Show .open-director folder",
         Chinese: "显示 .open-director 文件夹",
@@ -336,6 +337,10 @@ const TEXTS = {
     generation_plan: {
         English: "Generation Plan",
         Chinese: "生成计划",
+    },
+    open_in_browser: {
+        English: "Open in Browser",
+        Chinese: "在浏览器中打开",
     },
 };
 

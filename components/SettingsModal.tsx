@@ -20,6 +20,7 @@ export function SettingsModal(props: {
     const masked = useSignal<string | null>(null);
     const saving = useSignal(false);
     const error = useSignal<string | null>(null);
+    const gitHash = import.meta.env.VITE_GIT_HASH ?? "unknown";
 
     // Close on Escape, like a native dialog.
     useEffect(() => {
@@ -164,24 +165,35 @@ export function SettingsModal(props: {
                         </span>
                     </label>
 
-                    <div class="flex justify-end gap-2 pt-1">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:cursor-pointer transition-colors"
+                    <div class="flex items-center justify-between gap-3 pt-1">
+                        <p
+                            class="text-[11px] text-gray-400"
+                            title={gitHash}
                         >
-                            {get_text("cancel", language.value)}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={save}
-                            disabled={saving.value}
-                            class="px-3 py-1.5 rounded-lg text-sm bg-indigo-500 text-white hover:bg-indigo-600 hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                            {saving.value
-                                ? get_text("saving", language.value)
-                                : get_text("save", language.value)}
-                        </button>
+                            {get_text("version", language.value)}{"  "}
+                            <span class="font-mono">
+                                {gitHash.slice(0, 8)}
+                            </span>
+                        </p>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                class="px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:cursor-pointer transition-colors"
+                            >
+                                {get_text("cancel", language.value)}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={save}
+                                disabled={saving.value}
+                                class="px-3 py-1.5 rounded-lg text-sm bg-indigo-500 text-white hover:bg-indigo-600 hover:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                {saving.value
+                                    ? get_text("saving", language.value)
+                                    : get_text("save", language.value)}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

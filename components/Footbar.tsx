@@ -61,6 +61,19 @@ export function Footbar(props: { onOpenSettings: () => void }) {
                     </span>
                 </a>
 
+                <a
+                    href="/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={get_text("open_in_browser", language.value)}
+                    class="group flex items-center gap-1.5 px-2 py-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors text-xs font-medium"
+                >
+                    <BrowserIcon />
+                    <span class="whitespace-nowrap">
+                        {get_text("open_in_browser", language.value)}
+                    </span>
+                </a>
+
                 <div class="flex-1" />
 
                 <button
@@ -221,6 +234,25 @@ function PlanIcon() {
         >
             <path d="M9 5h11M9 12h11M9 19h11" />
             <path d="m3.5 5 1 1 2-2M3.5 12l1 1 2-2M3.5 19l1 1 2-2" />
+        </svg>
+    );
+}
+
+function BrowserIcon() {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+        >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
         </svg>
     );
 }
