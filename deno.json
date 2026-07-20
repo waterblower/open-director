@@ -9,7 +9,7 @@
         "start": "deno serve -A _fresh/server.js",
         "update": "deno run -A -r jsr:@fresh/update .",
         "loc": "deno run -R scripts/loc.ts",
-        "desktop:dev": "deno desktop -A --hmr --preload ./desktop.ts ."
+        "desktop": "deno desktop -A --preload ./desktop.ts ."
     },
     "fmt": { "indentWidth": 4 },
     "lint": {
