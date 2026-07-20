@@ -221,7 +221,10 @@ export function GenerationCard(
                 : url
                 ? (
                     <video
-                        src={url}
+                        // Safari otherwise shows a blank background until the
+                        // video starts. A tiny media-fragment seek makes it
+                        // decode the first frame for the idle preview.
+                        src={`${url}#t=0.001`}
                         preload="metadata"
                         playsInline
                         controls
@@ -229,12 +232,6 @@ export function GenerationCard(
                         draggable={false}
                         // cover fills the thumbnail; contain fits the whole frame in fullscreen
                         class="w-full aspect-video object-contain [&:fullscreen]:object-contain"
-                        onClick={(e) => {
-                            const v = e
-                                .currentTarget as HTMLVideoElement;
-                            if (v.paused) v.play();
-                            else v.pause();
-                        }}
                     />
                 )
                 : (
