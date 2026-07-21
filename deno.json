@@ -9,9 +9,24 @@
         "start": "deno serve -A _fresh/server.js",
         "update": "deno run -A -r jsr:@fresh/update .",
         "loc": "deno run -R scripts/loc.ts",
-        "desktop": "deno desktop -A --preload ./desktop.ts ."
+        "desktop": "deno desktop -A --exclude-unused-npm --preload ./desktop.ts ."
     },
     "fmt": { "indentWidth": 4 },
+    "compile": {
+        "exclude": [
+            ".claude/",
+            ".git/",
+            ".vscode/",
+            "_dist/",
+            "node_modules/",
+            "scripts/",
+            "**/*_test.ts",
+            "**/.env*",
+            "**/.DS_Store",
+            "README.md",
+            "static/logo.svg"
+        ]
+    },
     "lint": {
         "rules": {
             "tags": ["fresh", "recommended"],
