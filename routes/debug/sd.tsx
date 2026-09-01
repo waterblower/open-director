@@ -1,4 +1,5 @@
 import { Head } from "fresh/runtime";
+import { z } from "zod";
 import { define } from "../../utils.ts";
 import { seedance_client } from "../../apigen/seedance/seedance_client.ts";
 import type {
@@ -35,7 +36,18 @@ async function fetchAllFiles(): Promise<ArkFile[] | Error> {
             after,
             order: "desc",
         });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            // Ark currently returns the JSON literal `null`, rather than an
+            // empty list object, when this account has no File API records.
+            if (
+                page === 1 && res instanceof z.ZodError &&
+                res.issues.length === 1 &&
+                res.issues[0].code === "invalid_type" &&
+                res.issues[0].path.length === 0 &&
+                res.issues[0].message.includes("received null")
+            ) return [];
+            return res;
+        }
         all.push(...res.data);
         if (!res.has_more) return all;
         if (res.data.length === 0 || !res.last_id) {
