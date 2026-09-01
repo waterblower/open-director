@@ -1,5 +1,5 @@
 import { type Signal, useSignal } from "@preact/signals";
-import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import { get_text, language, trpc } from "../trpc/client.ts";
 import {
@@ -29,7 +29,7 @@ export function GenerationCard(
         projectRoot: string;
         generation: GeneratedVideo;
         /** Set to this generation's request when its reuse button is clicked. */
-        reusePrompt: Signal<CreateTaskRequest | null>;
+        reusePrompt: Signal<GenerateInput | null>;
         /** Whether this card is shown in the archived tab — swaps the
          * archive button for a restore button. */
         archived: boolean;

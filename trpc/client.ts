@@ -177,6 +177,10 @@ const TEXTS = {
         English: "Configure your Seedance API key to generate videos.",
         Chinese: "配置 Seedance API Key 以生成视频。",
     },
+    configure_provider_api_keys: {
+        English: "Configure API keys for the video providers you use.",
+        Chinese: "配置你所使用的视频生成服务 API Key。",
+    },
     currently_saved: { English: "Currently saved:", Chinese: "当前已保存：" },
     enter_a_new_key_to_replace_it: {
         English: "Enter a new key to replace it",
@@ -295,6 +299,11 @@ const TEXTS = {
             "Cost is a rough estimate based on token usage; refer to your Volcano Engine bill for the actual amount.",
         Chinese: "费用为按 token 用量的粗略估算，实际以火山引擎账单为准。",
     },
+    zzdh_cost_disclaimer: {
+        English:
+            "Estimated from the documented per-second ZZDH H3 promotional rate; the provider bill is authoritative.",
+        Chinese: "按 ZZDH H3 限时优惠的文档秒价估算，实际以服务商账单为准。",
+    },
 
     // Composer
     image: { English: "Image", Chinese: "图片" },
@@ -307,6 +316,18 @@ const TEXTS = {
     image_video_audio: {
         English: "Image / Video / Audio",
         Chinese: "图片/视频/音频",
+    },
+    reference_images: {
+        English: "Reference images",
+        Chinese: "参考图片",
+    },
+    zzdh_text_to_video_only: {
+        English: "ZZDH H3 text-to-video uses a prompt without attachments.",
+        Chinese: "ZZDH H3 文生视频仅使用提示词，不支持附件。",
+    },
+    zzdh_multi_reference_images: {
+        English: "Add 1–9 reference images.",
+        Chinese: "添加 1–9 张参考图片。",
     },
     remove: { English: "Remove", Chinese: "移除" },
     no_assets_yet: {

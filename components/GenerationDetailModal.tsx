@@ -1,6 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
+import type { Model as ZzdhModel } from "../apigen/zzdh/zzdh_client.ts";
 import { estimateCost } from "../apigen/seedance/pricing.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import {
@@ -25,8 +26,15 @@ function formatDuration(seconds: number, lang: Language): string {
 }
 
 /** Concatenated text of the prompt's text content items. */
-function promptText(req: CreateTaskRequest | null | undefined): string {
+function isZzdhRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: ZzdhModel }> {
+    return request.model.startsWith("zzdh-");
+}
+
+function promptText(req: GenerateInput | null | undefined): string {
     if (!req) return "";
+    if (isZzdhRequest(req)) return req.prompt.trim();
     return req.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
@@ -150,13 +158,33 @@ export function GenerationDetailModal(props: {
 
     // created_at / updated_at are unix seconds; their gap is the time spent
     // queued + running on the server.
-    const elapsed = task?.created_at != null && task.updated_at != null
-        ? task.updated_at - task.created_at
+    const createdAt = typeof task?.created_at === "number"
+        ? task.created_at
+        : null;
+    const updatedAt = typeof task?.updated_at === "number"
+        ? task.updated_at
+        : null;
+    const elapsed = createdAt != null && updatedAt != null
+        ? updatedAt - createdAt
         : null;
 
-    const totalTokens = task?.usage?.total_tokens ?? null;
-    const completionTokens = task?.usage?.completion_tokens ?? null;
-    const cost = totalTokens != null && req
+    const usage = task?.usage && typeof task.usage === "object"
+        ? task.usage
+        : null;
+    const totalTokens = usage && "total_tokens" in usage &&
+            typeof usage.total_tokens === "number"
+        ? usage.total_tokens
+        : null;
+    const completionTokens = usage && "completion_tokens" in usage &&
+            typeof usage.completion_tokens === "number"
+        ? usage.completion_tokens
+        : null;
+    const cost = req && isZzdhRequest(req)
+        ? {
+            rmb: (req.duration ?? 5) *
+                (req.model.endsWith("-768p") ? 0.06 : 0.04),
+        }
+        : totalTokens != null && req
         ? estimateCost(totalTokens, req)
         : null;
 
@@ -165,18 +193,25 @@ export function GenerationDetailModal(props: {
     // Reference inputs attached to the request, with their (servable
     // /project-file or data:) URLs, in prompt order.
     type Reference = { kind: "image" | "video" | "audio"; url: string };
-    const references = (req?.content ?? []).flatMap((c): Reference[] => {
-        if (c.type === "image_url") {
-            return [{ kind: "image", url: c.image_url.url }];
-        }
-        if (c.type === "video_url") {
-            return [{ kind: "video", url: c.video_url.url }];
-        }
-        if (c.type === "audio_url") {
-            return [{ kind: "audio", url: c.audio_url.url }];
-        }
-        return [];
-    });
+    const references: Reference[] = req && isZzdhRequest(req)
+        ? "reference_images" in req
+            ? req.reference_images.map((image) => ({
+                kind: "image" as const,
+                url: image.url,
+            }))
+            : []
+        : (req?.content ?? []).flatMap((c): Reference[] => {
+            if (c.type === "image_url") {
+                return [{ kind: "image", url: c.image_url.url }];
+            }
+            if (c.type === "video_url") {
+                return [{ kind: "video", url: c.video_url.url }];
+            }
+            if (c.type === "audio_url") {
+                return [{ kind: "audio", url: c.audio_url.url }];
+            }
+            return [];
+        });
 
     return (
         <div
@@ -315,7 +350,7 @@ export function GenerationDetailModal(props: {
                                         value={cost != null
                                             ? `¥${cost.rmb.toFixed(2)}`
                                             : "—"}
-                                        hint={cost != null
+                                        hint={cost != null && "usd" in cost
                                             ? `≈ $${cost.usd.toFixed(2)}`
                                             : undefined}
                                     />
@@ -420,7 +455,8 @@ export function GenerationDetailModal(props: {
                                             )}
                                             value={req.model}
                                         />
-                                        {req.resolution && (
+                                        {!isZzdhRequest(req) &&
+                                            req.resolution && (
                                             <Stat
                                                 label={get_text(
                                                     "resolution",
@@ -429,13 +465,36 @@ export function GenerationDetailModal(props: {
                                                 value={req.resolution}
                                             />
                                         )}
-                                        {req.ratio && (
+                                        {!isZzdhRequest(req) && req.ratio && (
                                             <Stat
                                                 label={get_text(
                                                     "aspect_ratio",
                                                     language.value,
                                                 )}
                                                 value={req.ratio}
+                                            />
+                                        )}
+                                        {isZzdhRequest(req) && (
+                                            <Stat
+                                                label={get_text(
+                                                    "resolution",
+                                                    language.value,
+                                                )}
+                                                value={req.model.endsWith(
+                                                        "-768p",
+                                                    )
+                                                    ? "768p"
+                                                    : "480p"}
+                                            />
+                                        )}
+                                        {isZzdhRequest(req) &&
+                                            req.aspect_ratio && (
+                                            <Stat
+                                                label={get_text(
+                                                    "aspect_ratio",
+                                                    language.value,
+                                                )}
+                                                value={req.aspect_ratio}
                                             />
                                         )}
                                         {req.duration != null && (
@@ -452,7 +511,8 @@ export function GenerationDetailModal(props: {
                                                 }`}
                                             />
                                         )}
-                                        {req.generate_audio != null && (
+                                        {!isZzdhRequest(req) &&
+                                            req.generate_audio != null && (
                                             <Stat
                                                 label={get_text(
                                                     "audio",
@@ -483,7 +543,9 @@ export function GenerationDetailModal(props: {
 
                                 <p class="text-[11px] text-gray-500">
                                     {get_text(
-                                        "cost_disclaimer",
+                                        req && isZzdhRequest(req)
+                                            ? "zzdh_cost_disclaimer"
+                                            : "cost_disclaimer",
                                         language.value,
                                     )}
                                 </p>

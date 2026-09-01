@@ -1,7 +1,7 @@
 /**
  * Standalone client for the 字字动画 MiniMax H3 limited-offer API.
  *
- * This module intentionally implements only text-to-video generation for the
+ * This module implements the supported video-generation modes for the
  * `zzdh-minimax-h3-限时优惠` series.
  */
 import { z } from "zod";
@@ -11,6 +11,7 @@ const API_ORIGIN = "http://zizidonghua.com";
 export const ZZDH_MODELS = [
     "zzdh-minimax-h3-限时优惠-文生-480p",
     "zzdh-minimax-h3-限时优惠-文生-768p",
+    "zzdh-minimax-h3-限时优惠-多参考图生-768p",
 ] as const;
 
 export const ModelSchema = z.enum(ZZDH_MODELS);
@@ -27,15 +28,42 @@ const NonEmptyStringSchema = z.string().refine(
     { error: "String cannot be empty" },
 );
 
-export const CreateTaskRequestSchema = z.object({
-    model: ModelSchema,
+const CommonRequestFields = {
     prompt: NonEmptyStringSchema,
     /** Whole-number output duration from 1 through 15 seconds. Defaults to 5. */
     duration: z.number().int().min(1).max(15).optional(),
     /** Defaults to vertical. The API does not support 1:1 for this series. */
     aspect_ratio: AspectRatioSchema.optional(),
     seed: z.number().int().optional(),
+};
+
+export const TextToVideoModelSchema = z.enum([
+    "zzdh-minimax-h3-限时优惠-文生-480p",
+    "zzdh-minimax-h3-限时优惠-文生-768p",
+]);
+export const MultiReferenceImageModelSchema = z.literal(
+    "zzdh-minimax-h3-限时优惠-多参考图生-768p",
+);
+export const ReferenceImageSchema = z.object({
+    url: NonEmptyStringSchema,
+    role: z.literal("reference_image"),
 }).strict();
+
+export const TextToVideoRequestSchema = z.object({
+    model: TextToVideoModelSchema,
+    ...CommonRequestFields,
+}).strict();
+
+export const MultiReferenceImageRequestSchema = z.object({
+    model: MultiReferenceImageModelSchema,
+    ...CommonRequestFields,
+    reference_images: z.array(ReferenceImageSchema).min(1).max(9),
+}).strict();
+
+export const CreateTaskRequestSchema = z.discriminatedUnion("model", [
+    TextToVideoRequestSchema,
+    MultiReferenceImageRequestSchema,
+]);
 
 export const CreateTaskResponseSchema = z.union([
     z.object({
@@ -68,11 +96,18 @@ export type Model = z.infer<typeof ModelSchema>;
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
-export type TextToVideoModel = Model;
-export type TextToVideoRequest = z.infer<
-    typeof CreateTaskRequestSchema
+export type TextToVideoModel = z.infer<typeof TextToVideoModelSchema>;
+export type MultiReferenceImageModel = z.infer<
+    typeof MultiReferenceImageModelSchema
 >;
-export type CreateTaskRequest = TextToVideoRequest;
+export type ReferenceImage = z.infer<typeof ReferenceImageSchema>;
+export type TextToVideoRequest = z.infer<
+    typeof TextToVideoRequestSchema
+>;
+export type MultiReferenceImageRequest = z.infer<
+    typeof MultiReferenceImageRequestSchema
+>;
+export type CreateTaskRequest = z.infer<typeof CreateTaskRequestSchema>;
 export type CreateTaskResponse = z.infer<
     typeof CreateTaskResponseSchema
 >;

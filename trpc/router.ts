@@ -33,17 +33,18 @@ import {
     unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
+import { setSeedanceApiKey } from "../apigen/seedance/seedance_client.ts";
+import { externalizeAttachments, storeDataUrl } from "../uploads.ts";
+import type { ContentItem } from "../apigen/seedance/seedance.ts";
 import {
-    seedance_client,
-    setSeedanceApiKey,
-} from "../apigen/seedance/seedance_client.ts";
-import { externalizeAttachments } from "../uploads.ts";
-import type {
-    ContentItem,
-    CreateTaskRequest,
-    Task,
-    TaskStatus,
-} from "../apigen/seedance/seedance.ts";
+    generate,
+    type GenerateInput,
+    getTask,
+    isZzdhModel,
+    localTaskStatus,
+    taskIdFromCreateResponse,
+} from "../apigen/mod.ts";
+import { ModelSchema as ZzdhModelSchema } from "../apigen/zzdh/zzdh_client.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 import { pickAndLoadGenerationPlan } from "../generation_plan.ts";
@@ -73,7 +74,7 @@ export const global_event_bus = chan<
         gen: {
             id: string;
             status: string;
-            request_json: CreateTaskRequest;
+            request_json: GenerateInput;
             created_at: string;
         };
     }
@@ -152,7 +153,7 @@ async function listDir(absPath: string): Promise<DirEntry[]> {
 type VideoListItem = {
     id: string;
     created_at: string;
-    status: TaskStatus;
+    status: "queued" | "running" | "succeeded" | "failed";
     /** Whether a create request is stored (drives the reuse button);
      * the request itself is fetched on demand via getGenerationRequest. */
     has_request: boolean;
@@ -563,24 +564,31 @@ export const appRouter = router({
             return { ok: true };
         }),
 
-    // Whether a Seedance API key is configured, plus a masked preview for the
-    // settings modal. The full key is never sent to the client.
-    getApiKeyStatus: publicProcedure.query(async () => {
-        const key = await getStoredApiKey("seedance");
-        return {
-            hasKey: !!key,
-            masked: key ? maskKey(key) : null,
-        };
-    }),
+    // Whether a provider API key is configured, plus a masked preview. The full
+    // key is never sent to the client.
+    getApiKeyStatus: publicProcedure
+        .input(z.enum(["seedance", "zzdh"]).optional())
+        .query(async ({ input }) => {
+            const provider = input ?? "seedance";
+            const key = await getStoredApiKey(provider);
+            return {
+                hasKey: !!key,
+                masked: key ? maskKey(key) : null,
+            };
+        }),
 
-    // Save the Seedance API key (machine-level in Deno KV) and rebuild the
-    // shared client so subsequent generations use it immediately.
+    // Save a provider API key. Seedance keeps its shared client in sync;
+    // ZZDH clients read their key from KV when a request is dispatched.
     setApiKey: publicProcedure
-        .input(z.object({ apiKey: z.string().trim().min(1) }))
+        .input(z.object({
+            provider: z.enum(["seedance", "zzdh"]).optional(),
+            apiKey: z.string().trim().min(1),
+        }))
         .mutation(async (opts) => {
+            const provider = opts.input.provider ?? "seedance";
             const key = opts.input.apiKey;
-            await setStoredApiKey("seedance", key);
-            setSeedanceApiKey(key);
+            await setStoredApiKey(provider, key);
+            if (provider === "seedance") setSeedanceApiKey(key);
             return { hasKey: true, masked: maskKey(key) };
         }),
 
@@ -628,16 +636,19 @@ export const appRouter = router({
 
     // Open APIs are available for both agents and the GUI.
     open: {
-        // Create a Seedance generation task and log it — the single round trip the
+        // Create a provider generation task and log it — the single round trip the
         // composer makes. Attachments arrive as data URLs (the browser inlines its
         // blob: bytes); the API call + key live server-side. task_checker later
         // polls + downloads the result, keyed by the same task id.
         generate: publicProcedure
             .input(z.object({
-                model: z.enum([
-                    "doubao-seedance-2-0-260128",
-                    "doubao-seedance-2-0-fast-260128",
-                    "doubao-seedance-2-0-mini-260615",
+                model: z.union([
+                    z.enum([
+                        "doubao-seedance-2-0-260128",
+                        "doubao-seedance-2-0-fast-260128",
+                        "doubao-seedance-2-0-mini-260615",
+                    ]),
+                    ZzdhModelSchema,
                 ]),
                 prompt: z.string(),
                 attachments: z.array(z.object({
@@ -652,6 +663,8 @@ export const appRouter = router({
                     "3:4",
                     "21:9",
                     "adaptive",
+                    "horizontal",
+                    "vertical",
                 ]),
                 resolution: z.enum(["1080p", "720p", "480p"]),
                 durationMode: z.enum(["seconds", "smart"]),
@@ -673,55 +686,134 @@ export const appRouter = router({
                     model,
                 } = opts.input;
 
-                // Assemble the multimodal content: optional text, then each
-                // attachment as a typed reference. A client may send either an
-                // inline data URL or a filesystem path; resolveToDataUrl inlines
-                // the latter so the rest of the pipeline only deals with data URLs.
-                const content: ContentItem[] = [];
-                if (prompt) content.push({ type: "text", text: prompt });
-                for (const att of attachments) {
-                    const url = await resolveToDataUrl(att.dataUrlOrFilePath);
-                    if (att.kind === "image") {
-                        content.push({
-                            type: "image_url",
-                            image_url: { url },
-                            role: "reference_image",
-                        });
-                    } else if (att.kind === "video") {
-                        content.push({
-                            type: "video_url",
-                            video_url: { url },
-                            role: "reference_video",
-                        });
-                    } else {
-                        content.push({
-                            type: "audio_url",
-                            audio_url: { url },
-                            role: "reference_audio",
-                        });
-                    }
-                }
-
-                // The outbound request keeps attachments inline as data URLs —
-                // Seedance can't reach our local `/project-file` server. The stored
-                // request swaps each data URL for a content-addressed file reference
-                // so the DB row stays small (see uploads.ts).
-                const request: CreateTaskRequest = {
-                    model,
-                    content,
-                    generate_audio: audio,
-                    resolution,
-                    ratio,
-                    ...(durationMode === "seconds" ? { duration } : {}),
-                };
                 const projectRoot = (await getLastOpenedProject(kv))?.path;
                 if (!projectRoot) {
                     throw new Error("Project not initialized");
                 }
-                const storedRequest: CreateTaskRequest = {
-                    ...request,
-                    content: await externalizeAttachments(projectRoot, content),
-                };
+
+                let request: GenerateInput;
+                let storedRequest: GenerateInput;
+                if (isZzdhModel(model)) {
+                    if (!prompt.trim()) {
+                        throw new Error("ZZDH H3 requires a prompt");
+                    }
+                    const aspectRatio = ratio === "horizontal" ||
+                            ratio === "16:9" || ratio === "4:3" ||
+                            ratio === "21:9"
+                        ? "horizontal"
+                        : ratio === "vertical" || ratio === "9:16" ||
+                                ratio === "3:4"
+                        ? "vertical"
+                        : null;
+                    if (!aspectRatio) {
+                        throw new Error(
+                            "ZZDH H3 supports only horizontal or vertical output",
+                        );
+                    }
+                    if (
+                        model ===
+                            "zzdh-minimax-h3-限时优惠-多参考图生-768p"
+                    ) {
+                        if (
+                            attachments.length < 1 ||
+                            attachments.length > 9 ||
+                            attachments.some((att) => att.kind !== "image")
+                        ) {
+                            throw new Error(
+                                "ZZDH H3 multi-reference generation requires 1–9 images",
+                            );
+                        }
+                        const referenceImages = await Promise.all(
+                            attachments.map(async (att) => ({
+                                url: await resolveToDataUrl(
+                                    att.dataUrlOrFilePath,
+                                ),
+                                role: "reference_image" as const,
+                            })),
+                        );
+                        const storedReferenceImages = await Promise.all(
+                            referenceImages.map(async (image) => {
+                                const url = await storeDataUrl(
+                                    projectRoot,
+                                    image.url,
+                                );
+                                if (url instanceof Error) throw url;
+                                return { ...image, url };
+                            }),
+                        );
+                        request = {
+                            model,
+                            prompt: prompt.trim(),
+                            aspect_ratio: aspectRatio,
+                            reference_images: referenceImages,
+                            ...(durationMode === "seconds" ? { duration } : {}),
+                        };
+                        storedRequest = {
+                            ...request,
+                            reference_images: storedReferenceImages,
+                        };
+                    } else {
+                        if (attachments.length > 0) {
+                            throw new Error(
+                                "ZZDH H3 text-to-video does not accept attachments",
+                            );
+                        }
+                        request = {
+                            model,
+                            prompt: prompt.trim(),
+                            aspect_ratio: aspectRatio,
+                            ...(durationMode === "seconds" ? { duration } : {}),
+                        };
+                        storedRequest = request;
+                    }
+                } else {
+                    // Assemble Seedance multimodal content: optional text, then
+                    // each attachment as a typed reference.
+                    const content: ContentItem[] = [];
+                    if (prompt) content.push({ type: "text", text: prompt });
+                    for (const att of attachments) {
+                        const url = await resolveToDataUrl(
+                            att.dataUrlOrFilePath,
+                        );
+                        if (att.kind === "image") {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: "reference_image",
+                            });
+                        } else if (att.kind === "video") {
+                            content.push({
+                                type: "video_url",
+                                video_url: { url },
+                                role: "reference_video",
+                            });
+                        } else {
+                            content.push({
+                                type: "audio_url",
+                                audio_url: { url },
+                                role: "reference_audio",
+                            });
+                        }
+                    }
+                    request = {
+                        model,
+                        content,
+                        generate_audio: audio,
+                        resolution,
+                        ratio: ratio as Exclude<
+                            typeof ratio,
+                            "horizontal" | "vertical"
+                        >,
+                        ...(durationMode === "seconds" ? { duration } : {}),
+                    };
+                    storedRequest = {
+                        ...request,
+                        content: await externalizeAttachments(
+                            projectRoot,
+                            content,
+                        ),
+                    };
+                }
 
                 const generation = createGeneration(db, storedRequest);
                 if (generation instanceof Error) {
@@ -733,7 +825,7 @@ export const appRouter = router({
                     gen: generation,
                 });
 
-                const created = await seedance_client.generate(request);
+                const created = await generate(request);
                 if (created instanceof Error) {
                     console.error(created);
                     const err = updateGeneration(db, {
@@ -752,22 +844,25 @@ export const appRouter = router({
                     return gen;
                 }
 
+                const taskId = taskIdFromCreateResponse(created);
+                if (taskId instanceof Error) throw taskId;
                 console.log("task created", created);
                 const err = updateGeneration(db, {
                     id: generation.id,
-                    task_id: created.id,
+                    task_id: taskId,
                 });
                 if (err instanceof Error) {
                     throw err;
                 }
 
-                const task = await seedance_client.getTask(created.id);
+                const task = await getTask(request.model, taskId);
                 if (task instanceof Error) {
                     throw task;
                 }
                 const err2 = updateGeneration(db, {
                     id: generation.id,
                     task_json: task,
+                    status: localTaskStatus(task),
                 });
                 if (err2 instanceof Error) {
                     throw err2;
@@ -777,10 +872,10 @@ export const appRouter = router({
 
                 // Logging failure shouldn't fail the request — the task is created.
                 const recordErr = recordGeneration(db, {
-                    taskId: created.id,
+                    taskId,
                     requestJson: JSON.stringify(storedRequest),
                     createdAt: new Date().toISOString(),
-                    status: task.status,
+                    status: localTaskStatus(task),
                     task,
                 });
                 if (recordErr) {

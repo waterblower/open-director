@@ -12,12 +12,12 @@ import { join } from "@std/path";
 import { ulid } from "@std/ulid";
 import { z } from "zod";
 import {
-    CreateTaskRequest,
-    CreateTaskRequestSchema,
-    Task,
-    TaskSchema,
-    TaskStatus,
-} from "./apigen/seedance/seedance.ts";
+    type GenerateInput,
+    GenerateInputSchema,
+    type GenerationTask,
+    GenerationTaskSchema,
+    type LocalTaskStatus,
+} from "./apigen/mod.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
 
@@ -108,9 +108,9 @@ export const GenerationRowSchema = z.object({
     id: z.ulid(),
     created_at: z.iso.datetime(),
     status: z.enum(["queued", "running", "succeeded", "failed"]),
-    request_json: jsonColumn(CreateTaskRequestSchema),
+    request_json: jsonColumn(GenerateInputSchema),
     task_id: z.string().nullable().optional(),
-    task_json: jsonColumn(TaskSchema).nullable().optional(),
+    task_json: jsonColumn(GenerationTaskSchema).nullable().optional(),
     downloaded_at: z.iso.datetime().nullable().optional(),
     failed_reason: z.string().nullable().optional(),
 });
@@ -124,7 +124,7 @@ export type Generation = z.infer<typeof GenerationRowSchema>;
  */
 export function createGeneration(
     db: DatabaseSync,
-    request: CreateTaskRequest,
+    request: GenerateInput,
 ) {
     try {
         const id = ulid();
@@ -152,9 +152,9 @@ export function createGeneration(
 export const UpdateGenerationSchema = z.object({
     id: z.ulid(),
     status: z.enum(["running", "succeeded", "failed", "queued"]).optional(),
-    request_json: jsonColumn(CreateTaskRequestSchema).optional(),
+    request_json: jsonColumn(GenerateInputSchema).optional(),
     task_id: z.string().optional(),
-    task_json: jsonColumn(TaskSchema).optional(),
+    task_json: jsonColumn(GenerationTaskSchema).optional(),
     downloaded_at: z.iso.datetime().optional(),
     failed_reason: z.string().optional(),
 });
@@ -220,8 +220,8 @@ export function recordGeneration(db: DatabaseSync, row: {
     taskId: string;
     createdAt: string;
     requestJson: string;
-    status?: TaskStatus;
-    task: Task;
+    status?: LocalTaskStatus;
+    task: GenerationTask;
 }): void | Error {
     try {
         db.prepare(
@@ -284,12 +284,17 @@ export function markDownloaded(
  */
 export function listPendingGenerations(db: DatabaseSync) {
     const rows = db.prepare(
-        `SELECT id, task_id FROM Generations
+        `SELECT id, task_id, json_extract(request_json, '$.model') AS model
+         FROM Generations
          WHERE task_id IS NOT NULL
            AND downloaded_at IS NULL
            AND (status IS NULL OR status != 'failed')`,
     ).all();
-    return z.array(z.object({ id: z.string(), task_id: z.string() }))
+    return z.array(z.object({
+        id: z.string(),
+        task_id: z.string(),
+        model: z.string().nullable(),
+    }))
         .parse(rows);
 }
 
@@ -316,12 +321,17 @@ export function listQueuedWithoutTask(db: DatabaseSync) {
  */
 export function listDownloadedGenerations(db: DatabaseSync) {
     const rows = db.prepare(
-        `SELECT id, task_id FROM Generations
+        `SELECT id, task_id, json_extract(request_json, '$.model') AS model
+         FROM Generations
          WHERE task_id IS NOT NULL
            AND downloaded_at IS NOT NULL
            AND status = 'succeeded'`,
     ).all();
-    return z.array(z.object({ id: z.string(), task_id: z.string() }))
+    return z.array(z.object({
+        id: z.string(),
+        task_id: z.string(),
+        model: z.string().nullable(),
+    }))
         .parse(rows);
 }
 
@@ -390,14 +400,14 @@ export function getGenerationByTaskId(
 export function getGenerationRequest(
     db: DatabaseSync,
     idOrTaskId: string,
-): CreateTaskRequest | null | Error {
+): GenerateInput | null | Error {
     const row = db.prepare(
         "SELECT request_json FROM Generations WHERE id = ? OR task_id = ? LIMIT 1",
     ).get(idOrTaskId, idOrTaskId) as
         | { request_json: string | null }
         | undefined;
     if (!row?.request_json) return null;
-    const parsed = CreateTaskRequestSchema.safeParse(
+    const parsed = GenerateInputSchema.safeParse(
         JSON.parse(row.request_json),
     );
     if (parsed.error) {

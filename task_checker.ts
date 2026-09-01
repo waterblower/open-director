@@ -7,7 +7,6 @@
  * downloaded" when a file with a stem equal to its id exists.
  */
 import type { DatabaseSync } from "node:sqlite";
-import { seedance_client } from "./apigen/seedance_client.ts";
 import { delay } from "@std/async";
 import { join } from "@std/path";
 import { VIDEOS_DIR } from "./trpc/router.ts";
@@ -23,7 +22,13 @@ import {
     recordTaskStatus,
     updateGeneration,
 } from "./db.ts";
-import { SeedanceError, type Task } from "./apigen/seedance/seedance.ts";
+import {
+    type GenerationTask,
+    getTask,
+    getVideoContent,
+    localTaskStatus,
+    taskFailureReason,
+} from "./apigen/mod.ts";
 
 /**
  * How long a generation may sit "queued" with no Seedance task id before we
@@ -53,17 +58,17 @@ export async function check_and_download(): Promise<void | Error> {
         //    unparseable request_json) can't crash the whole polling loop.
         for (const gen of pending) {
             try {
-                const task = await seedance_client.getTask(gen.task_id);
+                const task = await getTask(gen.model ?? "", gen.task_id);
                 if (task instanceof Error) {
                     // 404 → Seedance has no such task (never persisted / purged):
                     // terminal, so mark failed and stop polling it. Other errors
                     // (network, 5xx) are transient — log and retry next pass.
-                    if (task instanceof SeedanceError && task.status === 404) {
+                    if (hasHttpStatus(task, 404)) {
                         const e = updateGeneration(db, {
                             id: gen.id,
                             status: "failed",
                             failed_reason:
-                                `Seedance 未找到任务 ${gen.task_id}（任务不存在）`,
+                                `生成服务未找到任务 ${gen.task_id}（任务不存在）`,
                         });
                         if (e instanceof Error) console.error(e);
                     } else {
@@ -74,14 +79,13 @@ export async function check_and_download(): Promise<void | Error> {
 
                 // Record terminal failures (with the reason) so they drop out
                 // of `pending` and we stop polling them.
-                if (task.status === "failed") {
-                    const reason = task.error
-                        ? `${task.error.code}: ${task.error.message}`
-                        : undefined;
+                const status = localTaskStatus(task);
+                if (status === "failed") {
+                    const reason = taskFailureReason(task);
                     console.log(task, "failed", reason ?? "");
                     recordTaskStatus(db, {
-                        taskId: task.id,
-                        status: task.status,
+                        taskId: gen.task_id,
+                        status,
                         taskJson: JSON.stringify(task),
                         failedReason: reason,
                     });
@@ -89,9 +93,16 @@ export async function check_and_download(): Promise<void | Error> {
                 }
 
                 // Not ready yet (queued/running/…) — try again next pass.
-                if (task.status !== "succeeded") continue;
+                if (status !== "succeeded") continue;
 
-                await downloadAndRecord(db, project_path, gen.id, task);
+                await downloadAndRecord(
+                    db,
+                    project_path,
+                    gen.id,
+                    gen.task_id,
+                    gen.model ?? "",
+                    task,
+                );
             } catch (err) {
                 console.error(`polling generation ${gen.task_id} failed:`, err);
             }
@@ -112,7 +123,7 @@ export async function check_and_download(): Promise<void | Error> {
                     console.log(
                         `missing on disk, re-downloading ${gen.task_id}.mp4`,
                     );
-                    const task = await seedance_client.getTask(gen.task_id);
+                    const task = await getTask(gen.model ?? "", gen.task_id);
                     if (task instanceof Error) {
                         console.error(
                             `re-fetch task ${gen.task_id} failed:`,
@@ -120,13 +131,21 @@ export async function check_and_download(): Promise<void | Error> {
                         );
                         continue;
                     }
-                    if (task.status !== "succeeded") {
+                    const status = localTaskStatus(task);
+                    if (status !== "succeeded") {
                         console.error(
-                            `cannot re-download ${gen.task_id}: status ${task.status}`,
+                            `cannot re-download ${gen.task_id}: status ${status}`,
                         );
                         continue;
                     }
-                    await downloadAndRecord(db, project_path, gen.id, task);
+                    await downloadAndRecord(
+                        db,
+                        project_path,
+                        gen.id,
+                        gen.task_id,
+                        gen.model ?? "",
+                        task,
+                    );
                     continue;
                 }
 
@@ -157,7 +176,7 @@ export async function check_and_download(): Promise<void | Error> {
                     id: gen.id,
                     status: "failed",
                     failed_reason:
-                        "创建任务失败：未提交到 Seedance（无 task id）",
+                        "创建任务失败：未提交到生成服务（无 task id）",
                 });
                 if (err instanceof Error) {
                     console.error(`fail stuck generation ${gen.id}:`, err);
@@ -184,28 +203,27 @@ async function downloadAndRecord(
     db: DatabaseSync,
     projectPath: string,
     genId: string,
-    task: Task,
+    taskId: string,
+    model: string,
+    task: GenerationTask,
 ): Promise<void> {
-    const url = task.content?.video_url;
-    if (!url) {
-        console.error(
-            `task ${task.id} succeeded but has no video url; skipping`,
-        );
+    const response = await getVideoContent(model, taskId, task);
+    if (response instanceof Error) {
+        console.error(`download ${taskId} failed:`, response);
         return;
     }
-
-    const dest = join(projectPath, VIDEOS_DIR, `${task.id}.mp4`);
-    const err = await downloadVideo(url, dest);
+    const dest = join(projectPath, VIDEOS_DIR, `${taskId}.mp4`);
+    const err = await writeVideoResponse(response, dest);
     if (err instanceof Error) {
-        console.error(`download ${task.id} failed:`, err);
+        console.error(`download ${taskId} failed:`, err);
         return;
     }
-    console.log("downloaded", `${task.id}.mp4`);
+    console.log("downloaded", `${taskId}.mp4`);
     await hashAndRecord(db, genId, dest);
 
     markDownloaded(db, {
-        taskId: task.id,
-        status: task.status,
+        taskId,
+        status: localTaskStatus(task),
         taskJson: JSON.stringify(task),
         downloadedAt: new Date().toISOString(),
     });
@@ -255,11 +273,10 @@ async function fileExists(path: string): Promise<boolean> {
     }
 }
 
-/** Stream `url` to `dest`, overwriting any partial file. */
-async function downloadVideo(url: string, dest: string) {
-    const res = await fetch(url);
-    if (!res.ok || !res.body) {
-        return new Error(`${await res.text()}`);
+/** Stream a successful video response to `dest`, overwriting partial files. */
+async function writeVideoResponse(response: Response, dest: string) {
+    if (!response.body) {
+        return new Error("Video response had no body");
     }
     const file = await Deno.open(dest, {
         write: true,
@@ -267,8 +284,12 @@ async function downloadVideo(url: string, dest: string) {
         truncate: true,
     });
     try {
-        await res.body.pipeTo(file.writable);
+        await response.body.pipeTo(file.writable);
     } catch (err) {
         return err as Error;
     }
+}
+
+function hasHttpStatus(error: Error, status: number): boolean {
+    return "status" in error && error.status === status;
 }

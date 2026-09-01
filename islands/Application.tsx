@@ -1,7 +1,7 @@
 import { Signal, signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
 import {
     loadConfig,
     loadProjectData,
@@ -36,7 +36,7 @@ export default function Application() {
     const generated_videos = useSignal<Map<string, GeneratedVideo>>(new Map());
     // A past generation's request (prompt + settings) the grid asks the
     // composer to reuse. The composer consumes (and clears) it.
-    const reusePrompt = useSignal<CreateTaskRequest | null>(null);
+    const reusePrompt = useSignal<GenerateInput | null>(null);
     // Composer reports its measured height here to pad the results grid.
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
@@ -102,12 +102,17 @@ export default function Application() {
         };
     }, []);
 
-    // Prompt for the Seedance API key on mount when none is configured yet.
+    // Prompt for provider credentials when no generation service is configured.
     useEffect(() => {
         (async () => {
             try {
-                const status = await trpc.getApiKeyStatus.query();
-                if (!status.hasKey) settingsOpen.value = true;
+                const [seedance, zzdh] = await Promise.all([
+                    trpc.getApiKeyStatus.query("seedance"),
+                    trpc.getApiKeyStatus.query("zzdh"),
+                ]);
+                if (!seedance.hasKey && !zzdh.hasKey) {
+                    settingsOpen.value = true;
+                }
             } catch (err) {
                 console.error(err);
             }

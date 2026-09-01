@@ -10,9 +10,13 @@ import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
     ContentItem,
-    CreateTaskRequest,
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
+import {
+    type Model as ZzdhModel,
+    ZZDH_MODELS,
+} from "../apigen/zzdh/zzdh_client.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
@@ -53,6 +57,27 @@ const SEEDANCE_MODELS = [
     label: string;
     shortLabel: string;
 }[];
+
+const ZZDH_MODEL_OPTIONS = [
+    {
+        value: "zzdh-minimax-h3-限时优惠-文生-480p",
+        label: "ZZDH MiniMax H3 480p",
+        shortLabel: "H3 480p",
+    },
+    {
+        value: "zzdh-minimax-h3-限时优惠-文生-768p",
+        label: "ZZDH MiniMax H3 768p",
+        shortLabel: "H3 768p",
+    },
+    {
+        value: "zzdh-minimax-h3-限时优惠-多参考图生-768p",
+        label: "ZZDH MiniMax H3 Multi-Reference 768p",
+        shortLabel: "H3 Ref 768p",
+    },
+] as const;
+
+const GENERATION_MODELS = [...SEEDANCE_MODELS, ...ZZDH_MODEL_OPTIONS];
+type GenerationModel = SeedanceModel | ZzdhModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -100,7 +125,7 @@ const COMPOSER_STATE_KEY = "composer.state.v1";
 /** Persisted composer fields (attachments are intentionally excluded). */
 interface ComposerState {
     prompt: string;
-    model: SeedanceModel;
+    model: GenerationModel;
     mode: Mode;
     ratio: AspectRatio;
     resolution: Resolution;
@@ -135,9 +160,28 @@ function isSeedanceModel(value: unknown): value is SeedanceModel {
     return SEEDANCE_MODELS.some((model) => model.value === value);
 }
 
-function getModelOption(value: SeedanceModel) {
-    return SEEDANCE_MODELS.find((model) => model.value === value) ??
-        SEEDANCE_MODELS[0];
+function isZzdhModel(value: unknown): value is ZzdhModel {
+    return typeof value === "string" &&
+        (ZZDH_MODELS as readonly string[]).includes(value);
+}
+
+function isZzdhMultiReferenceModel(value: unknown): boolean {
+    return value === "zzdh-minimax-h3-限时优惠-多参考图生-768p";
+}
+
+function isGenerationModel(value: unknown): value is GenerationModel {
+    return isSeedanceModel(value) || isZzdhModel(value);
+}
+
+function isZzdhRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: ZzdhModel }> {
+    return isZzdhModel(request.model);
+}
+
+function getModelOption(value: GenerationModel) {
+    return GENERATION_MODELS.find((model) => model.value === value) ??
+        GENERATION_MODELS[0];
 }
 
 // The API can't fetch blob: object URLs, so inline the bytes as a data URL
@@ -302,14 +346,14 @@ export function Composer(props: {
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
     /** A past generation's request to load in; consumed (cleared) when applied. */
-    reusePrompt: Signal<CreateTaskRequest | null>;
+    reusePrompt: Signal<GenerateInput | null>;
     generated_videos: Signal<Map<string, GeneratedVideo>>;
 }) {
     const { genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
-    const model = useSignal<SeedanceModel>("doubao-seedance-2-0-260128");
+    const model = useSignal<GenerationModel>("doubao-seedance-2-0-260128");
     const mode = useSignal<Mode>("reference");
     const ratio = useSignal<AspectRatio>("21:9");
     const resolution = useSignal<Resolution>("480p");
@@ -356,7 +400,7 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            if (isSeedanceModel(saved.model)) model.value = saved.model;
+            if (isGenerationModel(saved.model)) model.value = saved.model;
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
             if (saved.resolution) resolution.value = saved.resolution;
@@ -386,7 +430,35 @@ export function Composer(props: {
     // Replace the composer's content (prompt text + reference media) and
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
-    const applyReuse = async (req: CreateTaskRequest) => {
+    const applyReuse = async (req: GenerateInput) => {
+        if (isZzdhRequest(req)) {
+            prompt.value = req.prompt;
+            model.value = req.model;
+            ratio.value = req.aspect_ratio === "horizontal" ? "16:9" : "9:16";
+            resolution.value = req.model.endsWith("-768p") ? "720p" : "480p";
+            durationMode.value = req.duration === undefined
+                ? "smart"
+                : "seconds";
+            if (req.duration !== undefined) duration.value = req.duration;
+            attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
+            attachments.value = "reference_images" in req
+                ? await Promise.all(req.reference_images.map(async (image) => ({
+                    id: nextId.current++,
+                    kind: "image" as const,
+                    name: kindLabel("image", language.value),
+                    url: URL.createObjectURL(
+                        await (await fetch(image.url)).blob(),
+                    ),
+                })))
+                : [];
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = req.prompt;
+                autoGrow(ta);
+            }
+            return;
+        }
+
         const content = req.content;
         const text = content
             .filter((c): c is Extract<ContentItem, { type: "text" }> =>
@@ -474,14 +546,32 @@ export function Composer(props: {
 
     // Resolutions allowed for the current model. Keep the selection valid when
     // the model changes (e.g. switching to 2.0 Fast drops 1080p → 720p).
-    const resolutions = useComputed(() => MODEL_RESOLUTIONS[model.value]);
+    const resolutions = useComputed(() =>
+        isSeedanceModel(model.value) ? MODEL_RESOLUTIONS[model.value] : []
+    );
     useSignalEffect(() => {
+        if (isZzdhModel(model.value)) {
+            if (!["16:9", "9:16"].includes(ratio.value)) {
+                ratio.value = "9:16";
+            }
+            duration.value = Math.max(1, Math.min(15, duration.value));
+            return;
+        }
         const clamped = clampResolution(model.value, resolution.value);
         if (clamped !== resolution.value) resolution.value = clamped;
     });
 
     const canSubmit = useComputed(() =>
-        prompt.value.trim().length > 0 || attachments.value.length > 0
+        isZzdhMultiReferenceModel(model.value)
+            ? prompt.value.trim().length > 0 &&
+                attachments.value.length >= 1 &&
+                attachments.value.length <= 9 &&
+                attachments.value.every((attachment) =>
+                    attachment.kind === "image"
+                )
+            : isZzdhModel(model.value)
+            ? prompt.value.trim().length > 0 && attachments.value.length === 0
+            : prompt.value.trim().length > 0 || attachments.value.length > 0
     );
 
     const togglePopover = (which: Exclude<Popover, null>) => {
@@ -489,8 +579,16 @@ export function Composer(props: {
     };
 
     const addFiles = (files: FileList | File[] | null) => {
+        if (
+            isZzdhModel(model.value) &&
+            !isZzdhMultiReferenceModel(model.value)
+        ) return;
         if (!files) return;
-        const added = Array.from(files).map((file) => ({
+        const accepted = isZzdhMultiReferenceModel(model.value)
+            ? Array.from(files).filter((file) => file.type.startsWith("image/"))
+                .slice(0, Math.max(0, 9 - attachments.value.length))
+            : Array.from(files);
+        const added = accepted.map((file) => ({
             id: nextId.current++,
             kind: kindOf(file),
             name: file.name,
@@ -504,9 +602,21 @@ export function Composer(props: {
     // object URL so it behaves like a file attachment (revocable, and the bytes
     // are held client-side for sending on to remote servers).
     const addProjectImage = async (path: string) => {
+        if (
+            isZzdhModel(model.value) &&
+            !isZzdhMultiReferenceModel(model.value)
+        ) return;
+        if (
+            isZzdhMultiReferenceModel(model.value) &&
+            attachments.value.length >= 9
+        ) return;
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
         const blob = await (await fetch(url)).blob();
+        if (
+            isZzdhMultiReferenceModel(model.value) &&
+            !blob.type.startsWith("image/")
+        ) return;
         attachments.value = [...attachments.value, {
             id: nextId.current++,
             kind: "image",
@@ -517,6 +627,10 @@ export function Composer(props: {
 
     // Accept pasted media (e.g. an image copied from the file explorer).
     const onPaste = (e: ClipboardEvent) => {
+        if (
+            isZzdhModel(model.value) &&
+            !isZzdhMultiReferenceModel(model.value)
+        ) return;
         const files = e.clipboardData?.files;
         if (!files || files.length === 0) return; // let text paste through
         const media = Array.from(files).filter((f) =>
@@ -530,6 +644,10 @@ export function Composer(props: {
     // Accept media dragged from the OS (e.g. an image from Finder) or an image
     // dragged from the project file explorer.
     const onDragOver = (e: DragEvent) => {
+        if (
+            isZzdhModel(model.value) &&
+            !isZzdhMultiReferenceModel(model.value)
+        ) return;
         const types = e.dataTransfer?.types;
         if (!types) return;
         if (!types.includes("Files") && !types.includes(PROJECT_FILE_MIME)) {
@@ -674,27 +792,64 @@ export function Composer(props: {
                 >
                     {/* Attachments */}
                     <div class="flex flex-wrap gap-3 mb-4">
-                        <button
-                            type="button"
-                            onClick={() => fileInput.current?.click()}
-                            class="w-[72px] h-[72px] rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex flex-col items-center justify-center gap-1 text-gray-400 transition-colors"
-                        >
-                            <span class="text-lg leading-none">+</span>
-                            <span class="text-[10px]">
-                                {get_text("image_video_audio", language.value)}
-                            </span>
-                        </button>
-                        <input
-                            ref={fileInput}
-                            type="file"
-                            multiple
-                            accept="image/*,video/*,audio/*"
-                            class="hidden"
-                            onChange={(e) => {
-                                addFiles(e.currentTarget.files);
-                                e.currentTarget.value = "";
-                            }}
-                        />
+                        {(!isZzdhModel(model.value) ||
+                            isZzdhMultiReferenceModel(model.value)) && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => fileInput.current?.click()}
+                                    class="w-[72px] h-[72px] rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex flex-col items-center justify-center gap-1 text-gray-400 transition-colors"
+                                >
+                                    <span class="text-lg leading-none">+</span>
+                                    <span class="text-[10px]">
+                                        {get_text(
+                                            isZzdhMultiReferenceModel(
+                                                    model.value,
+                                                )
+                                                ? "reference_images"
+                                                : "image_video_audio",
+                                            language.value,
+                                        )}
+                                    </span>
+                                </button>
+                                <input
+                                    ref={fileInput}
+                                    type="file"
+                                    multiple
+                                    accept={isZzdhMultiReferenceModel(
+                                            model.value,
+                                        )
+                                        ? "image/*"
+                                        : "image/*,video/*,audio/*"}
+                                    class="hidden"
+                                    onChange={(e) => {
+                                        addFiles(e.currentTarget.files);
+                                        e.currentTarget.value = "";
+                                    }}
+                                />
+                            </>
+                        )}
+
+                        {isZzdhModel(model.value) &&
+                            !isZzdhMultiReferenceModel(model.value) &&
+                            attachments.value.length === 0 && (
+                            <div class="h-[72px] flex items-center text-xs text-gray-400">
+                                {get_text(
+                                    "zzdh_text_to_video_only",
+                                    language.value,
+                                )}
+                            </div>
+                        )}
+
+                        {isZzdhMultiReferenceModel(model.value) &&
+                            attachments.value.length === 0 && (
+                            <div class="h-[72px] flex items-center text-xs text-gray-400">
+                                {get_text(
+                                    "zzdh_multi_reference_images",
+                                    language.value,
+                                )}
+                            </div>
+                        )}
 
                         {attachments.value.map((att) => {
                             return (
@@ -861,7 +1016,7 @@ export function Composer(props: {
                                             language.value,
                                         )}
                                     </div>
-                                    {SEEDANCE_MODELS.map((item) => (
+                                    {GENERATION_MODELS.map((item) => (
                                         <button
                                             key={item.value}
                                             type="button"
@@ -896,76 +1051,80 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        <div class="relative">
-                            <button
-                                type="button"
-                                onClick={() => togglePopover("mode")}
-                                class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                                <VideoIcon class="size-4" />
-                                {mode.value === "reference"
-                                    ? get_text("reference", language.value)
-                                    : get_text(
-                                        "first_last_frame",
-                                        language.value,
-                                    )}
-                                <ChevronIcon up={popover.value === "mode"} />
-                            </button>
-
-                            {popover.value === "mode" && (
-                                <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
-                                    <div class="px-3 py-2 text-sm text-gray-400">
-                                        {get_text(
-                                            "select_mode",
+                        {!isZzdhModel(model.value) && (
+                            <div class="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => togglePopover("mode")}
+                                    class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                    <VideoIcon class="size-4" />
+                                    {mode.value === "reference"
+                                        ? get_text("reference", language.value)
+                                        : get_text(
+                                            "first_last_frame",
                                             language.value,
                                         )}
-                                    </div>
-                                    {(
-                                        [
-                                            {
-                                                value: "reference",
-                                                textId: "reference",
-                                                icon: (
-                                                    <VideoIcon class="size-4" />
-                                                ),
-                                            },
-                                            {
-                                                value: "frames",
-                                                textId: "first_last_frame",
-                                                icon: (
-                                                    <FramesIcon class="size-4" />
-                                                ),
-                                            },
-                                        ] as const
-                                    ).map((item) => (
-                                        <button
-                                            key={item.value}
-                                            type="button"
-                                            onClick={() => {
-                                                mode.value = item.value;
-                                                popover.value = null;
-                                            }}
-                                            class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
-                                                mode.value === item.value
-                                                    ? "bg-indigo-50 hover:bg-indigo-50"
-                                                    : ""
-                                            }`}
-                                        >
-                                            {item.icon}
+                                    <ChevronIcon
+                                        up={popover.value === "mode"}
+                                    />
+                                </button>
+
+                                {popover.value === "mode" && (
+                                    <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
+                                        <div class="px-3 py-2 text-sm text-gray-400">
                                             {get_text(
-                                                item.textId,
+                                                "select_mode",
                                                 language.value,
                                             )}
-                                            {mode.value === item.value && (
-                                                <span class="ml-auto">
-                                                    <CheckIcon />
-                                                </span>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                        </div>
+                                        {(
+                                            [
+                                                {
+                                                    value: "reference",
+                                                    textId: "reference",
+                                                    icon: (
+                                                        <VideoIcon class="size-4" />
+                                                    ),
+                                                },
+                                                {
+                                                    value: "frames",
+                                                    textId: "first_last_frame",
+                                                    icon: (
+                                                        <FramesIcon class="size-4" />
+                                                    ),
+                                                },
+                                            ] as const
+                                        ).map((item) => (
+                                            <button
+                                                key={item.value}
+                                                type="button"
+                                                onClick={() => {
+                                                    mode.value = item.value;
+                                                    popover.value = null;
+                                                }}
+                                                class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
+                                                    mode.value === item.value
+                                                        ? "bg-indigo-50 hover:bg-indigo-50"
+                                                        : ""
+                                                }`}
+                                            >
+                                                {item.icon}
+                                                {get_text(
+                                                    item.textId,
+                                                    language.value,
+                                                )}
+                                                {mode.value === item.value && (
+                                                    <span class="ml-auto">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Output settings */}
                         <div class="relative">
@@ -977,7 +1136,13 @@ export function Composer(props: {
                                 <span class="px-2.5 flex items-center gap-1.5">
                                     {ratio.value}
                                 </span>
-                                <span class="px-2.5">{resolution.value}</span>
+                                <span class="px-2.5">
+                                    {isZzdhModel(model.value)
+                                        ? model.value.endsWith("-768p")
+                                            ? "768p"
+                                            : "480p"
+                                        : resolution.value}
+                                </span>
                                 <span class="px-2.5">
                                     {durationLabel.value}
                                 </span>
@@ -992,7 +1157,11 @@ export function Composer(props: {
                                         )}
                                     </div>
                                     <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
-                                        {RATIOS.map((r) => (
+                                        {RATIOS.filter((r) =>
+                                            !isZzdhModel(model.value) ||
+                                            r.value === "16:9" ||
+                                            r.value === "9:16"
+                                        ).map((r) => (
                                             <button
                                                 key={r.value}
                                                 type="button"
@@ -1020,32 +1189,43 @@ export function Composer(props: {
                                         ))}
                                     </div>
 
-                                    <div class="text-sm text-gray-500 mb-2">
-                                        {get_text("resolution", language.value)}
-                                    </div>
-                                    <div
-                                        class="grid bg-gray-100 rounded-lg p-1 mb-5"
-                                        style={{
-                                            gridTemplateColumns:
-                                                `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
-                                        }}
-                                    >
-                                        {resolutions.value.map((res) => (
-                                            <button
-                                                key={res}
-                                                type="button"
-                                                onClick={() =>
-                                                    resolution.value = res}
-                                                class={`h-9 rounded-md text-sm ${
-                                                    resolution.value === res
-                                                        ? "bg-white shadow text-gray-900 font-medium"
-                                                        : "text-gray-500 hover:text-gray-700"
-                                                }`}
+                                    {!isZzdhModel(model.value) && (
+                                        <>
+                                            <div class="text-sm text-gray-500 mb-2">
+                                                {get_text(
+                                                    "resolution",
+                                                    language.value,
+                                                )}
+                                            </div>
+                                            <div
+                                                class="grid bg-gray-100 rounded-lg p-1 mb-5"
+                                                style={{
+                                                    gridTemplateColumns:
+                                                        `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
+                                                }}
                                             >
-                                                {res}
-                                            </button>
-                                        ))}
-                                    </div>
+                                                {resolutions.value.map((
+                                                    res,
+                                                ) => (
+                                                    <button
+                                                        key={res}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            resolution.value =
+                                                                res}
+                                                        class={`h-9 rounded-md text-sm ${
+                                                            resolution.value ===
+                                                                    res
+                                                                ? "bg-white shadow text-gray-900 font-medium"
+                                                                : "text-gray-500 hover:text-gray-700"
+                                                        }`}
+                                                    >
+                                                        {res}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
 
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
@@ -1087,7 +1267,9 @@ export function Composer(props: {
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
-                                                min={4}
+                                                min={isZzdhModel(model.value)
+                                                    ? 1
+                                                    : 4}
                                                 max={15}
                                                 step={1}
                                                 value={duration.value}
@@ -1113,17 +1295,19 @@ export function Composer(props: {
                         </div>
 
                         {/* Audio toggle */}
-                        <button
-                            type="button"
-                            onClick={() => audio.value = !audio.value}
-                            class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
-                                audio.value
-                                    ? "border-indigo-300 bg-indigo-50 text-indigo-600"
-                                    : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                            }`}
-                        >
-                            <SpeakerIcon />
-                        </button>
+                        {!isZzdhModel(model.value) && (
+                            <button
+                                type="button"
+                                onClick={() => audio.value = !audio.value}
+                                class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
+                                    audio.value
+                                        ? "border-indigo-300 bg-indigo-50 text-indigo-600"
+                                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                                }`}
+                            >
+                                <SpeakerIcon />
+                            </button>
+                        )}
 
                         <div class="flex-1" />
 
