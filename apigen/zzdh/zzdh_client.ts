@@ -13,9 +13,9 @@ export const ZZDH_MODELS = [
     "zzdh-minimax-h3-限时优惠-文生-768p",
 ] as const;
 
-export const ZzdhModelSchema = z.enum(ZZDH_MODELS);
-export const ZzdhAspectRatioSchema = z.enum(["horizontal", "vertical"]);
-export const ZzdhTaskStatusSchema = z.enum([
+export const ModelSchema = z.enum(ZZDH_MODELS);
+export const AspectRatioSchema = z.enum(["horizontal", "vertical"]);
+export const TaskStatusSchema = z.enum([
     "queued",
     "in_progress",
     "completed",
@@ -27,17 +27,17 @@ const NonEmptyStringSchema = z.string().refine(
     { error: "String cannot be empty" },
 );
 
-export const CreateZzdhTaskRequestSchema = z.object({
-    model: ZzdhModelSchema,
+export const CreateTaskRequestSchema = z.object({
+    model: ModelSchema,
     prompt: NonEmptyStringSchema,
     /** Whole-number output duration from 1 through 15 seconds. Defaults to 5. */
     duration: z.number().int().min(1).max(15).optional(),
     /** Defaults to vertical. The API does not support 1:1 for this series. */
-    aspect_ratio: ZzdhAspectRatioSchema.optional(),
+    aspect_ratio: AspectRatioSchema.optional(),
     seed: z.number().int().optional(),
 }).strict();
 
-export const CreateZzdhTaskResponseSchema = z.union([
+export const CreateTaskResponseSchema = z.union([
     z.object({
         id: NonEmptyStringSchema,
         task_id: NonEmptyStringSchema.optional(),
@@ -48,10 +48,10 @@ export const CreateZzdhTaskResponseSchema = z.union([
     }).catchall(z.unknown()),
 ]);
 
-export const ZzdhTaskSchema = z.object({
+export const TaskSchema = z.object({
     id: NonEmptyStringSchema.optional(),
     task_id: NonEmptyStringSchema.optional(),
-    status: ZzdhTaskStatusSchema,
+    status: TaskStatusSchema,
 }).catchall(z.unknown());
 
 const TaskIdSchema = NonEmptyStringSchema;
@@ -64,21 +64,21 @@ const ErrorResponseSchema = z.object({
     }).catchall(z.unknown()).optional(),
 }).catchall(z.unknown());
 
-export type ZzdhModel = z.infer<typeof ZzdhModelSchema>;
-export type ZzdhAspectRatio = z.infer<typeof ZzdhAspectRatioSchema>;
-export type ZzdhTaskStatus = z.infer<typeof ZzdhTaskStatusSchema>;
+export type Model = z.infer<typeof ModelSchema>;
+export type AspectRatio = z.infer<typeof AspectRatioSchema>;
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
-export type TextToVideoModel = ZzdhModel;
+export type TextToVideoModel = Model;
 export type TextToVideoRequest = z.infer<
-    typeof CreateZzdhTaskRequestSchema
+    typeof CreateTaskRequestSchema
 >;
-export type CreateZzdhTaskRequest = TextToVideoRequest;
-export type CreateZzdhTaskResponse = z.infer<
-    typeof CreateZzdhTaskResponseSchema
+export type CreateTaskRequest = TextToVideoRequest;
+export type CreateTaskResponse = z.infer<
+    typeof CreateTaskResponseSchema
 >;
-export type ZzdhTask = z.infer<typeof ZzdhTaskSchema>;
+export type Task = z.infer<typeof TaskSchema>;
 
-export interface ZzdhClientOptions {
+export interface ClientOptions {
     apiKey: string;
 }
 
@@ -96,15 +96,15 @@ export class ZzdhApiError extends Error {
 export class ZzdhClient {
     readonly apiKey: string;
 
-    constructor(options: ZzdhClientOptions) {
+    constructor(options: ClientOptions) {
         this.apiKey = options.apiKey;
     }
 
     /** POST /v8/videos/generations */
     async createTask(
-        request: CreateZzdhTaskRequest,
-    ): Promise<CreateZzdhTaskResponse | Error> {
-        const parsedRequest = CreateZzdhTaskRequestSchema.safeParse(request);
+        request: CreateTaskRequest,
+    ): Promise<CreateTaskResponse | Error> {
+        const parsedRequest = CreateTaskRequestSchema.safeParse(request);
         if (!parsedRequest.success) return parsedRequest.error;
 
         const response = await this.requestJson("/v8/videos/generations", {
@@ -114,14 +114,14 @@ export class ZzdhClient {
         });
         if (response instanceof Error) return response;
 
-        const parsedResponse = CreateZzdhTaskResponseSchema.safeParse(response);
+        const parsedResponse = CreateTaskResponseSchema.safeParse(response);
         return parsedResponse.success
             ? parsedResponse.data
             : parsedResponse.error;
     }
 
     /** GET /v8/videos/generations/{task_id} */
-    async getTask(taskId: string): Promise<ZzdhTask | Error> {
+    async getTask(taskId: string): Promise<Task | Error> {
         const parsedTaskId = TaskIdSchema.safeParse(taskId);
         if (!parsedTaskId.success) return parsedTaskId.error;
         const response = await this.requestJson(
@@ -130,7 +130,7 @@ export class ZzdhClient {
         );
         if (response instanceof Error) return response;
 
-        const parsedResponse = ZzdhTaskSchema.safeParse(response);
+        const parsedResponse = TaskSchema.safeParse(response);
         return parsedResponse.success
             ? parsedResponse.data
             : parsedResponse.error;
@@ -193,7 +193,7 @@ export class ZzdhClient {
 export function validateCreateTaskRequest(
     request: unknown,
 ): z.ZodError | undefined {
-    const result = CreateZzdhTaskRequestSchema.safeParse(request);
+    const result = CreateTaskRequestSchema.safeParse(request);
     return result.success ? undefined : result.error;
 }
 
