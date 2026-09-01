@@ -7,7 +7,7 @@
  * downloaded" when a file with a stem equal to its id exists.
  */
 import type { DatabaseSync } from "node:sqlite";
-import { seedance_client } from "./seedance_client.ts";
+import { seedance_client } from "./apigen/seedance_client.ts";
 import { delay } from "@std/async";
 import { join } from "@std/path";
 import { VIDEOS_DIR } from "./trpc/router.ts";
@@ -23,7 +23,7 @@ import {
     recordTaskStatus,
     updateGeneration,
 } from "./db.ts";
-import { SeedanceError, type Task } from "./seedance/seedance.ts";
+import { SeedanceError, type Task } from "./apigen/seedance/seedance.ts";
 
 /**
  * How long a generation may sit "queued" with no Seedance task id before we

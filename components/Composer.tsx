@@ -12,7 +12,7 @@ import type {
     ContentItem,
     CreateTaskRequest,
     SeedanceModel,
-} from "../seedance/seedance.ts";
+} from "../apigen/seedance/seedance.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";

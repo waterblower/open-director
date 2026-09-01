@@ -33,14 +33,17 @@ import {
     unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
-import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
+import {
+    seedance_client,
+    setSeedanceApiKey,
+} from "../apigen/seedance_client.ts";
 import { externalizeAttachments } from "../uploads.ts";
 import type {
     ContentItem,
     CreateTaskRequest,
     Task,
     TaskStatus,
-} from "../seedance/seedance.ts";
+} from "../apigen/seedance/seedance.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 import { pickAndLoadGenerationPlan } from "../generation_plan.ts";

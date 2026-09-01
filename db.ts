@@ -17,7 +17,7 @@ import {
     Task,
     TaskSchema,
     TaskStatus,
-} from "./seedance/seedance.ts";
+} from "./apigen/seedance/seedance.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
 

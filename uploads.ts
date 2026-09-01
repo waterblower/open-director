@@ -11,7 +11,7 @@
  * across generations writes the file once and dedupes automatically.
  */
 import { join } from "@std/path";
-import { ContentItem } from "./seedance/seedance.ts";
+import { ContentItem } from "./apigen/seedance/seedance.ts";
 import { resolveInProject } from "./project.ts";
 
 /** Project-relative uploads dir. Forward slashes — also used to build URLs. */

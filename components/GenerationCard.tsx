@@ -1,5 +1,5 @@
 import { type Signal, useSignal } from "@preact/signals";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import { get_text, language, trpc } from "../trpc/client.ts";
 import {

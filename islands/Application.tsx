@@ -1,7 +1,7 @@
 import { Signal, signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
 import {
     loadConfig,
     loadProjectData,

@@ -1,7 +1,7 @@
 import { Head } from "fresh/runtime";
 import { define } from "../../utils.ts";
-import { seedance_client } from "../../seedance_client.ts";
-import type { Task, TaskStatus } from "../../seedance/seedance.ts";
+import { seedance_client } from "../../apigen/seedance_client.ts";
+import type { Task, TaskStatus } from "../../apigen/seedance/seedance.ts";
 
 /** Fetch every task from Seedance, following pagination. */
 async function fetchAllTasks(): Promise<Task[] | Error> {

@@ -1,6 +1,6 @@
 import { type Signal, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
 import { GenerationTabs } from "./GenerationTabs.tsx";
 import { get_text, language, trpc } from "@/trpc/client.ts";

@@ -1,7 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
-import { estimateCost } from "../seedance/pricing.ts";
+import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
+import { estimateCost } from "../apigen/seedance/pricing.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import {
     DislikeIcon,
