@@ -31,7 +31,7 @@ async function fetchAllFiles(): Promise<ArkFile[] | Error> {
     // Cap the page count defensively in case the API repeats a cursor.
     for (let page = 1; page <= 50; page++) {
         const res = await seedance_client.listFiles({
-            limit: 10_000,
+            limit: 100,
             after,
             order: "desc",
         });
