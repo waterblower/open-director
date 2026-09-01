@@ -24,7 +24,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 Deno.test({
     name: "upload and download a MiniMax video-generation input image",
     async fn() {
-        const client = new MiniMaxClient({ apiKey: "sk-api-_21A4sFKO32JP5H_GK89CAjphdt8cBCqCLXM6nJgio_kMbroL8iwU9Ey0sEKz8OLAnDDgAMssA62gssJfsRnBYSr3B6_RwUKsNDcRkYR_FnalGIlPjD6fSw" });
+        const client = new MiniMaxClient({ apiKey: "" });
         const sourceBytes = await Deno.readFile(SOURCE_URL);
         const sourceFile = new File([sourceBytes], IMAGE_NAME, {
             type: "image/jpeg",

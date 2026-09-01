@@ -76,7 +76,12 @@ const STATUS_ORDER: (TaskStatus | "unknown")[] = [
     "unknown",
 ];
 
-const FILE_STATUS_ORDER: FileStatus[] = ["uploaded", "processed", "error"];
+const FILE_STATUS_ORDER: FileStatus[] = [
+    "active",
+    "uploaded",
+    "processed",
+    "error",
+];
 
 function fmtTime(unixSec: number): string {
     if (!unixSec) return "—";
