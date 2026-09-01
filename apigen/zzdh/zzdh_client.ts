@@ -4,6 +4,7 @@
  * This module intentionally implements only text-to-video generation for the
  * `zzdh-minimax-h3-限时优惠` series.
  */
+import { z } from "zod";
 
 const API_ORIGIN = "http://zizidonghua.com";
 
@@ -12,47 +13,70 @@ export const ZZDH_MODELS = [
     "zzdh-minimax-h3-限时优惠-文生-768p",
 ] as const;
 
-export type ZzdhModel = (typeof ZZDH_MODELS)[number];
-export type ZzdhAspectRatio = "horizontal" | "vertical";
-export type ZzdhTaskStatus =
-    | "queued"
-    | "in_progress"
-    | "completed"
-    | "failed";
+export const ZzdhModelSchema = z.enum(ZZDH_MODELS);
+export const ZzdhAspectRatioSchema = z.enum(["horizontal", "vertical"]);
+export const ZzdhTaskStatusSchema = z.enum([
+    "queued",
+    "in_progress",
+    "completed",
+    "failed",
+]);
+
+const NonEmptyStringSchema = z.string().refine(
+    (value) => value.trim().length > 0,
+    { error: "String cannot be empty" },
+);
+
+export const CreateZzdhTaskRequestSchema = z.object({
+    model: ZzdhModelSchema,
+    prompt: NonEmptyStringSchema,
+    /** Whole-number output duration from 1 through 15 seconds. Defaults to 5. */
+    duration: z.number().int().min(1).max(15).optional(),
+    /** Defaults to vertical. The API does not support 1:1 for this series. */
+    aspect_ratio: ZzdhAspectRatioSchema.optional(),
+    seed: z.number().int().optional(),
+}).strict();
+
+export const CreateZzdhTaskResponseSchema = z.union([
+    z.object({
+        id: NonEmptyStringSchema,
+        task_id: NonEmptyStringSchema.optional(),
+    }).catchall(z.unknown()),
+    z.object({
+        id: NonEmptyStringSchema.optional(),
+        task_id: NonEmptyStringSchema,
+    }).catchall(z.unknown()),
+]);
+
+export const ZzdhTaskSchema = z.object({
+    id: NonEmptyStringSchema.optional(),
+    task_id: NonEmptyStringSchema.optional(),
+    status: ZzdhTaskStatusSchema,
+}).catchall(z.unknown());
+
+const TaskIdSchema = NonEmptyStringSchema;
+const ErrorResponseSchema = z.object({
+    code: z.string().optional(),
+    message: z.string().optional(),
+    error: z.object({
+        code: z.string().optional(),
+        message: z.string().optional(),
+    }).catchall(z.unknown()).optional(),
+}).catchall(z.unknown());
+
+export type ZzdhModel = z.infer<typeof ZzdhModelSchema>;
+export type ZzdhAspectRatio = z.infer<typeof ZzdhAspectRatioSchema>;
+export type ZzdhTaskStatus = z.infer<typeof ZzdhTaskStatusSchema>;
 
 export type TextToVideoModel = ZzdhModel;
-
-interface CommonCreateTaskFields {
-    /** Whole-number output duration from 1 through 15 seconds. Defaults to 5. */
-    duration?: number;
-    /** Defaults to vertical. The API does not support 1:1 for this series. */
-    aspect_ratio?: ZzdhAspectRatio;
-    seed?: number;
-}
-
-export interface TextToVideoRequest extends CommonCreateTaskFields {
-    model: TextToVideoModel;
-    prompt: string;
-}
-
+export type TextToVideoRequest = z.infer<
+    typeof CreateZzdhTaskRequestSchema
+>;
 export type CreateZzdhTaskRequest = TextToVideoRequest;
-
-interface ZzdhResponseData {
-    [key: string]: unknown;
-}
-
-export type CreateZzdhTaskResponse =
-    & ZzdhResponseData
-    & (
-        | { id: string; task_id?: string }
-        | { id?: string; task_id: string }
-    );
-
-export interface ZzdhTask extends ZzdhResponseData {
-    id?: string;
-    task_id?: string;
-    status: ZzdhTaskStatus;
-}
+export type CreateZzdhTaskResponse = z.infer<
+    typeof CreateZzdhTaskResponseSchema
+>;
+export type ZzdhTask = z.infer<typeof ZzdhTaskSchema>;
 
 export interface ZzdhClientOptions {
     apiKey: string;
@@ -80,59 +104,36 @@ export class ZzdhClient {
     async createTask(
         request: CreateZzdhTaskRequest,
     ): Promise<CreateZzdhTaskResponse | Error> {
-        const validation = validateCreateTaskRequest(request);
-        if (validation) return validation;
-
-        // Build the body from the documented fields so additional runtime
-        // properties supplied by untyped callers are never forwarded.
-        const body: Record<string, unknown> = {
-            model: request.model,
-            prompt: request.prompt,
-            duration: request.duration,
-            aspect_ratio: request.aspect_ratio,
-            seed: request.seed,
-        };
-        for (const key of Object.keys(body)) {
-            if (body[key] === undefined) delete body[key];
-        }
+        const parsedRequest = CreateZzdhTaskRequestSchema.safeParse(request);
+        if (!parsedRequest.success) return parsedRequest.error;
 
         const response = await this.requestJson("/v8/videos/generations", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+            body: JSON.stringify(parsedRequest.data),
         });
         if (response instanceof Error) return response;
 
-        if (!isRecord(response)) {
-            return invalidResponse("Create-task response was not an object");
-        }
-        if (
-            !isNonEmptyString(response.id) &&
-            !isNonEmptyString(response.task_id)
-        ) {
-            return invalidResponse(
-                "Create-task response did not contain id or task_id",
-            );
-        }
-        return response as CreateZzdhTaskResponse;
+        const parsedResponse = CreateZzdhTaskResponseSchema.safeParse(response);
+        return parsedResponse.success
+            ? parsedResponse.data
+            : parsedResponse.error;
     }
 
     /** GET /v8/videos/generations/{task_id} */
     async getTask(taskId: string): Promise<ZzdhTask | Error> {
-        const validation = validateTaskId(taskId);
-        if (validation) return validation;
+        const parsedTaskId = TaskIdSchema.safeParse(taskId);
+        if (!parsedTaskId.success) return parsedTaskId.error;
         const response = await this.requestJson(
-            `/v8/videos/generations/${encodeURIComponent(taskId)}`,
+            `/v8/videos/generations/${encodeURIComponent(parsedTaskId.data)}`,
             { method: "GET" },
         );
         if (response instanceof Error) return response;
 
-        if (!isRecord(response) || !isTaskStatus(response.status)) {
-            return invalidResponse(
-                "Task response did not contain a documented status",
-            );
-        }
-        return response as ZzdhTask;
+        const parsedResponse = ZzdhTaskSchema.safeParse(response);
+        return parsedResponse.success
+            ? parsedResponse.data
+            : parsedResponse.error;
     }
 
     /**
@@ -142,10 +143,10 @@ export class ZzdhClient {
      * a stream, Blob, or ArrayBuffer without the client altering video bytes.
      */
     async getContent(taskId: string): Promise<Response | Error> {
-        const validation = validateTaskId(taskId);
-        if (validation) return validation;
+        const parsedTaskId = TaskIdSchema.safeParse(taskId);
+        if (!parsedTaskId.success) return parsedTaskId.error;
         const response = await this.fetch(
-            `/v1/videos/${encodeURIComponent(taskId)}/content`,
+            `/v1/videos/${encodeURIComponent(parsedTaskId.data)}/content`,
             { method: "GET" },
         );
         if (response instanceof Error) return response;
@@ -190,60 +191,10 @@ export class ZzdhClient {
 }
 
 export function validateCreateTaskRequest(
-    request: CreateZzdhTaskRequest,
-): ZzdhApiError | undefined {
-    if (!isRecord(request)) {
-        return validationError("Request must be an object");
-    }
-    if (!(ZZDH_MODELS as readonly string[]).includes(request.model)) {
-        return validationError("model is not a documented ZZDH model");
-    }
-    if (
-        request.duration !== undefined &&
-        (!Number.isInteger(request.duration) || request.duration < 1 ||
-            request.duration > 15)
-    ) {
-        return validationError("duration must be an integer from 1 to 15");
-    }
-    if (
-        request.aspect_ratio !== undefined &&
-        request.aspect_ratio !== "horizontal" &&
-        request.aspect_ratio !== "vertical"
-    ) {
-        return validationError(
-            "aspect_ratio must be horizontal or vertical",
-        );
-    }
-    if (request.seed !== undefined && !Number.isInteger(request.seed)) {
-        return validationError("seed must be an integer");
-    }
-    if (!isNonEmptyString(request.prompt)) {
-        return validationError("prompt is required and cannot be empty");
-    }
-}
-
-function validateTaskId(taskId: string): ZzdhApiError | undefined {
-    if (!isNonEmptyString(taskId)) {
-        return validationError("taskId cannot be empty");
-    }
-}
-
-function isTaskStatus(value: unknown): value is ZzdhTaskStatus {
-    return value === "queued" || value === "in_progress" ||
-        value === "completed" || value === "failed";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null &&
-        !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-    return typeof value === "string" && value.trim().length > 0;
-}
-
-function validationError(message: string): ZzdhApiError {
-    return new ZzdhApiError(0, "validation_error", message);
+    request: unknown,
+): z.ZodError | undefined {
+    const result = CreateZzdhTaskRequestSchema.safeParse(request);
+    return result.success ? undefined : result.error;
 }
 
 function invalidResponse(message: string): ZzdhApiError {
@@ -259,18 +210,12 @@ async function responseError(response: Response): Promise<ZzdhApiError> {
         body = undefined;
     }
 
-    const record = isRecord(body) ? body : undefined;
-    const nestedError = isRecord(record?.error) ? record.error : undefined;
-    const code = isNonEmptyString(nestedError?.code)
-        ? nestedError.code
-        : isNonEmptyString(record?.code)
-        ? record.code
-        : String(response.status);
-    const message = isNonEmptyString(nestedError?.message)
-        ? nestedError.message
-        : isNonEmptyString(record?.message)
-        ? record.message
-        : text || response.statusText;
+    const parsed = ErrorResponseSchema.safeParse(body);
+    const errorBody = parsed.success ? parsed.data : undefined;
+    const code = errorBody?.error?.code ?? errorBody?.code ??
+        String(response.status);
+    const message = errorBody?.error?.message ?? errorBody?.message ??
+        (text || response.statusText);
 
     return new ZzdhApiError(response.status, code, message);
 }
