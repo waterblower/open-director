@@ -1,5 +1,5 @@
-import { SeedanceClient } from "./seedance/seedance.ts";
-import { getStoredApiKey } from "../kv.ts";
+import { SeedanceClient } from "./seedance.ts";
+import { getStoredApiKey } from "../../kv.ts";
 
 // Shared, configured Seedance client used across islands/components. The API key
 // is loaded from Deno KV (set via the in-app settings modal); `let` + live ESM
