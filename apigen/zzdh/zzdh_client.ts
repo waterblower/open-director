@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 
-const API_ORIGIN = "http://zizidonghua.com";
+const API_ORIGIN = "https://zizidonghua.com";
 
 export const ZZDH_MODELS = [
     "zzdh-minimax-h3-限时优惠-文生-480p",
@@ -197,7 +197,7 @@ export class ZzdhClient {
 
         try {
             const text = await response.text();
-            console.log(text);
+            console.log(text, path, init);
             return JSON.parse(text);
         } catch (e) {
             return e as Error;
