@@ -361,7 +361,7 @@ export type FilePurpose =
     | "user_data"
     | "agent";
 
-export type FileStatus = "uploaded" | "processed" | "error";
+export type FileStatus = z.infer<typeof FileStatusSchema>;
 
 export interface ArkFile {
     id: string;
@@ -392,7 +392,8 @@ export interface ListFilesRequest {
 }
 
 export interface ListFilesResponse {
-    object: "list";
+    /** The live Ark API currently returns "file"; older responses use "list". */
+    object: "file" | "list";
     data: ArkFile[];
     has_more: boolean;
     first_id?: string;
@@ -409,10 +410,12 @@ const FilePurposeSchema = z.enum(["user_data", "agent"]) satisfies z.ZodType<
     FilePurpose
 >;
 const FileStatusSchema = z.enum([
+    "active",
     "uploaded",
+    "processing",
     "processed",
     "error",
-]) satisfies z.ZodType<FileStatus>;
+]);
 
 const ArkFileSchema = z.object({
     id: z.string(),
@@ -428,7 +431,7 @@ const ArkFileSchema = z.object({
 }) satisfies z.ZodType<ArkFile>;
 
 const ListFilesResponseSchema = z.object({
-    object: z.literal("list"),
+    object: z.enum(["file", "list"]),
     data: z.array(ArkFileSchema),
     has_more: z.boolean(),
     first_id: z.string().optional(),
@@ -600,6 +603,7 @@ export class SeedanceClient {
         form.append("purpose", request.purpose);
         const res = await this.postForm("/files", form);
         if (res instanceof Error) return res;
+        console.log(res)
         const parsed = ArkFileSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
