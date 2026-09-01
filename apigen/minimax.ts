@@ -15,10 +15,6 @@ const DEFAULT_API_ORIGIN = "https://api.minimaxi.com";
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 const IMAGE_EXTENSION = /\.(?:jpe?g|png|webp|heic|heif)$/i;
 
-const NonEmptyStringSchema = z.string().refine(
-    (value) => value.trim().length > 0,
-    { error: "String cannot be empty" },
-);
 
 export const FileIdSchema = z.union([
     z.number().int().positive(),
@@ -37,7 +33,7 @@ export const FileSchema = z.object({
     file_id: FileIdSchema,
     bytes: z.number().int().nonnegative(),
     created_at: z.number().int().nonnegative(),
-    filename: NonEmptyStringSchema,
+    filename: z.string().nonempty(),
     purpose: FilePurposeSchema,
 }).catchall(z.unknown());
 
@@ -102,15 +98,7 @@ export class MiniMaxClient {
             return new TypeError("file must be a Blob or File");
         }
 
-        const filename = request.filename ??
-            (request.file instanceof File ? request.file.name : "");
-        const parsedFilename = NonEmptyStringSchema.safeParse(filename);
-        if (!parsedFilename.success) return parsedFilename.error;
-        if (!IMAGE_EXTENSION.test(parsedFilename.data)) {
-            return new TypeError(
-                "Image filename must end in .jpg, .jpeg, .png, .webp, .heic, or .heif",
-            );
-        }
+
         if (request.file.size <= 0 || request.file.size > MAX_IMAGE_BYTES) {
             return new RangeError(
                 `Image size must be between 1 byte and ${MAX_IMAGE_BYTES} bytes`,
@@ -119,7 +107,7 @@ export class MiniMaxClient {
 
         const form = new FormData();
         form.append("purpose", "video_generation_input");
-        form.append("file", request.file, parsedFilename.data);
+        form.append("file", request.file);
 
         const response = await this.fetch("/v1/files/upload", {
             method: "POST",
@@ -170,14 +158,12 @@ export class MiniMaxClient {
         path: string,
         init: RequestInit,
     ): Promise<Response | Error> {
-        const parsedApiKey = NonEmptyStringSchema.safeParse(this.apiKey);
-        if (!parsedApiKey.success) return parsedApiKey.error;
 
         try {
             return await fetch(`${this.baseUrl}${path}`, {
                 ...init,
                 headers: {
-                    Authorization: `Bearer ${parsedApiKey.data}`,
+                    Authorization: `Bearer ${this.apiKey}`,
                     ...init.headers,
                 },
             });
