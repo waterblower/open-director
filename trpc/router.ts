@@ -36,7 +36,7 @@ import {
 import {
     seedance_client,
     setSeedanceApiKey,
-} from "../apigen/seedance_client.ts";
+} from "../apigen/seedance/seedance_client.ts";
 import { externalizeAttachments } from "../uploads.ts";
 import type {
     ContentItem,
@@ -566,7 +566,7 @@ export const appRouter = router({
     // Whether a Seedance API key is configured, plus a masked preview for the
     // settings modal. The full key is never sent to the client.
     getApiKeyStatus: publicProcedure.query(async () => {
-        const key = await getStoredApiKey();
+        const key = await getStoredApiKey("seedance");
         return {
             hasKey: !!key,
             masked: key ? maskKey(key) : null,
@@ -579,7 +579,7 @@ export const appRouter = router({
         .input(z.object({ apiKey: z.string().trim().min(1) }))
         .mutation(async (opts) => {
             const key = opts.input.apiKey;
-            await setStoredApiKey(key);
+            await setStoredApiKey("seedance", key);
             setSeedanceApiKey(key);
             return { hasKey: true, masked: maskKey(key) };
         }),

@@ -5,7 +5,7 @@ import { getStoredApiKey } from "../../kv.ts";
 // is loaded from Deno KV (set via the in-app settings modal); `let` + live ESM
 // bindings let `setSeedanceApiKey` swap in a new client that importers pick up.
 export let seedance_client = new SeedanceClient({
-    apiKey: (await getStoredApiKey()) ?? "",
+    apiKey: (await getStoredApiKey("seedance")) ?? "",
 });
 
 /** Rebuild the shared client with a new API key (after the user saves one). */

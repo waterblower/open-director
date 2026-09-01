@@ -14,18 +14,28 @@ const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
 export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
-const SEEDANCE_API_KEY = ["config", "seedance_api_key"] as const;
+export type ApiProvider = "seedance" | "zzdh";
+
+const API_KEY_BY_PROVIDER = {
+    seedance: ["config", "seedance_api_key"],
+    zzdh: ["config", "zzdh_api_key"],
+} as const satisfies Record<ApiProvider, Deno.KvKey>;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
 
-/** The configured Seedance API key, or null if one was never set. */
-export async function getStoredApiKey(): Promise<string | null> {
-    const res = await kv.get<string>(SEEDANCE_API_KEY);
+/** The configured provider API key, or null if one was never set. */
+export async function getStoredApiKey(
+    provider: ApiProvider,
+): Promise<string | null> {
+    const res = await kv.get<string>(API_KEY_BY_PROVIDER[provider]);
     return res.value;
 }
 
-/** Persist the Seedance API key (machine-level, shared across projects). */
-export async function setStoredApiKey(key: string): Promise<void> {
-    await kv.set(SEEDANCE_API_KEY, key);
+/** Persist a provider API key (machine-level, shared across projects). */
+export async function setStoredApiKey(
+    provider: ApiProvider,
+    key: string,
+): Promise<void> {
+    await kv.set(API_KEY_BY_PROVIDER[provider], key);
 }
 
 /**
