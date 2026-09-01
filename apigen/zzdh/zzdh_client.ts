@@ -117,16 +117,7 @@ export interface ClientOptions {
     apiKey: string;
 }
 
-export class ZzdhApiError extends Error {
-    constructor(
-        public readonly status: number,
-        public readonly code: string,
-        message: string,
-    ) {
-        super(`[${status}] ${code}: ${message}`);
-        this.name = "ZzdhApiError";
-    }
-}
+
 
 export class ZzdhClient {
     readonly apiKey: string;
@@ -148,6 +139,8 @@ export class ZzdhClient {
             body: JSON.stringify(parsedRequest.data),
         });
         if (response instanceof Error) return response;
+
+        console.log("zzdh!", response);
 
         const parsedResponse = CreateTaskResponseSchema.safeParse(response);
         return parsedResponse.success
@@ -185,7 +178,9 @@ export class ZzdhClient {
             { method: "GET" },
         );
         if (response instanceof Error) return response;
-        if (!response.ok) return await responseError(response);
+        if (!response.ok) {
+            return new Error(`${response.statusText}: ${await response.text()}`);
+        }
         return response;
     }
 
@@ -195,12 +190,17 @@ export class ZzdhClient {
     ): Promise<unknown | Error> {
         const response = await this.fetch(path, init);
         if (response instanceof Error) return response;
-        if (!response.ok) return await responseError(response);
+        if (!response.ok) {
+            const text = await response.text();
+            return new Error(`${response.statusText}: ${text}`);
+        }
 
         try {
-            return await response.json();
-        } catch {
-            return invalidResponse("Response body was not valid JSON");
+            const text = await response.text();
+            console.log(text)
+            return JSON.parse(text);
+        } catch (e ){
+            return e as Error
         }
     }
 
@@ -217,10 +217,7 @@ export class ZzdhClient {
                 },
             });
         } catch (error) {
-            const message = error instanceof Error
-                ? error.message
-                : String(error);
-            return new ZzdhApiError(0, "network_error", message);
+            return error as Error;
         }
     }
 }
@@ -230,27 +227,4 @@ export function validateCreateTaskRequest(
 ): z.ZodError | undefined {
     const result = CreateTaskRequestSchema.safeParse(request);
     return result.success ? undefined : result.error;
-}
-
-function invalidResponse(message: string): ZzdhApiError {
-    return new ZzdhApiError(0, "invalid_response", message);
-}
-
-async function responseError(response: Response): Promise<ZzdhApiError> {
-    const text = await response.text().catch(() => "");
-    let body: unknown;
-    try {
-        body = text ? JSON.parse(text) : undefined;
-    } catch {
-        body = undefined;
-    }
-
-    const parsed = ErrorResponseSchema.safeParse(body);
-    const errorBody = parsed.success ? parsed.data : undefined;
-    const code = errorBody?.error?.code ?? errorBody?.code ??
-        String(response.status);
-    const message = errorBody?.error?.message ?? errorBody?.message ??
-        (text || response.statusText);
-
-    return new ZzdhApiError(response.status, code, message);
 }
