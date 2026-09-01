@@ -117,8 +117,6 @@ export interface ClientOptions {
     apiKey: string;
 }
 
-
-
 export class ZzdhClient {
     readonly apiKey: string;
 
@@ -179,7 +177,9 @@ export class ZzdhClient {
         );
         if (response instanceof Error) return response;
         if (!response.ok) {
-            return new Error(`${response.statusText}: ${await response.text()}`);
+            return new Error(
+                `${response.statusText}: ${await response.text()}`,
+            );
         }
         return response;
     }
@@ -197,10 +197,10 @@ export class ZzdhClient {
 
         try {
             const text = await response.text();
-            console.log(text)
+            console.log(text);
             return JSON.parse(text);
-        } catch (e ){
-            return e as Error
+        } catch (e) {
+            return e as Error;
         }
     }
 
