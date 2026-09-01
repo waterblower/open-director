@@ -1,7 +1,12 @@
 import { Head } from "fresh/runtime";
 import { define } from "../../utils.ts";
 import { seedance_client } from "../../apigen/seedance/seedance_client.ts";
-import type { Task, TaskStatus } from "../../apigen/seedance/seedance.ts";
+import type {
+    ArkFile,
+    FileStatus,
+    Task,
+    TaskStatus,
+} from "../../apigen/seedance/seedance.ts";
 
 /** Fetch every task from Seedance, following pagination. */
 async function fetchAllTasks(): Promise<Task[] | Error> {
@@ -19,6 +24,35 @@ async function fetchAllTasks(): Promise<Task[] | Error> {
     return all;
 }
 
+/** Fetch every file from Seedance, following cursor pagination. */
+async function fetchAllFiles(): Promise<ArkFile[] | Error> {
+    const all: ArkFile[] = [];
+    let after: string | undefined;
+    // Cap the page count defensively in case the API repeats a cursor.
+    for (let page = 1; page <= 50; page++) {
+        const res = await seedance_client.listFiles({
+            limit: 10_000,
+            after,
+            order: "desc",
+        });
+        if (res instanceof Error) return res;
+        all.push(...res.data);
+        if (!res.has_more) return all;
+        if (res.data.length === 0 || !res.last_id) {
+            return new Error(
+                "Seedance Files API reported more files without a cursor",
+            );
+        }
+        if (res.last_id === after) {
+            return new Error(
+                "Seedance Files API repeated its pagination cursor",
+            );
+        }
+        after = res.last_id;
+    }
+    return new Error("Seedance Files API exceeded the 50-page safety limit");
+}
+
 // Preferred display order; any other status is appended afterwards.
 const STATUS_ORDER: (TaskStatus | "unknown")[] = [
     "queued",
@@ -30,6 +64,8 @@ const STATUS_ORDER: (TaskStatus | "unknown")[] = [
     "unknown",
 ];
 
+const FILE_STATUS_ORDER: FileStatus[] = ["uploaded", "processed", "error"];
+
 function fmtTime(unixSec: number): string {
     if (!unixSec) return "—";
     return new Date(unixSec * 1000).toISOString().replace("T", " ").slice(
@@ -38,13 +74,25 @@ function fmtTime(unixSec: number): string {
     );
 }
 
+function fmtBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+    if (bytes < 1024 ** 3) {
+        return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+    }
+    return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
 export default define.page(async function Debug() {
-    const result = await fetchAllTasks();
+    const [taskResult, fileResult] = await Promise.all([
+        fetchAllTasks(),
+        fetchAllFiles(),
+    ]);
 
     return (
         <>
             <Head>
-                <title>Debug · Seedance tasks</title>
+                <title>Debug · Seedance tasks and files</title>
                 <style>
                     {`
                     body { font: 13px/1.5 ui-monospace, monospace; margin: 24px; color: #1f2937; }
@@ -63,9 +111,14 @@ export default define.page(async function Debug() {
             </Head>
             <h1>Seedance tasks</h1>
 
-            {result instanceof Error
-                ? <p class="err">Failed to list tasks: {result.message}</p>
-                : <TaskGroups tasks={result} />}
+            {taskResult instanceof Error
+                ? <p class="err">Failed to list tasks: {taskResult.message}</p>
+                : <TaskGroups tasks={taskResult} />}
+
+            <h1>Seedance files</h1>
+            {fileResult instanceof Error
+                ? <p class="err">Failed to list files: {fileResult.message}</p>
+                : <FileGroups files={fileResult} />}
         </>
     );
 });
@@ -146,6 +199,79 @@ function TaskGroups({ tasks }: { tasks: Task[] }) {
                                             {t.error
                                                 ? `${t.error.code}: ${t.error.message}`
                                                 : ""}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </section>
+                );
+            })}
+        </>
+    );
+}
+
+function FileGroups({ files }: { files: ArkFile[] }) {
+    const groups = new Map<FileStatus, ArkFile[]>();
+    for (const file of files) {
+        const list = groups.get(file.status) ?? [];
+        list.push(file);
+        groups.set(file.status, list);
+    }
+
+    const statuses = FILE_STATUS_ORDER.filter((status) => groups.has(status));
+
+    return (
+        <>
+            <p class="summary">
+                <span>
+                    <b>total:</b> {files.length}
+                </span>
+                {statuses.map((status) => (
+                    <span key={status}>
+                        <b>{status}:</b> {groups.get(status)!.length}
+                    </span>
+                ))}
+            </p>
+
+            {files.length === 0 && <p class="muted">No files.</p>}
+
+            {statuses.map((status) => {
+                const list = groups.get(status)!;
+                return (
+                    <section key={status}>
+                        <h2>{status} ({list.length})</h2>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>id</th>
+                                    <th>filename</th>
+                                    <th>MIME type</th>
+                                    <th>size</th>
+                                    <th>purpose</th>
+                                    <th>created</th>
+                                    <th>expires</th>
+                                    <th>details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {list.map((file) => (
+                                    <tr key={file.id}>
+                                        <td>{file.id}</td>
+                                        <td>{file.filename}</td>
+                                        <td>{file.mime_type ?? "—"}</td>
+                                        <td title={`${file.bytes} bytes`}>
+                                            {fmtBytes(file.bytes)}
+                                        </td>
+                                        <td>{file.purpose}</td>
+                                        <td>{fmtTime(file.created_at)}</td>
+                                        <td>
+                                            {file.expire_at
+                                                ? fmtTime(file.expire_at)
+                                                : "—"}
+                                        </td>
+                                        <td class="err">
+                                            {file.status_details ?? ""}
                                         </td>
                                     </tr>
                                 ))}
