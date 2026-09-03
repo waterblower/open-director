@@ -64,7 +64,10 @@ const ResultSchema = z.union([
             z.object({
                 loc: z.array(z.union([z.string(), z.number()])),
                 msg: z.string(),
-                type: z.enum(["content_policy_violation", "file_download_error"]),
+                type: z.enum([
+                    "content_policy_violation",
+                    "file_download_error",
+                ]),
                 url: z.string(),
                 input: z.union([
                     z.string(),

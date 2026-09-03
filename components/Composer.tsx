@@ -13,10 +13,7 @@ import type {
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
 import type { GenerateInput } from "../apigen/mod.ts";
-import {
-    type Model as ZzdhModel,
-    ZZDH_MODELS,
-} from "../apigen/zzdh/zzdh_client.ts";
+
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
@@ -59,14 +56,6 @@ const SEEDANCE_MODELS = [
     shortLabel: string;
 }[];
 
-const ZZDH_MODEL_OPTIONS = [
-    {
-        value: "zzdh-minimax-h3-限时优惠-多参考图生-768p",
-        label: "ZZDH MiniMax H3 Multi-Reference 768p",
-        shortLabel: "H3 Ref 768p",
-    },
-] as const;
-
 const MINIMAX_MODEL_OPTIONS = [
     {
         value: "MiniMax-H3",
@@ -86,10 +75,9 @@ const MINIMAX_MODEL_OPTIONS = [
 
 const GENERATION_MODELS = [
     ...SEEDANCE_MODELS,
-    ...ZZDH_MODEL_OPTIONS,
     ...MINIMAX_MODEL_OPTIONS,
 ];
-type GenerationModel = SeedanceModel | ZzdhModel | MiniMaxVideoModel;
+type GenerationModel = SeedanceModel | MiniMaxVideoModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -177,28 +165,8 @@ function isSeedanceModel(value: unknown): value is SeedanceModel {
     return SEEDANCE_MODELS.some((model) => model.value === value);
 }
 
-function isZzdhModel(value: unknown): value is ZzdhModel {
-    return typeof value === "string" &&
-        (ZZDH_MODELS as readonly string[]).includes(value);
-}
-
-function isZzdhMultiReferenceModel(value: unknown): boolean {
-    return value === "zzdh-minimax-h3-限时优惠-多参考图生-768p";
-}
-
 function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
     return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
-}
-
-function isGenerationModel(value: unknown): value is GenerationModel {
-    return isSeedanceModel(value) || isZzdhModel(value) ||
-        isMiniMaxModel(value);
-}
-
-function isZzdhRequest(
-    request: GenerateInput,
-): request is Extract<GenerateInput, { model: ZzdhModel }> {
-    return isZzdhModel(request.model);
 }
 
 function isMiniMaxRequest(
@@ -459,34 +427,6 @@ export function Composer(props: {
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
-        if (isZzdhRequest(req)) {
-            prompt.value = req.prompt;
-            model.value = req.model;
-            ratio.value = req.aspect_ratio === "horizontal" ? "16:9" : "9:16";
-            resolution.value = req.model.endsWith("-768p") ? "720p" : "480p";
-            durationMode.value = req.duration === undefined
-                ? "smart"
-                : "seconds";
-            if (req.duration !== undefined) duration.value = req.duration;
-            attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
-            attachments.value = "reference_images" in req
-                ? await Promise.all(req.reference_images.map(async (image) => ({
-                    id: nextId.current++,
-                    kind: "image" as const,
-                    name: kindLabel("image", language.value),
-                    url: URL.createObjectURL(
-                        await (await fetch(image.url)).blob(),
-                    ),
-                })))
-                : [];
-            const ta = promptRef.current;
-            if (ta) {
-                ta.value = req.prompt;
-                autoGrow(ta);
-            }
-            return;
-        }
-
         if (isMiniMaxRequest(req)) {
             const text = req.content
                 .filter((item) => item.type === "text")
@@ -546,63 +486,69 @@ export function Composer(props: {
                 autoGrow(ta);
             }
             return;
-        }
+        } else if (
+            req.model == "doubao-seedance-2-0-260128" ||
+            req.model == "doubao-seedance-2-0-fast-260128" ||
+            req.model == "doubao-seedance-2-0-mini-260615"
+        ) {
+            const content = req.content;
+            const text = content
+                .filter((c): c is Extract<ContentItem, { type: "text" }> =>
+                    c.type === "text"
+                )
+                .map((c) => c.text)
+                .join("\n");
+            prompt.value = text;
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = text;
+                autoGrow(ta);
+            }
 
-        const content = req.content;
-        const text = content
-            .filter((c): c is Extract<ContentItem, { type: "text" }> =>
-                c.type === "text"
-            )
-            .map((c) => c.text)
-            .join("\n");
-        prompt.value = text;
-        const ta = promptRef.current;
-        if (ta) {
-            ta.value = text;
-            autoGrow(ta);
-        }
+            // Settings — mirror how the request was assembled on submit: `duration`
+            // is only present in "seconds" mode, omitted in "smart" mode.
+            model.value = req.model;
+            if (req.ratio) ratio.value = req.ratio;
+            if (req.resolution) resolution.value = req.resolution;
+            if (typeof req.duration === "number") {
+                durationMode.value = "seconds";
+                duration.value = req.duration;
+            } else {
+                durationMode.value = "smart";
+            }
+            if (typeof req.generate_audio === "boolean") {
+                audio.value = req.generate_audio;
+            }
 
-        // Settings — mirror how the request was assembled on submit: `duration`
-        // is only present in "seconds" mode, omitted in "smart" mode.
-        model.value = req.model;
-        if (req.ratio) ratio.value = req.ratio;
-        if (req.resolution) resolution.value = req.resolution;
-        if (typeof req.duration === "number") {
-            durationMode.value = "seconds";
-            duration.value = req.duration;
+            // Reference media is stored as data URLs; rebuild each into a revocable
+            // object URL so it behaves like a normally-attached file.
+            const media = content
+                .map((c) => {
+                    if (c.type === "image_url") {
+                        return { kind: "image" as const, url: c.image_url.url };
+                    }
+                    if (c.type === "video_url") {
+                        return { kind: "video" as const, url: c.video_url.url };
+                    }
+                    if (c.type === "audio_url") {
+                        return { kind: "audio" as const, url: c.audio_url.url };
+                    }
+                    return null;
+                })
+                .filter((m): m is { kind: AttachmentKind; url: string } =>
+                    m !== null
+                );
+
+            attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
+            attachments.value = await Promise.all(media.map(async (m) => ({
+                id: nextId.current++,
+                kind: m.kind,
+                name: kindLabel(m.kind, language.value),
+                url: URL.createObjectURL(await (await fetch(m.url)).blob()),
+            })));
         } else {
-            durationMode.value = "smart";
+            throw new Error("Unsupported model: " + req.model);
         }
-        if (typeof req.generate_audio === "boolean") {
-            audio.value = req.generate_audio;
-        }
-
-        // Reference media is stored as data URLs; rebuild each into a revocable
-        // object URL so it behaves like a normally-attached file.
-        const media = content
-            .map((c) => {
-                if (c.type === "image_url") {
-                    return { kind: "image" as const, url: c.image_url.url };
-                }
-                if (c.type === "video_url") {
-                    return { kind: "video" as const, url: c.video_url.url };
-                }
-                if (c.type === "audio_url") {
-                    return { kind: "audio" as const, url: c.audio_url.url };
-                }
-                return null;
-            })
-            .filter((m): m is { kind: AttachmentKind; url: string } =>
-                m !== null
-            );
-
-        attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
-        attachments.value = await Promise.all(media.map(async (m) => ({
-            id: nextId.current++,
-            kind: m.kind,
-            name: kindLabel(m.kind, language.value),
-            url: URL.createObjectURL(await (await fetch(m.url)).blob()),
-        })));
     };
 
     useSignalEffect(() => {
@@ -645,13 +591,6 @@ export function Composer(props: {
         return [];
     });
     useSignalEffect(() => {
-        if (isZzdhModel(model.value)) {
-            if (!["16:9", "9:16"].includes(ratio.value)) {
-                ratio.value = "9:16";
-            }
-            duration.value = Math.max(1, Math.min(15, duration.value));
-            return;
-        }
         if (isMiniMaxModel(model.value)) {
             const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
             if (!allowed.includes(resolution.value)) {
@@ -670,24 +609,13 @@ export function Composer(props: {
                 ratio.value = "16:9";
             }
             return;
+        } else {
+            const clamped = clampResolution(model.value, resolution.value);
+            if (clamped !== resolution.value) resolution.value = clamped;
         }
-        const clamped = clampResolution(model.value, resolution.value);
-        if (clamped !== resolution.value) resolution.value = clamped;
     });
 
     const canSubmit = useComputed(() => {
-        if (isZzdhMultiReferenceModel(model.value)) {
-            return prompt.value.trim().length > 0 &&
-                attachments.value.length >= 1 &&
-                attachments.value.length <= 9 &&
-                attachments.value.every((attachment) =>
-                    attachment.kind === "image"
-                );
-        }
-        if (isZzdhModel(model.value)) {
-            return prompt.value.trim().length > 0 &&
-                attachments.value.length === 0;
-        }
         if (isMiniMaxModel(model.value)) {
             if (!prompt.value.trim()) return false;
             if (
@@ -710,9 +638,10 @@ export function Composer(props: {
                 item.kind === "audio"
             ).length;
             return imageCount <= 9 && videoCount <= 3 && audioCount <= 3;
+        } else {
+            return prompt.value.trim().length > 0 ||
+                attachments.value.length > 0;
         }
-        return prompt.value.trim().length > 0 ||
-            attachments.value.length > 0;
     });
 
     const togglePopover = (which: Exclude<Popover, null>) => {
@@ -720,17 +649,10 @@ export function Composer(props: {
     };
 
     const addFiles = (files: FileList | File[] | null) => {
-        if (
-            isZzdhModel(model.value) &&
-            !isZzdhMultiReferenceModel(model.value)
-        ) return;
         if (!files) return;
         const miniMaxFrames = isMiniMaxModel(model.value) &&
             (mode.value === "frames" || model.value === "MiniMax-H3-Max");
-        const accepted = isZzdhMultiReferenceModel(model.value)
-            ? Array.from(files).filter((file) => file.type.startsWith("image/"))
-                .slice(0, Math.max(0, 9 - attachments.value.length))
-            : miniMaxFrames
+        const accepted = miniMaxFrames
             ? Array.from(files).filter((file) => file.type.startsWith("image/"))
                 .slice(0, Math.max(0, 2 - attachments.value.length))
             : Array.from(files);
@@ -749,14 +671,6 @@ export function Composer(props: {
     // are held client-side for sending on to remote servers).
     const addProjectImage = async (path: string) => {
         if (
-            isZzdhModel(model.value) &&
-            !isZzdhMultiReferenceModel(model.value)
-        ) return;
-        if (
-            isZzdhMultiReferenceModel(model.value) &&
-            attachments.value.length >= 9
-        ) return;
-        if (
             isMiniMaxModel(model.value) &&
             (mode.value === "frames" || model.value === "MiniMax-H3-Max") &&
             attachments.value.length >= 2
@@ -764,10 +678,7 @@ export function Composer(props: {
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
         const blob = await (await fetch(url)).blob();
-        if (
-            isZzdhMultiReferenceModel(model.value) &&
-            !blob.type.startsWith("image/")
-        ) return;
+
         attachments.value = [...attachments.value, {
             id: nextId.current++,
             kind: "image",
@@ -778,10 +689,6 @@ export function Composer(props: {
 
     // Accept pasted media (e.g. an image copied from the file explorer).
     const onPaste = (e: ClipboardEvent) => {
-        if (
-            isZzdhModel(model.value) &&
-            !isZzdhMultiReferenceModel(model.value)
-        ) return;
         const files = e.clipboardData?.files;
         if (!files || files.length === 0) return; // let text paste through
         const media = Array.from(files).filter((f) =>
@@ -795,10 +702,6 @@ export function Composer(props: {
     // Accept media dragged from the OS (e.g. an image from Finder) or an image
     // dragged from the project file explorer.
     const onDragOver = (e: DragEvent) => {
-        if (
-            isZzdhModel(model.value) &&
-            !isZzdhMultiReferenceModel(model.value)
-        ) return;
         const types = e.dataTransfer?.types;
         if (!types) return;
         if (!types.includes("Files") && !types.includes(PROJECT_FILE_MIME)) {
@@ -943,64 +846,38 @@ export function Composer(props: {
                 >
                     {/* Attachments */}
                     <div class="flex flex-wrap gap-3 mb-4">
-                        {(!isZzdhModel(model.value) ||
-                            isZzdhMultiReferenceModel(model.value)) && (
-                            <>
-                                <button
-                                    type="button"
-                                    onClick={() => fileInput.current?.click()}
-                                    class="w-[72px] h-[72px] rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex flex-col items-center justify-center gap-1 text-gray-400 transition-colors"
-                                >
-                                    <span class="text-lg leading-none">+</span>
-                                    <span class="text-[10px]">
-                                        {get_text(
-                                            isZzdhMultiReferenceModel(
-                                                    model.value,
-                                                ) ||
-                                                (isMiniMaxModel(
-                                                    model.value,
-                                                ) &&
-                                                    (mode.value ===
-                                                            "frames" ||
-                                                        model.value ===
-                                                            "MiniMax-H3-Max"))
-                                                ? "reference_images"
-                                                : "image_video_audio",
-                                            language.value,
-                                        )}
-                                    </span>
-                                </button>
-                                <input
-                                    ref={fileInput}
-                                    type="file"
-                                    multiple
-                                    accept={isZzdhMultiReferenceModel(
-                                            model.value,
-                                        ) ||
-                                            (isMiniMaxModel(model.value) &&
-                                                (mode.value === "frames" ||
-                                                    model.value ===
-                                                        "MiniMax-H3-Max"))
-                                        ? "image/*"
-                                        : "image/*,video/*,audio/*"}
-                                    class="hidden"
-                                    onChange={(e) => {
-                                        addFiles(e.currentTarget.files);
-                                        e.currentTarget.value = "";
-                                    }}
-                                />
-                            </>
-                        )}
-
-                        {isZzdhMultiReferenceModel(model.value) &&
-                            attachments.value.length === 0 && (
-                            <div class="h-[72px] flex items-center text-xs text-gray-400">
+                        <button
+                            type="button"
+                            onClick={() => fileInput.current?.click()}
+                            class="w-[72px] h-[72px] rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 flex flex-col items-center justify-center gap-1 text-gray-400 transition-colors"
+                        >
+                            <span class="text-lg leading-none">+</span>
+                            <span class="text-[10px]">
                                 {get_text(
-                                    "zzdh_multi_reference_images",
+                                    isMiniMaxModel(model.value) &&
+                                        (mode.value === "frames" ||
+                                            model.value === "MiniMax-H3-Max")
+                                        ? "reference_images"
+                                        : "image_video_audio",
                                     language.value,
                                 )}
-                            </div>
-                        )}
+                            </span>
+                        </button>
+                        <input
+                            ref={fileInput}
+                            type="file"
+                            multiple
+                            accept={isMiniMaxModel(model.value) &&
+                                    (mode.value === "frames" ||
+                                        model.value === "MiniMax-H3-Max")
+                                ? "image/*"
+                                : "image/*,video/*,audio/*"}
+                            class="hidden"
+                            onChange={(e) => {
+                                addFiles(e.currentTarget.files);
+                                e.currentTarget.value = "";
+                            }}
+                        />
 
                         {attachments.value.map((att) => {
                             return (
@@ -1202,8 +1079,7 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        {!isZzdhModel(model.value) &&
-                            model.value !== "MiniMax-H3-Max" && (
+                        {model.value !== "MiniMax-H3-Max" && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -1289,11 +1165,7 @@ export function Composer(props: {
                                     {ratio.value}
                                 </span>
                                 <span class="px-2.5">
-                                    {isZzdhModel(model.value)
-                                        ? model.value.endsWith("-768p")
-                                            ? "768p"
-                                            : "480p"
-                                        : resolution.value}
+                                    {resolution.value}
                                 </span>
                                 <span class="px-2.5">
                                     {durationLabel.value}
@@ -1309,11 +1181,7 @@ export function Composer(props: {
                                         )}
                                     </div>
                                     <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
-                                        {RATIOS.filter((r) =>
-                                            !isZzdhModel(model.value) ||
-                                            r.value === "16:9" ||
-                                            r.value === "9:16"
-                                        ).map((r) => (
+                                        {RATIOS.map((r) => (
                                             <button
                                                 key={r.value}
                                                 type="button"
@@ -1341,43 +1209,38 @@ export function Composer(props: {
                                         ))}
                                     </div>
 
-                                    {!isZzdhModel(model.value) && (
-                                        <>
-                                            <div class="text-sm text-gray-500 mb-2">
-                                                {get_text(
-                                                    "resolution",
-                                                    language.value,
-                                                )}
-                                            </div>
-                                            <div
-                                                class="grid bg-gray-100 rounded-lg p-1 mb-5"
-                                                style={{
-                                                    gridTemplateColumns:
-                                                        `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
-                                                }}
+                                    <div class="text-sm text-gray-500 mb-2">
+                                        {get_text(
+                                            "resolution",
+                                            language.value,
+                                        )}
+                                    </div>
+                                    <div
+                                        class="grid bg-gray-100 rounded-lg p-1 mb-5"
+                                        style={{
+                                            gridTemplateColumns:
+                                                `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
+                                        }}
+                                    >
+                                        {resolutions.value.map((
+                                            res,
+                                        ) => (
+                                            <button
+                                                key={res}
+                                                type="button"
+                                                onClick={() =>
+                                                    resolution.value = res}
+                                                class={`h-9 rounded-md text-sm ${
+                                                    resolution.value ===
+                                                            res
+                                                        ? "bg-white shadow text-gray-900 font-medium"
+                                                        : "text-gray-500 hover:text-gray-700"
+                                                }`}
                                             >
-                                                {resolutions.value.map((
-                                                    res,
-                                                ) => (
-                                                    <button
-                                                        key={res}
-                                                        type="button"
-                                                        onClick={() =>
-                                                            resolution.value =
-                                                                res}
-                                                        class={`h-9 rounded-md text-sm ${
-                                                            resolution.value ===
-                                                                    res
-                                                                ? "bg-white shadow text-gray-900 font-medium"
-                                                                : "text-gray-500 hover:text-gray-700"
-                                                        }`}
-                                                    >
-                                                        {res}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
+                                                {res}
+                                            </button>
+                                        ))}
+                                    </div>
 
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
@@ -1422,10 +1285,8 @@ export function Composer(props: {
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
-                                                min={isZzdhModel(model.value)
-                                                    ? 1
-                                                    : model.value ===
-                                                            "MiniMax-H3-Max"
+                                                min={model.value ===
+                                                        "MiniMax-H3-Max"
                                                     ? 5
                                                     : 4}
                                                 max={15}
