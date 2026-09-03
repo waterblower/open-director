@@ -64,9 +64,15 @@ const ResultSchema = z.union([
             z.object({
                 loc: z.array(z.union([z.string(), z.number()])),
                 msg: z.string(),
-                type: z.string(),
+                type: z.enum(["content_policy_violation", "file_download_error"]),
                 url: z.string(),
-                input: z.string(),
+                input: z.union([
+                    z.string(),
+                    z.object({
+                        text: z.array(z.string()),
+                        image_url: z.array(z.string()),
+                    }),
+                ]),
             }),
         ),
     }),
@@ -105,6 +111,7 @@ export async function get_result(requestID: string, apikey: string) {
     }
     const text = await res.text();
     const json = JSON.parse(text);
+    // console.log(res.status, json);
     const final_result = ResultSchema.safeParse({
         status: res.status,
         ...json,
@@ -115,7 +122,7 @@ export async function get_result(requestID: string, apikey: string) {
     return final_result.data;
 }
 
-async function wait_for_result(requestID: string, apikey: string) {
+export async function wait_for_result(requestID: string, apikey: string) {
     while (true) {
         const result = await get_result(requestID, apikey);
         if (result instanceof Error) {
