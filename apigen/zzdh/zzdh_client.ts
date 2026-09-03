@@ -113,13 +113,11 @@ export class ZzdhClient {
     async createTask(
         request: CreateTaskRequest,
     ): Promise<CreateTaskResponse | Error> {
-        const parsedRequest = CreateTaskRequestSchema.safeParse(request);
-        if (!parsedRequest.success) return parsedRequest.error;
-
+        console.log(request)
         const response = await this.requestJson("/v8/videos/generations", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(parsedRequest.data),
+            body: JSON.stringify(request),
         });
         if (response instanceof Error) return response;
 
