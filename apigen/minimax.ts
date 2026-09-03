@@ -33,11 +33,6 @@ function mediaUrlSchema(dataUriPattern: RegExp) {
     );
 }
 
-const ImageUrlSchema = mediaUrlSchema(
-    /^data:image\/(?:jpg|jpeg|png|webp|heic|heif);base64,/,
-);
-const VideoUrlSchema = mediaUrlSchema(/^data:video\/mp4;base64,/);
-const AudioUrlSchema = mediaUrlSchema(/^data:audio\/(?:wav|mp3);base64,/);
 
 export const FileIdSchema = z.union([
     z.number().int().positive(),
@@ -98,25 +93,25 @@ export const TextContentSchema = z.object({
 
 export const ImageContentSchema = z.object({
     type: z.literal("image_url"),
-    image_url: z.object({ url: z.url() }),
+    image_url: z.object({ url: z.string() }),
     role: z.enum([
         "first_frame",
         "last_frame",
         "reference_image",
     ]).optional(),
-}).strict();
+});
 
 export const VideoContentSchema = z.object({
     type: z.literal("video_url"),
-    video_url: z.object({ url: VideoUrlSchema }).strict(),
+    video_url: z.object({ url: z.string() }),
     role: z.literal("reference_video"),
-}).strict();
+});
 
 export const AudioContentSchema = z.object({
     type: z.literal("audio_url"),
-    audio_url: z.object({ url: AudioUrlSchema }).strict(),
+    audio_url: z.object({ url: z.string() }),
     role: z.literal("reference_audio"),
-}).strict();
+});
 
 export const VideoGenerationContentSchema = z.discriminatedUnion("type", [
     TextContentSchema,

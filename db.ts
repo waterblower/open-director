@@ -29,7 +29,10 @@ import { kv } from "./kv.ts";
  */
 function jsonColumn<T>(schema: z.ZodType<T>) {
     return z.string().transform((s): T => {
-        return schema.parse(JSON.parse(s));
+        const value: unknown = JSON.parse(s);
+        const result = schema.safeParse(value, { reportInput: true });
+        if (!result.success) throw result.error;
+        return result.data;
     });
 }
 
