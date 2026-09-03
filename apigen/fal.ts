@@ -49,9 +49,61 @@ export async function reference_to_video(input: FalInput, apikey: string) {
         return res;
     }
     const json = await res.json();
-    const output =  OutputSchema.safeParse(json);
-    if(output.error) {
-        return output.error
+    const output = OutputSchema.safeParse(json);
+    if (output.error) {
+        return output.error;
     }
     return output.data;
+}
+
+const ResultSchema = z.union([
+    z.object({
+        detail: z.array(
+            z.object({
+                loc: z.array(z.string()),
+                msg: z.string(),
+                type: z.string(),
+                url: z.string(),
+                input: z.string(),
+            }),
+        ),
+    }),
+    z.object({
+        cancel_url:z.string(),
+        detail: z.string(),
+        request_id: z.string(),
+        response_url: z.string(),
+        status_url: z.string(),
+    }),
+    z.object({
+        video: z.object({
+            url: z.string(),
+            content_type: z.literal("video/mp4"),
+            file_name: z.string(),
+            file_size: z.number(),
+        }),
+        expanded_prompt: z.string(),
+    }),
+]);
+
+export async function get_result(requestID: string, apikey: string) {
+    const res = await safeFetch(
+        `https://queue.fal.run/minimax/h3/requests/${requestID}`,
+        {
+            method: "GET",
+            headers: {
+                "Authorization": `Key ${apikey}`,
+            },
+        },
+    );
+    if (res instanceof Error) {
+        return res;
+    }
+    const json = await res.json();
+    return [res.status, json];
+    // const output =  OutputSchema.safeParse(json);
+    // if(output.error) {
+    //     return output.error
+    // }
+    // return output.data;
 }

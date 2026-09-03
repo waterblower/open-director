@@ -18,3 +18,4 @@ db.script.ts
 .DS_Store
 *.jpeg
 *.mp4
+/apigen/data

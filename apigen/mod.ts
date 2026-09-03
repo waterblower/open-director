@@ -46,7 +46,7 @@ export async function generate(
     if (input.model == "fal/minimax/h3/reference-to-video") {
         const result = await reference_to_video(input.input, apiKey);
         console.log(result);
-        if(result instanceof Error) {
+        if (result instanceof Error) {
             return result;
         }
 
@@ -60,37 +60,37 @@ export async function generate(
             apiKey,
         });
         const result = await client.createVideoTask(input);
-        if(result instanceof Error) {
+        if (result instanceof Error) {
             return result;
         }
         return {
             provider: "minimax" as const,
             model: input.model,
             res: result,
-        }
+        };
     } else if (isZzdhInput(input)) {
         const zzdhClient = new ZzdhClient({
             apiKey,
         });
         const res = await zzdhClient.createTask(input);
-        if(res instanceof Error) {
+        if (res instanceof Error) {
             return res;
         }
         return {
             provider: "zzdh" as const,
             model: input.model,
             res,
-        }
+        };
     } else {
         const res = await new SeedanceClient({ apiKey }).generate(input);
-        if(res instanceof Error) {
+        if (res instanceof Error) {
             return res;
         }
         return {
             provider: "seedance" as const,
             model: input.model,
             res,
-        }
+        };
     }
 }
 
