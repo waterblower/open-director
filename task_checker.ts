@@ -37,7 +37,7 @@ import {
  */
 const QUEUED_GRACE_MS = 5 * 60 * 1000;
 import { global_event_bus } from "./trpc/router.ts";
-import { kv } from "./kv.ts";
+import { getStoredApiKey, getStoredApiKeyFromModel, kv } from "./kv.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { sha256Hex } from "./utils.ts";
 
@@ -58,7 +58,12 @@ export async function check_and_download(): Promise<void | Error> {
         //    unparseable request_json) can't crash the whole polling loop.
         for (const gen of pending) {
             try {
-                const task = await getTask(gen.model ?? "", gen.task_id);
+                const apiKey = await getStoredApiKeyFromModel(gen.model ?? "");
+                const task = await getTask(
+                    gen.model ?? "",
+                    gen.task_id,
+                    apiKey ?? "",
+                );
                 if (task instanceof Error) {
                     // 404 → Seedance has no such task (never persisted / purged):
                     // terminal, so mark failed and stop polling it. Other errors
@@ -102,6 +107,7 @@ export async function check_and_download(): Promise<void | Error> {
                     gen.task_id,
                     gen.model ?? "",
                     task,
+                    apiKey ?? "",
                 );
             } catch (err) {
                 console.error(`polling generation ${gen.task_id} failed:`, err);
@@ -123,7 +129,15 @@ export async function check_and_download(): Promise<void | Error> {
                     console.log(
                         `missing on disk, re-downloading ${gen.task_id}.mp4`,
                     );
-                    const task = await getTask(gen.model ?? "", gen.task_id);
+                    const apiKey = await getStoredApiKeyFromModel(
+                        gen.model ?? "",
+                    );
+
+                    const task = await getTask(
+                        gen.model ?? "",
+                        gen.task_id,
+                        apiKey ?? "",
+                    );
                     if (task instanceof Error) {
                         console.error(
                             `re-fetch task ${gen.task_id} failed:`,
@@ -145,6 +159,7 @@ export async function check_and_download(): Promise<void | Error> {
                         gen.task_id,
                         gen.model ?? "",
                         task,
+                        apiKey ?? "",
                     );
                     continue;
                 }
@@ -206,8 +221,9 @@ async function downloadAndRecord(
     taskId: string,
     model: string,
     task: GenerationTask,
+    apiKey: string,
 ): Promise<void> {
-    const response = await getVideoContent(model, taskId, task);
+    const response = await getVideoContent(model, taskId, task, apiKey);
     if (response instanceof Error) {
         console.error(`download ${taskId} failed:`, response);
         return;

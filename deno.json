@@ -53,6 +53,7 @@
     "imports": {
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",
+        "@fal-ai/client": "npm:@fal-ai/client@^1.10.1",
         "@libs/qrcode": "jsr:@libs/qrcode@^3.0.1",
         "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.29.0",
         "@std/assert": "jsr:@std/assert@^1.0.19",

@@ -16,7 +16,6 @@ import {
     VideoModelSchema as MiniMaxVideoModelSchema,
     VideoTaskSchema as MiniMaxVideoTaskSchema,
 } from "@/apigen/minimax.ts";
-import { getStoredApiKey } from "@/kv.ts";
 
 export const GenerateInputSchema = z.union([
     MiniMaxCreateVideoTaskRequestSchema,
@@ -33,34 +32,40 @@ export type GenerateInput = z.infer<typeof GenerateInputSchema>;
 export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
-export async function generate(input: GenerateInput) {
-    if (isMiniMaxInput(input)) {
+export async function generate(
+    input: GenerateInput | {
+        model: "fal/minimax/h3/reference-to-video";
+    },
+    apiKey: string,
+) {
+    if (input.model == "fal/minimax/h3/reference-to-video") {
+        throw new Error("fal not implemented");
+    } else if (isMiniMaxInput(input)) {
         const client = new MiniMaxClient({
-            apiKey: (await getStoredApiKey("minimax")) ?? "",
+            apiKey,
         });
         return await client.createVideoTask(input);
-    }
-    if (isZzdhInput(input)) {
+    } else if (isZzdhInput(input)) {
         const zzdhClient = new ZzdhClient({
-            apiKey: (await getStoredApiKey("zzdh")) ?? "",
+            apiKey,
         });
         return await zzdhClient.createTask(input);
+    } else {
+        return await seedance_client.generate(input);
     }
-
-    return await seedance_client.generate(input);
 }
 
-export async function getTask(model: string, taskId: string) {
+export async function getTask(model: string, taskId: string, apiKey: string) {
     if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
-            apiKey: (await getStoredApiKey("minimax")) ?? "",
+            apiKey,
         });
         const response = await client.getVideoTask(taskId);
         return response instanceof Error ? response : response.task;
     }
     if (isZzdhModel(model)) {
         const zzdhClient = new ZzdhClient({
-            apiKey: (await getStoredApiKey("zzdh")) ?? "",
+            apiKey,
         });
         return await zzdhClient.getTask(taskId);
     }
@@ -71,6 +76,7 @@ export async function getVideoContent(
     model: string,
     taskId: string,
     task: GenerationTask,
+    apiKey: string,
 ): Promise<Response | Error> {
     if (isMiniMaxModel(model)) {
         const parsed = MiniMaxVideoTaskSchema.safeParse(task);
@@ -91,7 +97,7 @@ export async function getVideoContent(
     }
     if (isZzdhModel(model)) {
         const zzdhClient = new ZzdhClient({
-            apiKey: (await getStoredApiKey("zzdh")) ?? "",
+            apiKey,
         });
         return await zzdhClient.getContent(taskId);
     }

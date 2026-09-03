@@ -923,8 +923,11 @@ export const appRouter = router({
                     type: "generation_created",
                     gen: generation,
                 });
-
-                const created = await generate(request);
+                const apiKey = await getStoredApiKeyFromModel(request.model);
+                if (!apiKey) {
+                    throw new Error("no api key found for model");
+                }
+                const created = await generate(request, apiKey);
                 if (created instanceof Error) {
                     console.error(created);
                     const err = updateGeneration(db, {
@@ -954,7 +957,7 @@ export const appRouter = router({
                     throw err;
                 }
 
-                const task = await getTask(request.model, taskId);
+                const task = await getTask(request.model, taskId, apiKey);
                 if (task instanceof Error) {
                     throw task;
                 }
@@ -1182,6 +1185,7 @@ import { delay } from "@std/async";
 import {
     getShowOpenDirectorDir,
     getStoredApiKey,
+    getStoredApiKeyFromModel,
     kv,
     setShowOpenDirectorDir,
     setStoredApiKey,

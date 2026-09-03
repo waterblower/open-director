@@ -31,6 +31,20 @@ export async function getStoredApiKey(
     return res.value;
 }
 
+/** The configured provider API key, or null if one was never set. */
+export async function getStoredApiKeyFromModel(
+    model: string,
+): Promise<string | null> {
+    type ApiProvider = "seedance" | "zzdh" | "minimax";
+    let provider: ApiProvider = "seedance";
+    if (model.includes("zzdh")) {
+        provider = "zzdh";
+    } else if (model.includes("minimax")) {
+        provider = "minimax";
+    }
+    return await getStoredApiKey(provider);
+}
+
 /** Persist a provider API key (machine-level, shared across projects). */
 export async function setStoredApiKey(
     provider: ApiProvider,

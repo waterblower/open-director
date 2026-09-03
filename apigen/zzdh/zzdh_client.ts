@@ -113,7 +113,7 @@ export class ZzdhClient {
     async createTask(
         request: CreateTaskRequest,
     ): Promise<CreateTaskResponse | Error> {
-        console.log(request)
+        console.log(request);
         const response = await this.requestJson("/v8/videos/generations", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
