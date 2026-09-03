@@ -943,8 +943,11 @@ export const appRouter = router({
 
                     return gen;
                 }
+                if (created.provider == "fal") {
+                    throw new Error("fal provider is not supported");
+                }
 
-                const taskId = taskIdFromCreateResponse(created);
+                const taskId = taskIdFromCreateResponse(created.res);
                 if (taskId instanceof Error) throw taskId;
                 console.log("task created", created);
                 const err = updateGeneration(db, {

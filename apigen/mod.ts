@@ -33,26 +33,64 @@ export type GenerateInput = z.infer<typeof GenerateInputSchema>;
 export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
+import { fal } from "@fal-ai/client";
+import { FalInput, reference_to_video } from "@/apigen/fal.ts";
+
 export async function generate(
     input: GenerateInput | {
         model: "fal/minimax/h3/reference-to-video";
+        input: FalInput;
     },
     apiKey: string,
 ) {
     if (input.model == "fal/minimax/h3/reference-to-video") {
-        throw new Error("fal not implemented");
+        const result = await reference_to_video(input.input, apiKey);
+        console.log(result);
+        if(result instanceof Error) {
+            return result;
+        }
+
+        return {
+            provider: "fal" as const,
+            model: input.model,
+            res: result,
+        };
     } else if (isMiniMaxInput(input)) {
         const client = new MiniMaxClient({
             apiKey,
         });
-        return await client.createVideoTask(input);
+        const result = await client.createVideoTask(input);
+        if(result instanceof Error) {
+            return result;
+        }
+        return {
+            provider: "minimax" as const,
+            model: input.model,
+            res: result,
+        }
     } else if (isZzdhInput(input)) {
         const zzdhClient = new ZzdhClient({
             apiKey,
         });
-        return await zzdhClient.createTask(input);
+        const res = await zzdhClient.createTask(input);
+        if(res instanceof Error) {
+            return res;
+        }
+        return {
+            provider: "zzdh" as const,
+            model: input.model,
+            res,
+        }
     } else {
-        return await new SeedanceClient({ apiKey }).generate(input);
+        const res = await new SeedanceClient({ apiKey }).generate(input);
+        if(res instanceof Error) {
+            return res;
+        }
+        return {
+            provider: "seedance" as const,
+            model: input.model,
+            res,
+        }
     }
 }
 
