@@ -58,9 +58,10 @@ export async function reference_to_video(input: FalInput, apikey: string) {
 
 const ResultSchema = z.union([
     z.object({
+        status: z.literal(422),
         detail: z.array(
             z.object({
-                loc: z.array(z.string()),
+                loc: z.array(z.union([z.string(), z.number()])),
                 msg: z.string(),
                 type: z.string(),
                 url: z.string(),
@@ -69,13 +70,15 @@ const ResultSchema = z.union([
         ),
     }),
     z.object({
-        cancel_url:z.string(),
+        status: z.literal(400),
+        cancel_url: z.string(),
         detail: z.string(),
         request_id: z.string(),
         response_url: z.string(),
         status_url: z.string(),
     }),
     z.object({
+        status: z.literal(200),
         video: z.object({
             url: z.string(),
             content_type: z.literal("video/mp4"),
@@ -99,11 +102,14 @@ export async function get_result(requestID: string, apikey: string) {
     if (res instanceof Error) {
         return res;
     }
-    const json = await res.json();
-    return [res.status, json];
-    // const output =  OutputSchema.safeParse(json);
-    // if(output.error) {
-    //     return output.error
-    // }
-    // return output.data;
+    const text = await res.text();
+    const json = JSON.parse(text);
+    const final_result = ResultSchema.safeParse({
+        status: res.status,
+        ...json,
+    });
+    if (final_result.error) {
+        return final_result.error;
+    }
+    return final_result.data;
 }
