@@ -109,7 +109,6 @@ export async function getVideoContent(
         }
     }
 
-
     const parsed = SeedanceTaskSchema.safeParse(task);
     if (!parsed.success) return parsed.error;
     const url = parsed.data.content?.video_url;
@@ -125,7 +124,6 @@ export async function getVideoContent(
     }
 }
 
-
 export function isMiniMaxModel(model: unknown): model is z.infer<
     typeof MiniMaxVideoModelSchema
 > {
@@ -137,8 +135,6 @@ export function isMiniMaxInput(
 ): input is z.infer<typeof MiniMaxCreateVideoTaskRequestSchema> {
     return isMiniMaxModel(input.model);
 }
-
-
 
 export function localTaskStatus(task: GenerationTask): LocalTaskStatus {
     switch (task.status) {

@@ -39,7 +39,7 @@ export async function getStoredApiKeyFromModel(
     if (model.includes("minimax")) {
         provider = "minimax";
     } else if (model.includes("seedance")) {
-        provider = "seedance"
+        provider = "seedance";
     } else {
         throw new Error(`Unsupported model: ${model}`);
     }
