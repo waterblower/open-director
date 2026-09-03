@@ -14,11 +14,10 @@ const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
 export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
-export type ApiProvider = "seedance" | "zzdh" | "minimax";
+export type ApiProvider = "seedance" | "minimax";
 
 const API_KEY_BY_PROVIDER = {
     seedance: ["config", "seedance_api_key"],
-    zzdh: ["config", "zzdh_api_key"],
     minimax: ["config", "minimax_api_key"],
 } as const satisfies Record<ApiProvider, Deno.KvKey>;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
@@ -35,12 +34,14 @@ export async function getStoredApiKey(
 export async function getStoredApiKeyFromModel(
     model: string,
 ): Promise<string | null> {
-    type ApiProvider = "seedance" | "zzdh" | "minimax";
+    type ApiProvider = "seedance" | "minimax";
     let provider: ApiProvider = "seedance";
-    if (model.includes("zzdh")) {
-        provider = "zzdh";
-    } else if (model.includes("minimax")) {
+    if (model.includes("minimax")) {
         provider = "minimax";
+    } else if (model.includes("seedance")) {
+        provider = "seedance"
+    } else {
+        throw new Error(`Unsupported model: ${model}`);
     }
     return await getStoredApiKey(provider);
 }
