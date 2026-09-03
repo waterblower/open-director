@@ -83,7 +83,9 @@ export async function readDir(projectRoot: string, path: string) {
 export async function loadProjectData(): Promise<ProjectData | null | Error> {
     try {
         const data = await trpc.loadProjectData.query();
-        if (!data) return null;
+        if (!data) {
+            return null;
+        }
         const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};
         for (const [dir, entries] of Object.entries(data.childrenByPath)) {
             childrenByPath[dir] = entries.filter(notHidden);

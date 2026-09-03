@@ -43,11 +43,9 @@ import {
     type GenerateInput,
     getTask,
     isMiniMaxModel,
-    isZzdhModel,
     localTaskStatus,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
-import { ModelSchema as ZzdhModelSchema } from "../apigen/zzdh/zzdh_client.ts";
 import {
     type VideoGenerationContent,
     VideoModelSchema as MiniMaxVideoModelSchema,
@@ -349,11 +347,13 @@ export const appRouter = router({
         for (const rel of expanded) {
             const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
+                console.error(target);
                 throw target;
             }
             try {
                 childrenByPath[rel] = await listDir(target);
-            } catch {
+            } catch (e) {
+                console.warn(e);
                 // Directory removed since last session — drop it silently.
             }
         }
@@ -574,7 +574,7 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "zzdh", "minimax"]).optional())
+        .input(z.enum(["seedance", "minimax"]).optional())
         .query(async ({ input }) => {
             const provider = input ?? "seedance";
             const key = await getStoredApiKey(provider);
@@ -585,10 +585,10 @@ export const appRouter = router({
         }),
 
     // Save a provider API key. Seedance keeps its shared client in sync;
-    // ZZDH and MiniMax clients read their keys from KV when dispatched.
+    // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "zzdh", "minimax"]).optional(),
+            provider: z.enum(["seedance", "minimax"]).optional(),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
@@ -654,7 +654,6 @@ export const appRouter = router({
                         "doubao-seedance-2-0-fast-260128",
                         "doubao-seedance-2-0-mini-260615",
                     ]),
-                    ZzdhModelSchema,
                     MiniMaxVideoModelSchema,
                 ]),
                 prompt: z.string(),
@@ -708,69 +707,7 @@ export const appRouter = router({
 
                 let request: GenerateInput;
                 let storedRequest: GenerateInput;
-                if (isZzdhModel(model)) {
-                    if (!prompt.trim()) {
-                        throw new Error("ZZDH H3 requires a prompt");
-                    }
-                    const aspectRatio = ratio === "horizontal" ||
-                            ratio === "16:9" || ratio === "4:3" ||
-                            ratio === "21:9"
-                        ? "horizontal"
-                        : ratio === "vertical" || ratio === "9:16" ||
-                                ratio === "3:4"
-                        ? "vertical"
-                        : null;
-                    if (!aspectRatio) {
-                        throw new Error(
-                            "ZZDH H3 supports only horizontal or vertical output",
-                        );
-                    }
-                    if (
-                        model ===
-                            "zzdh-minimax-h3-限时优惠-多参考图生-768p"
-                    ) {
-                        if (
-                            attachments.length < 1 ||
-                            attachments.length > 9 ||
-                            attachments.some((att) => att.kind !== "image")
-                        ) {
-                            throw new Error(
-                                "ZZDH H3 multi-reference generation requires 1–9 images",
-                            );
-                        }
-                        const referenceImages = await Promise.all(
-                            attachments.map(async (att) => ({
-                                url: await resolveToDataUrl(
-                                    att.dataUrlOrFilePath,
-                                ),
-                                role: "reference_image" as const,
-                            })),
-                        );
-                        const storedReferenceImages = await Promise.all(
-                            referenceImages.map(async (image) => {
-                                const url = await storeDataUrl(
-                                    projectRoot,
-                                    image.url,
-                                );
-                                if (url instanceof Error) throw url;
-                                return { ...image, url };
-                            }),
-                        );
-                        request = {
-                            model,
-                            prompt: prompt.trim(),
-                            aspect_ratio: aspectRatio,
-                            reference_images: referenceImages,
-                            ...(durationMode === "seconds" ? { duration } : {}),
-                        };
-                        storedRequest = {
-                            ...request,
-                            reference_images: storedReferenceImages,
-                        };
-                    } else {
-                        throw new Error(`Invalid model ${model}`);
-                    }
-                } else if (isMiniMaxModel(model)) {
+                if (isMiniMaxModel(model)) {
                     if (!prompt.trim()) {
                         throw new Error("MiniMax H3 requires a prompt");
                     }

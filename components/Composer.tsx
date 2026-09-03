@@ -396,7 +396,6 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            if (isGenerationModel(saved.model)) model.value = saved.model;
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
             if (saved.resolution) resolution.value = saved.resolution;

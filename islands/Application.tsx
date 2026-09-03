@@ -106,12 +106,11 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, zzdh, minimax] = await Promise.all([
+                const [seedance, minimax] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
-                    trpc.getApiKeyStatus.query("zzdh"),
                     trpc.getApiKeyStatus.query("minimax"),
                 ]);
-                if (!seedance.hasKey && !zzdh.hasKey && !minimax.hasKey) {
+                if (!seedance.hasKey && !minimax.hasKey) {
                     settingsOpen.value = true;
                 }
             } catch (err) {
@@ -132,6 +131,7 @@ export default function Application() {
             const data = await loadProjectData();
             if (data instanceof Error) {
                 console.error(data);
+
                 return;
             }
             if (!data) {

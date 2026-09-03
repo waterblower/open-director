@@ -17,10 +17,8 @@ export function SettingsModal(props: {
     const { onClose, onStatusChange } = props;
 
     const seedanceApiKey = useSignal("");
-    const zzdhApiKey = useSignal("");
     const minimaxApiKey = useSignal("");
     const seedanceMasked = useSignal<string | null>(null);
-    const zzdhMasked = useSignal<string | null>(null);
     const minimaxMasked = useSignal<string | null>(null);
     const saving = useSignal(false);
     const error = useSignal<string | null>(null);
@@ -39,13 +37,11 @@ export function SettingsModal(props: {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, zzdh, minimax] = await Promise.all([
+                const [seedance, minimax] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
-                    trpc.getApiKeyStatus.query("zzdh"),
                     trpc.getApiKeyStatus.query("minimax"),
                 ]);
                 seedanceMasked.value = seedance.masked;
-                zzdhMasked.value = zzdh.masked;
                 minimaxMasked.value = minimax.masked;
             } catch (err) {
                 console.error(err);
@@ -55,9 +51,8 @@ export function SettingsModal(props: {
 
     const save = async () => {
         const seedanceKey = seedanceApiKey.value.trim();
-        const zzdhKey = zzdhApiKey.value.trim();
         const minimaxKey = minimaxApiKey.value.trim();
-        if (!seedanceKey && !zzdhKey && !minimaxKey) {
+        if (!seedanceKey && !minimaxKey) {
             error.value = get_text("please_enter_an_api_key", language.value);
             return;
         }
@@ -71,12 +66,6 @@ export function SettingsModal(props: {
                         apiKey: seedanceKey,
                     })
                     : null,
-                zzdhKey
-                    ? trpc.setApiKey.mutate({
-                        provider: "zzdh",
-                        apiKey: zzdhKey,
-                    })
-                    : null,
                 minimaxKey
                     ? trpc.setApiKey.mutate({
                         provider: "minimax",
@@ -85,11 +74,9 @@ export function SettingsModal(props: {
                     : null,
             ]);
             if (results[0]) seedanceMasked.value = results[0].masked;
-            if (results[1]) zzdhMasked.value = results[1].masked;
-            if (results[2]) minimaxMasked.value = results[2].masked;
+            if (results[1]) minimaxMasked.value = results[1].masked;
             onStatusChange?.(Boolean(
-                seedanceMasked.value || zzdhMasked.value ||
-                    minimaxMasked.value,
+                seedanceMasked.value || minimaxMasked.value,
             ));
             onClose();
         } catch (err) {
@@ -170,40 +157,6 @@ export function SettingsModal(props: {
                                 {error.value}
                             </p>
                         )}
-                    </div>
-
-                    <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-gray-700">
-                            ZZDH API Key
-                        </label>
-                        {zzdhMasked.value && (
-                            <p class="text-[11px] text-gray-500">
-                                {get_text("currently_saved", language.value)}
-                                {" "}
-                                <span class="font-mono">
-                                    {zzdhMasked.value}
-                                </span>
-                            </p>
-                        )}
-                        <input
-                            type="password"
-                            autoComplete="off"
-                            spellcheck={false}
-                            value={zzdhApiKey.value}
-                            placeholder={zzdhMasked.value
-                                ? get_text(
-                                    "enter_a_new_key_to_replace_it",
-                                    language.value,
-                                )
-                                : "YOUR_API_KEY"}
-                            onInput={(e) =>
-                                zzdhApiKey.value =
-                                    (e.target as HTMLInputElement).value}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") save();
-                            }}
-                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
-                        />
                     </div>
 
                     <div class="space-y-1.5">
