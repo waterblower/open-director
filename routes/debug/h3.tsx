@@ -1,8 +1,8 @@
 import { Head } from "fresh/runtime";
 import { define } from "../../utils.ts";
 import {
-    type MiniMaxFile,
     MiniMaxClient,
+    type MiniMaxFile,
     type VideoTask,
     type VideoTaskStatus,
 } from "../../apigen/minimax.ts";
@@ -119,7 +119,9 @@ function TaskGroups({ tasks }: { tasks: VideoTask[] }) {
     return (
         <>
             <p class="summary">
-                <span><b>total:</b> {tasks.length}</span>
+                <span>
+                    <b>total:</b> {tasks.length}
+                </span>
                 {statuses.map((status) => (
                     <span key={status}>
                         <b>{status}:</b> {groups.get(status)!.length}
@@ -210,7 +212,11 @@ function formatUsage(task: VideoTask): string {
 function FileTable({ files }: { files: MiniMaxFile[] }) {
     return (
         <>
-            <p class="summary"><span><b>total:</b> {files.length}</span></p>
+            <p class="summary">
+                <span>
+                    <b>total:</b> {files.length}
+                </span>
+            </p>
             {files.length === 0 && <p class="muted">No files.</p>}
             {files.length > 0 && (
                 <table>

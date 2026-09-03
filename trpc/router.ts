@@ -770,18 +770,7 @@ export const appRouter = router({
                             reference_images: storedReferenceImages,
                         };
                     } else {
-                        if (attachments.length > 0) {
-                            throw new Error(
-                                "ZZDH H3 text-to-video does not accept attachments",
-                            );
-                        }
-                        request = {
-                            model,
-                            prompt: prompt.trim(),
-                            aspect_ratio: aspectRatio,
-                            ...(durationMode === "seconds" ? { duration } : {}),
-                        };
-                        storedRequest = request;
+                        throw new Error(`Invalid model ${model}`);
                     }
                 } else if (isMiniMaxModel(model)) {
                     if (!prompt.trim()) {

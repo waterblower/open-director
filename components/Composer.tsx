@@ -61,16 +61,6 @@ const SEEDANCE_MODELS = [
 
 const ZZDH_MODEL_OPTIONS = [
     {
-        value: "zzdh-minimax-h3-限时优惠-文生-480p",
-        label: "ZZDH MiniMax H3 480p",
-        shortLabel: "H3 480p",
-    },
-    {
-        value: "zzdh-minimax-h3-限时优惠-文生-768p",
-        label: "ZZDH MiniMax H3 768p",
-        shortLabel: "H3 768p",
-    },
-    {
         value: "zzdh-minimax-h3-限时优惠-多参考图生-768p",
         label: "ZZDH MiniMax H3 Multi-Reference 768p",
         shortLabel: "H3 Ref 768p",
@@ -1000,17 +990,6 @@ export function Composer(props: {
                                     }}
                                 />
                             </>
-                        )}
-
-                        {isZzdhModel(model.value) &&
-                            !isZzdhMultiReferenceModel(model.value) &&
-                            attachments.value.length === 0 && (
-                            <div class="h-[72px] flex items-center text-xs text-gray-400">
-                                {get_text(
-                                    "zzdh_text_to_video_only",
-                                    language.value,
-                                )}
-                            </div>
                         )}
 
                         {isZzdhMultiReferenceModel(model.value) &&

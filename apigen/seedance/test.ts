@@ -1,12 +1,11 @@
 import { SeedanceClient } from "@/apigen/seedance/seedance.ts";
 
-
 const IMAGE_NAME = "沈云舒-正脸-35.jpeg";
 const IMAGE_URL = new URL(`./data/${IMAGE_NAME}`, import.meta.url);
 
 const seedance_client = new SeedanceClient({
-    apiKey: ""
-})
+    apiKey: "",
+});
 
 Deno.test({
     name: "upload image",

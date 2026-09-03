@@ -326,10 +326,6 @@ const TEXTS = {
         English: "Reference images",
         Chinese: "参考图片",
     },
-    zzdh_text_to_video_only: {
-        English: "ZZDH H3 text-to-video uses a prompt without attachments.",
-        Chinese: "ZZDH H3 文生视频仅使用提示词，不支持附件。",
-    },
     zzdh_multi_reference_images: {
         English: "Add 1–9 reference images.",
         Chinese: "添加 1–9 张参考图片。",

@@ -9,8 +9,6 @@ import { z } from "zod";
 const API_ORIGIN = "https://zizidonghua.com";
 
 export const ZZDH_MODELS = [
-    "zzdh-minimax-h3-限时优惠-文生-480p",
-    "zzdh-minimax-h3-限时优惠-文生-768p",
     "zzdh-minimax-h3-限时优惠-多参考图生-768p",
 ] as const;
 
@@ -37,21 +35,12 @@ const CommonRequestFields = {
     seed: z.number().int().optional(),
 };
 
-export const TextToVideoModelSchema = z.enum([
-    "zzdh-minimax-h3-限时优惠-文生-480p",
-    "zzdh-minimax-h3-限时优惠-文生-768p",
-]);
 export const MultiReferenceImageModelSchema = z.literal(
     "zzdh-minimax-h3-限时优惠-多参考图生-768p",
 );
 export const ReferenceImageSchema = z.object({
     url: NonEmptyStringSchema,
     role: z.literal("reference_image"),
-}).strict();
-
-export const TextToVideoRequestSchema = z.object({
-    model: TextToVideoModelSchema,
-    ...CommonRequestFields,
 }).strict();
 
 export const MultiReferenceImageRequestSchema = z.object({
@@ -61,7 +50,6 @@ export const MultiReferenceImageRequestSchema = z.object({
 }).strict();
 
 export const CreateTaskRequestSchema = z.discriminatedUnion("model", [
-    TextToVideoRequestSchema,
     MultiReferenceImageRequestSchema,
 ]);
 
@@ -96,14 +84,11 @@ export type Model = z.infer<typeof ModelSchema>;
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
-export type TextToVideoModel = z.infer<typeof TextToVideoModelSchema>;
 export type MultiReferenceImageModel = z.infer<
     typeof MultiReferenceImageModelSchema
 >;
 export type ReferenceImage = z.infer<typeof ReferenceImageSchema>;
-export type TextToVideoRequest = z.infer<
-    typeof TextToVideoRequestSchema
->;
+
 export type MultiReferenceImageRequest = z.infer<
     typeof MultiReferenceImageRequestSchema
 >;

@@ -1,14 +1,12 @@
 import { assertEquals } from "@std/assert/equals";
 import { MiniMaxClient } from "./minimax.ts";
 
-
 const IMAGE_NAME = "沈云舒-正脸-35.jpeg";
 const SOURCE_URL = new URL(`./data/${IMAGE_NAME}`, import.meta.url);
 const DOWNLOAD_URL = new URL(
     "./data/沈云舒-正脸-35.downloaded.jpeg",
     import.meta.url,
 );
-
 
 async function sha256(bytes: Uint8Array): Promise<string> {
     const digest = await crypto.subtle.digest(
@@ -34,7 +32,8 @@ Deno.test({
         if (uploaded instanceof Error) throw uploaded;
 
         assertEquals(
-            uploaded.file.bytes , sourceBytes.byteLength,
+            uploaded.file.bytes,
+            sourceBytes.byteLength,
             `Uploaded byte count ${uploaded.file.bytes} does not match source ${sourceBytes.byteLength}`,
         );
         console.log(

@@ -8,7 +8,8 @@ Deno.test({
         const client = new ZzdhClient({ apiKey: API_KEY });
         const result = await client.createTask({
             model: "zzdh-minimax-h3-限时优惠-多参考图生-768p",
-            prompt: "东京郊区夜晚。镜头在汽车内部，后排坐。她将高跟鞋脱下放到座位底下，然后背靠车门，横着将双腿放到沙发上休息。画面最终定格在她的玉足。没有配乐，没有字幕。",
+            prompt:
+                "东京郊区夜晚。镜头在汽车内部，后排坐。她将高跟鞋脱下放到座位底下，然后背靠车门，横着将双腿放到沙发上休息。画面最终定格在她的玉足。没有配乐，没有字幕。",
             duration: 15,
             aspect_ratio: "horizontal",
             reference_images: [
@@ -19,11 +20,10 @@ Deno.test({
                 {
                     url: "https://github-production-user-asset-6210df.s3.amazonaws.com/127284497/644342073-055f6ebe-320d-4263-acb7-ce2b4822d052.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20260901%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260901T131748Z&X-Amz-Expires=300&X-Amz-Signature=4bae684c1f1b37eb87e976c93ca856ebf8d00785e0d4a2c2eb5d78b696c0d681&X-Amz-SignedHeaders=host&response-content-type=image%2Fpng",
                     role: "reference_image",
-                }
+                },
             ],
         });
         if (result instanceof Error) throw result;
-
 
         console.log("Created ZZDH task:", result);
     },

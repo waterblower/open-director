@@ -33,7 +33,6 @@ function mediaUrlSchema(dataUriPattern: RegExp) {
     );
 }
 
-
 export const FileIdSchema = z.union([
     z.number().int().positive(),
     z.string().regex(/^\d+$/, "File ID must contain only digits"),
@@ -344,7 +343,6 @@ export interface UploadImageRequest {
     filename?: string;
 }
 
-
 export class MiniMaxClient {
     readonly apiKey: string;
     readonly baseUrl: string;
@@ -448,10 +446,8 @@ export class MiniMaxClient {
         const parsedResponse = ListFilesResponseSchema.safeParse(response);
         if (!parsedResponse.success) return parsedResponse.error;
         if (parsedResponse.data.base_resp.status_code !== 0) {
-            return new MiniMaxApiError(
-                200,
-                String(parsedResponse.data.base_resp.status_code),
-                parsedResponse.data.base_resp.status_msg,
+            return new Error(
+                `[${parsedResponse.data.base_resp.status_code}] ${parsedResponse.data.base_resp.status_msg}`,
             );
         }
         return parsedResponse.data;
@@ -523,7 +519,7 @@ export class MiniMaxClient {
         const response = await this.fetch(path, init);
         if (response instanceof Error) return response;
         if (!response.ok) {
-            return new Error(`[${response.status}] ${response.statusText}`)
+            return new Error(`[${response.status}] ${response.statusText}`);
         }
 
         const text = await response.text();
@@ -531,7 +527,7 @@ export class MiniMaxClient {
         try {
             return JSON.parse(text);
         } catch (e) {
-            return e as Error
+            return e as Error;
         }
     }
 
