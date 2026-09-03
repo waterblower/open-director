@@ -4,12 +4,7 @@ import {
     SeedanceClient,
     TaskSchema as SeedanceTaskSchema,
 } from "@/apigen/seedance/seedance.ts";
-import {
-    CreateTaskRequestSchema as ZzdhCreateTaskRequestSchema,
-    ModelSchema as ZzdhModelSchema,
-    TaskSchema as ZzdhTaskSchema,
-    ZzdhClient,
-} from "@/apigen/zzdh/zzdh_client.ts";
+
 import {
     CreateVideoTaskRequestSchema as MiniMaxCreateVideoTaskRequestSchema,
     MiniMaxClient,
@@ -21,12 +16,10 @@ import { S } from "@/_fresh/client/assets/signals.module-DwPwiWj3.js";
 export const GenerateInputSchema = z.union([
     MiniMaxCreateVideoTaskRequestSchema,
     SeedanceCreateTaskRequestSchema,
-    ZzdhCreateTaskRequestSchema,
 ]);
 export const GenerationTaskSchema = z.union([
     MiniMaxVideoTaskSchema,
     SeedanceTaskSchema,
-    ZzdhTaskSchema,
 ]);
 
 export type GenerateInput = z.infer<typeof GenerateInputSchema>;
@@ -68,19 +61,6 @@ export async function generate(
             model: input.model,
             res: result,
         };
-    } else if (isZzdhInput(input)) {
-        const zzdhClient = new ZzdhClient({
-            apiKey,
-        });
-        const res = await zzdhClient.createTask(input);
-        if (res instanceof Error) {
-            return res;
-        }
-        return {
-            provider: "zzdh" as const,
-            model: input.model,
-            res,
-        };
     } else {
         const res = await new SeedanceClient({ apiKey }).generate(input);
         if (res instanceof Error) {
@@ -101,12 +81,6 @@ export async function getTask(model: string, taskId: string, apiKey: string) {
         });
         const response = await client.getVideoTask(taskId);
         return response instanceof Error ? response : response.task;
-    }
-    if (isZzdhModel(model)) {
-        const zzdhClient = new ZzdhClient({
-            apiKey,
-        });
-        return await zzdhClient.getTask(taskId);
     }
     return await new SeedanceClient({ apiKey }).getTask(taskId);
 }
@@ -134,12 +108,7 @@ export async function getVideoContent(
             return error instanceof Error ? error : new Error(String(error));
         }
     }
-    if (isZzdhModel(model)) {
-        const zzdhClient = new ZzdhClient({
-            apiKey,
-        });
-        return await zzdhClient.getContent(taskId);
-    }
+
 
     const parsed = SeedanceTaskSchema.safeParse(task);
     if (!parsed.success) return parsed.error;
@@ -156,11 +125,6 @@ export async function getVideoContent(
     }
 }
 
-export function isZzdhModel(model: unknown): model is z.infer<
-    typeof ZzdhModelSchema
-> {
-    return ZzdhModelSchema.safeParse(model).success;
-}
 
 export function isMiniMaxModel(model: unknown): model is z.infer<
     typeof MiniMaxVideoModelSchema
@@ -174,18 +138,10 @@ export function isMiniMaxInput(
     return isMiniMaxModel(input.model);
 }
 
-export function isZzdhInput(
-    input: GenerateInput,
-): input is z.infer<typeof ZzdhCreateTaskRequestSchema> {
-    return isZzdhModel(input.model);
-}
+
 
 export function localTaskStatus(task: GenerationTask): LocalTaskStatus {
     switch (task.status) {
-        case "in_progress":
-            return "running";
-        case "completed":
-            return "succeeded";
         case "cancelled":
         case "expired":
             return "failed";
