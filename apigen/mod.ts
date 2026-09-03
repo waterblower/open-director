@@ -10,13 +10,21 @@ import {
     TaskSchema as ZzdhTaskSchema,
     ZzdhClient,
 } from "@/apigen/zzdh/zzdh_client.ts";
+import {
+    CreateVideoTaskRequestSchema as MiniMaxCreateVideoTaskRequestSchema,
+    MiniMaxClient,
+    VideoModelSchema as MiniMaxVideoModelSchema,
+    VideoTaskSchema as MiniMaxVideoTaskSchema,
+} from "@/apigen/minimax.ts";
 import { getStoredApiKey } from "@/kv.ts";
 
 export const GenerateInputSchema = z.union([
+    MiniMaxCreateVideoTaskRequestSchema,
     SeedanceCreateTaskRequestSchema,
     ZzdhCreateTaskRequestSchema,
 ]);
 export const GenerationTaskSchema = z.union([
+    MiniMaxVideoTaskSchema,
     SeedanceTaskSchema,
     ZzdhTaskSchema,
 ]);
@@ -26,6 +34,12 @@ export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export async function generate(input: GenerateInput) {
+    if (isMiniMaxInput(input)) {
+        const client = new MiniMaxClient({
+            apiKey: (await getStoredApiKey("minimax")) ?? "",
+        });
+        return await client.createVideoTask(input);
+    }
     if (isZzdhInput(input)) {
         const zzdhClient = new ZzdhClient({
             apiKey: (await getStoredApiKey("zzdh")) ?? "",
@@ -37,6 +51,13 @@ export async function generate(input: GenerateInput) {
 }
 
 export async function getTask(model: string, taskId: string) {
+    if (isMiniMaxModel(model)) {
+        const client = new MiniMaxClient({
+            apiKey: (await getStoredApiKey("minimax")) ?? "",
+        });
+        const response = await client.getVideoTask(taskId);
+        return response instanceof Error ? response : response.task;
+    }
     if (isZzdhModel(model)) {
         const zzdhClient = new ZzdhClient({
             apiKey: (await getStoredApiKey("zzdh")) ?? "",
@@ -51,6 +72,23 @@ export async function getVideoContent(
     taskId: string,
     task: GenerationTask,
 ): Promise<Response | Error> {
+    if (isMiniMaxModel(model)) {
+        const parsed = MiniMaxVideoTaskSchema.safeParse(task);
+        if (!parsed.success) return parsed.error;
+        const url = parsed.data.content?.url;
+        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                return new Error(
+                    `[${response.status}] ${await response.text()}`,
+                );
+            }
+            return response;
+        } catch (error) {
+            return error instanceof Error ? error : new Error(String(error));
+        }
+    }
     if (isZzdhModel(model)) {
         const zzdhClient = new ZzdhClient({
             apiKey: (await getStoredApiKey("zzdh")) ?? "",
@@ -79,6 +117,18 @@ export function isZzdhModel(model: unknown): model is z.infer<
     return ZzdhModelSchema.safeParse(model).success;
 }
 
+export function isMiniMaxModel(model: unknown): model is z.infer<
+    typeof MiniMaxVideoModelSchema
+> {
+    return MiniMaxVideoModelSchema.safeParse(model).success;
+}
+
+export function isMiniMaxInput(
+    input: GenerateInput,
+): input is z.infer<typeof MiniMaxCreateVideoTaskRequestSchema> {
+    return isMiniMaxModel(input.model);
+}
+
 export function isZzdhInput(
     input: GenerateInput,
 ): input is z.infer<typeof ZzdhCreateTaskRequestSchema> {
@@ -91,6 +141,9 @@ export function localTaskStatus(task: GenerationTask): LocalTaskStatus {
             return "running";
         case "completed":
             return "succeeded";
+        case "cancelled":
+        case "expired":
+            return "failed";
         case "running":
         case "succeeded":
         case "failed":

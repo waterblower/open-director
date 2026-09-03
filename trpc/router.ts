@@ -35,16 +35,24 @@ import {
 } from "../db.ts";
 import { setSeedanceApiKey } from "../apigen/seedance/seedance_client.ts";
 import { externalizeAttachments, storeDataUrl } from "../uploads.ts";
-import type { ContentItem } from "../apigen/seedance/seedance.ts";
+import type {
+    ContentItem,
+    CreateTaskRequest as SeedanceCreateTaskRequest,
+} from "../apigen/seedance/seedance.ts";
 import {
     generate,
     type GenerateInput,
     getTask,
+    isMiniMaxModel,
     isZzdhModel,
     localTaskStatus,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
 import { ModelSchema as ZzdhModelSchema } from "../apigen/zzdh/zzdh_client.ts";
+import {
+    type VideoGenerationContent,
+    VideoModelSchema as MiniMaxVideoModelSchema,
+} from "../apigen/minimax.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 import { pickAndLoadGenerationPlan } from "../generation_plan.ts";
@@ -567,7 +575,7 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "zzdh"]).optional())
+        .input(z.enum(["seedance", "zzdh", "minimax"]).optional())
         .query(async ({ input }) => {
             const provider = input ?? "seedance";
             const key = await getStoredApiKey(provider);
@@ -578,10 +586,10 @@ export const appRouter = router({
         }),
 
     // Save a provider API key. Seedance keeps its shared client in sync;
-    // ZZDH clients read their key from KV when a request is dispatched.
+    // ZZDH and MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "zzdh"]).optional(),
+            provider: z.enum(["seedance", "zzdh", "minimax"]).optional(),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
@@ -649,6 +657,7 @@ export const appRouter = router({
                         "doubao-seedance-2-0-mini-260615",
                     ]),
                     ZzdhModelSchema,
+                    MiniMaxVideoModelSchema,
                 ]),
                 prompt: z.string(),
                 attachments: z.array(z.object({
@@ -666,10 +675,17 @@ export const appRouter = router({
                     "horizontal",
                     "vertical",
                 ]),
-                resolution: z.enum(["1080p", "720p", "480p"]),
+                resolution: z.enum([
+                    "1080p",
+                    "720p",
+                    "480p",
+                    "768P",
+                    "2K",
+                ]),
                 durationMode: z.enum(["seconds", "smart"]),
                 duration: z.number(),
                 audio: z.boolean(),
+                mode: z.enum(["reference", "frames"]).default("reference"),
             }))
             .mutation(async (opts) => {
                 if (!db) {
@@ -684,6 +700,7 @@ export const appRouter = router({
                     audio,
                     resolution,
                     model,
+                    mode,
                 } = opts.input;
 
                 const projectRoot = (await getLastOpenedProject(kv))?.path;
@@ -766,9 +783,101 @@ export const appRouter = router({
                         };
                         storedRequest = request;
                     }
+                } else if (isMiniMaxModel(model)) {
+                    if (!prompt.trim()) {
+                        throw new Error("MiniMax H3 requires a prompt");
+                    }
+
+                    const useFrames = mode === "frames" ||
+                        model === "MiniMax-H3-Max";
+                    if (
+                        useFrames &&
+                        (attachments.length > 2 ||
+                            attachments.some((att) => att.kind !== "image"))
+                    ) {
+                        throw new Error(
+                            "MiniMax frame generation accepts at most two images",
+                        );
+                    }
+                    const content: VideoGenerationContent[] = [{
+                        type: "text",
+                        text: prompt.trim(),
+                    }];
+                    for (const [index, att] of attachments.entries()) {
+                        const rawUrl = await resolveToDataUrl(
+                            att.dataUrlOrFilePath,
+                        );
+                        const url = normalizeMiniMaxDataUrl(rawUrl);
+                        if (useFrames) {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: index === 0
+                                    ? "first_frame"
+                                    : "last_frame",
+                            });
+                        } else if (att.kind === "image") {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: "reference_image",
+                            });
+                        } else if (att.kind === "video") {
+                            content.push({
+                                type: "video_url",
+                                video_url: { url },
+                                role: "reference_video",
+                            });
+                        } else {
+                            content.push({
+                                type: "audio_url",
+                                audio_url: { url },
+                                role: "reference_audio",
+                            });
+                        }
+                    }
+
+                    const outputResolution = resolution === "2K"
+                        ? "2K"
+                        : resolution === "768P"
+                        ? "768P"
+                        : resolution === "480p"
+                        ? "480P"
+                        : null;
+                    if (!outputResolution) {
+                        throw new Error(
+                            `Unsupported MiniMax resolution: ${resolution}`,
+                        );
+                    }
+                    const outputRatio = ratio === "horizontal"
+                        ? "16:9"
+                        : ratio === "vertical"
+                        ? "9:16"
+                        : ratio;
+                    request = {
+                        model,
+                        content,
+                        resolution: outputResolution,
+                        duration,
+                        ratio: useFrames && attachments.length > 0
+                            ? "adaptive"
+                            : outputRatio,
+                    };
+                    storedRequest = {
+                        ...request,
+                        content: await externalizeMiniMaxAttachments(
+                            projectRoot,
+                            content,
+                        ),
+                    };
                 } else {
                     // Assemble Seedance multimodal content: optional text, then
                     // each attachment as a typed reference.
+                    if (resolution === "768P" || resolution === "2K") {
+                        throw new Error(
+                            `Unsupported Seedance resolution: ${resolution}`,
+                        );
+                    }
                     const content: ContentItem[] = [];
                     if (prompt) content.push({ type: "text", text: prompt });
                     for (const att of attachments) {
@@ -795,7 +904,7 @@ export const appRouter = router({
                             });
                         }
                     }
-                    request = {
+                    const seedanceRequest = {
                         model,
                         content,
                         generate_audio: audio,
@@ -805,9 +914,10 @@ export const appRouter = router({
                             "horizontal" | "vertical"
                         >,
                         ...(durationMode === "seconds" ? { duration } : {}),
-                    };
+                    } satisfies SeedanceCreateTaskRequest;
+                    request = seedanceRequest;
                     storedRequest = {
-                        ...request,
+                        ...seedanceRequest,
                         content: await externalizeAttachments(
                             projectRoot,
                             content,
@@ -1122,6 +1232,43 @@ function bytesToBase64(bytes: Uint8Array): string {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     }
     return btoa(binary);
+}
+
+/** Normalize browser MIME aliases to the data-URI spellings MiniMax accepts. */
+function normalizeMiniMaxDataUrl(url: string): string {
+    return url
+        .replace(/^data:audio\/mpeg;base64,/, "data:audio/mp3;base64,")
+        .replace(
+            /^data:audio\/(?:x-wav|wave);base64,/,
+            "data:audio/wav;base64,",
+        );
+}
+
+/** Keep generation history small by replacing inline MiniMax media with files. */
+async function externalizeMiniMaxAttachments(
+    projectRoot: string,
+    content: VideoGenerationContent[],
+): Promise<VideoGenerationContent[]> {
+    return await Promise.all(content.map(async (item) => {
+        if (item.type === "text") return item;
+
+        const source = item.type === "image_url"
+            ? item.image_url.url
+            : item.type === "video_url"
+            ? item.video_url.url
+            : item.audio_url.url;
+        if (!source.startsWith("data:")) return item;
+
+        const url = await storeDataUrl(projectRoot, source);
+        if (url instanceof Error) throw url;
+        if (item.type === "image_url") {
+            return { ...item, image_url: { url } };
+        }
+        if (item.type === "video_url") {
+            return { ...item, video_url: { url } };
+        }
+        return { ...item, audio_url: { url } };
+    }));
 }
 
 /**

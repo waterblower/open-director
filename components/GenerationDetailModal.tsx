@@ -2,6 +2,7 @@ import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { GenerateInput } from "../apigen/mod.ts";
 import type { Model as ZzdhModel } from "../apigen/zzdh/zzdh_client.ts";
+import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { estimateCost } from "../apigen/seedance/pricing.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import {
@@ -30,6 +31,13 @@ function isZzdhRequest(
     request: GenerateInput,
 ): request is Extract<GenerateInput, { model: ZzdhModel }> {
     return request.model.startsWith("zzdh-");
+}
+
+function isMiniMaxRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: MiniMaxVideoModel }> {
+    return request.model === "MiniMax-H3" ||
+        request.model === "MiniMax-H3-Max";
 }
 
 function promptText(req: GenerateInput | null | undefined): string {
@@ -184,6 +192,8 @@ export function GenerationDetailModal(props: {
             rmb: (req.duration ?? 5) *
                 (req.model.endsWith("-768p") ? 0.06 : 0.04),
         }
+        : req && isMiniMaxRequest(req)
+        ? null
         : totalTokens != null && req
         ? estimateCost(totalTokens, req)
         : null;
@@ -512,6 +522,7 @@ export function GenerationDetailModal(props: {
                                             />
                                         )}
                                         {!isZzdhRequest(req) &&
+                                            !isMiniMaxRequest(req) &&
                                             req.generate_audio != null && (
                                             <Stat
                                                 label={get_text(
@@ -529,7 +540,8 @@ export function GenerationDetailModal(props: {
                                                     )}
                                             />
                                         )}
-                                        {req.seed != null && req.seed >= 0 && (
+                                        {"seed" in req && req.seed != null &&
+                                            req.seed >= 0 && (
                                             <Stat
                                                 label={get_text(
                                                     "seed",
@@ -545,6 +557,8 @@ export function GenerationDetailModal(props: {
                                     {get_text(
                                         req && isZzdhRequest(req)
                                             ? "zzdh_cost_disclaimer"
+                                            : req && isMiniMaxRequest(req)
+                                            ? "minimax_cost_disclaimer"
                                             : "cost_disclaimer",
                                         language.value,
                                     )}

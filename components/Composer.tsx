@@ -17,6 +17,7 @@ import {
     type Model as ZzdhModel,
     ZZDH_MODELS,
 } from "../apigen/zzdh/zzdh_client.ts";
+import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
@@ -32,7 +33,7 @@ type Attachment = {
 };
 
 type Mode = "reference" | "frames";
-type Resolution = "480p" | "720p" | "1080p";
+type Resolution = "480p" | "720p" | "1080p" | "768P" | "2K";
 type DurationMode = "seconds" | "smart";
 type Popover = "model" | "mode" | "settings" | null;
 
@@ -76,8 +77,29 @@ const ZZDH_MODEL_OPTIONS = [
     },
 ] as const;
 
-const GENERATION_MODELS = [...SEEDANCE_MODELS, ...ZZDH_MODEL_OPTIONS];
-type GenerationModel = SeedanceModel | ZzdhModel;
+const MINIMAX_MODEL_OPTIONS = [
+    {
+        value: "MiniMax-H3",
+        label: "MiniMax H3",
+        shortLabel: "H3",
+    },
+    {
+        value: "MiniMax-H3-Max",
+        label: "MiniMax H3 Max",
+        shortLabel: "H3 Max",
+    },
+] as const satisfies readonly {
+    value: MiniMaxVideoModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+const GENERATION_MODELS = [
+    ...SEEDANCE_MODELS,
+    ...ZZDH_MODEL_OPTIONS,
+    ...MINIMAX_MODEL_OPTIONS,
+];
+type GenerationModel = SeedanceModel | ZzdhModel | MiniMaxVideoModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -95,6 +117,11 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
     "doubao-seedance-2-0-260128": ["480p", "720p", "1080p"],
     "doubao-seedance-2-0-fast-260128": ["480p", "720p"],
     "doubao-seedance-2-0-mini-260615": ["480p", "720p"],
+};
+
+const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
+    "MiniMax-H3": ["768P", "2K"],
+    "MiniMax-H3-Max": ["480p", "768P"],
 };
 
 /** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
@@ -169,14 +196,25 @@ function isZzdhMultiReferenceModel(value: unknown): boolean {
     return value === "zzdh-minimax-h3-限时优惠-多参考图生-768p";
 }
 
+function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
+    return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
+}
+
 function isGenerationModel(value: unknown): value is GenerationModel {
-    return isSeedanceModel(value) || isZzdhModel(value);
+    return isSeedanceModel(value) || isZzdhModel(value) ||
+        isMiniMaxModel(value);
 }
 
 function isZzdhRequest(
     request: GenerateInput,
 ): request is Extract<GenerateInput, { model: ZzdhModel }> {
     return isZzdhModel(request.model);
+}
+
+function isMiniMaxRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: MiniMaxVideoModel }> {
+    return isMiniMaxModel(request.model);
 }
 
 function getModelOption(value: GenerationModel) {
@@ -459,6 +497,67 @@ export function Composer(props: {
             return;
         }
 
+        if (isMiniMaxRequest(req)) {
+            const text = req.content
+                .filter((item) => item.type === "text")
+                .map((item) => item.text)
+                .join("\n");
+            prompt.value = text;
+            model.value = req.model;
+            ratio.value = req.ratio ?? "adaptive";
+            resolution.value = req.resolution === "480P"
+                ? "480p"
+                : req.resolution;
+            durationMode.value = "seconds";
+            duration.value = req.duration;
+            mode.value = req.content.some((item) =>
+                    item.type === "image_url" &&
+                    (item.role === "first_frame" ||
+                        item.role === "last_frame" || item.role === undefined)
+                )
+                ? "frames"
+                : "reference";
+            audio.value = false;
+
+            const media: { kind: AttachmentKind; url: string }[] = req.content
+                .flatMap((item): { kind: AttachmentKind; url: string }[] => {
+                    if (item.type === "image_url") {
+                        return [{
+                            kind: "image" as const,
+                            url: item.image_url.url,
+                        }];
+                    }
+                    if (item.type === "video_url") {
+                        return [{
+                            kind: "video" as const,
+                            url: item.video_url.url,
+                        }];
+                    }
+                    if (item.type === "audio_url") {
+                        return [{
+                            kind: "audio" as const,
+                            url: item.audio_url.url,
+                        }];
+                    }
+                    return [];
+                });
+            attachments.value.forEach((attachment) =>
+                URL.revokeObjectURL(attachment.url)
+            );
+            attachments.value = await Promise.all(media.map(async (item) => ({
+                id: nextId.current++,
+                kind: item.kind,
+                name: kindLabel(item.kind, language.value),
+                url: URL.createObjectURL(await (await fetch(item.url)).blob()),
+            })));
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = text;
+                autoGrow(ta);
+            }
+            return;
+        }
+
         const content = req.content;
         const text = content
             .filter((c): c is Extract<ContentItem, { type: "text" }> =>
@@ -546,9 +645,15 @@ export function Composer(props: {
 
     // Resolutions allowed for the current model. Keep the selection valid when
     // the model changes (e.g. switching to 2.0 Fast drops 1080p → 720p).
-    const resolutions = useComputed(() =>
-        isSeedanceModel(model.value) ? MODEL_RESOLUTIONS[model.value] : []
-    );
+    const resolutions = useComputed(() => {
+        if (isSeedanceModel(model.value)) {
+            return MODEL_RESOLUTIONS[model.value];
+        }
+        if (isMiniMaxModel(model.value)) {
+            return MINIMAX_MODEL_RESOLUTIONS[model.value];
+        }
+        return [];
+    });
     useSignalEffect(() => {
         if (isZzdhModel(model.value)) {
             if (!["16:9", "9:16"].includes(ratio.value)) {
@@ -557,22 +662,68 @@ export function Composer(props: {
             duration.value = Math.max(1, Math.min(15, duration.value));
             return;
         }
+        if (isMiniMaxModel(model.value)) {
+            const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
+            if (!allowed.includes(resolution.value)) {
+                resolution.value = "768P";
+            }
+            const minimum = model.value === "MiniMax-H3-Max" ? 5 : 4;
+            duration.value = Math.max(
+                minimum,
+                Math.min(15, duration.value),
+            );
+            durationMode.value = "seconds";
+            if (model.value === "MiniMax-H3-Max") mode.value = "frames";
+            if (
+                attachments.value.length === 0 && ratio.value === "adaptive"
+            ) {
+                ratio.value = "16:9";
+            }
+            return;
+        }
         const clamped = clampResolution(model.value, resolution.value);
         if (clamped !== resolution.value) resolution.value = clamped;
     });
 
-    const canSubmit = useComputed(() =>
-        isZzdhMultiReferenceModel(model.value)
-            ? prompt.value.trim().length > 0 &&
+    const canSubmit = useComputed(() => {
+        if (isZzdhMultiReferenceModel(model.value)) {
+            return prompt.value.trim().length > 0 &&
                 attachments.value.length >= 1 &&
                 attachments.value.length <= 9 &&
                 attachments.value.every((attachment) =>
                     attachment.kind === "image"
-                )
-            : isZzdhModel(model.value)
-            ? prompt.value.trim().length > 0 && attachments.value.length === 0
-            : prompt.value.trim().length > 0 || attachments.value.length > 0
-    );
+                );
+        }
+        if (isZzdhModel(model.value)) {
+            return prompt.value.trim().length > 0 &&
+                attachments.value.length === 0;
+        }
+        if (isMiniMaxModel(model.value)) {
+            if (!prompt.value.trim()) return false;
+            if (
+                attachments.value.length === 0 && ratio.value === "adaptive"
+            ) return false;
+            if (
+                mode.value === "frames" ||
+                model.value === "MiniMax-H3-Max"
+            ) {
+                return attachments.value.length <= 2 &&
+                    attachments.value.every((item) => item.kind === "image");
+            }
+            const imageCount = attachments.value.filter((item) =>
+                item.kind === "image"
+            ).length;
+            const videoCount = attachments.value.filter((item) =>
+                item.kind === "video"
+            ).length;
+            const audioCount = attachments.value.filter((item) =>
+                item.kind === "audio"
+            ).length;
+            return imageCount <= 9 && videoCount <= 3 && audioCount <= 3;
+        }
+        return prompt.value.trim().length > 0 ||
+            attachments.value.length > 0;
+    });
 
     const togglePopover = (which: Exclude<Popover, null>) => {
         popover.value = popover.value === which ? null : which;
@@ -584,9 +735,14 @@ export function Composer(props: {
             !isZzdhMultiReferenceModel(model.value)
         ) return;
         if (!files) return;
+        const miniMaxFrames = isMiniMaxModel(model.value) &&
+            (mode.value === "frames" || model.value === "MiniMax-H3-Max");
         const accepted = isZzdhMultiReferenceModel(model.value)
             ? Array.from(files).filter((file) => file.type.startsWith("image/"))
                 .slice(0, Math.max(0, 9 - attachments.value.length))
+            : miniMaxFrames
+            ? Array.from(files).filter((file) => file.type.startsWith("image/"))
+                .slice(0, Math.max(0, 2 - attachments.value.length))
             : Array.from(files);
         const added = accepted.map((file) => ({
             id: nextId.current++,
@@ -609,6 +765,11 @@ export function Composer(props: {
         if (
             isZzdhMultiReferenceModel(model.value) &&
             attachments.value.length >= 9
+        ) return;
+        if (
+            isMiniMaxModel(model.value) &&
+            (mode.value === "frames" || model.value === "MiniMax-H3-Max") &&
+            attachments.value.length >= 2
         ) return;
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
@@ -805,7 +966,14 @@ export function Composer(props: {
                                         {get_text(
                                             isZzdhMultiReferenceModel(
                                                     model.value,
-                                                )
+                                                ) ||
+                                                (isMiniMaxModel(
+                                                    model.value,
+                                                ) &&
+                                                    (mode.value ===
+                                                            "frames" ||
+                                                        model.value ===
+                                                            "MiniMax-H3-Max"))
                                                 ? "reference_images"
                                                 : "image_video_audio",
                                             language.value,
@@ -818,7 +986,11 @@ export function Composer(props: {
                                     multiple
                                     accept={isZzdhMultiReferenceModel(
                                             model.value,
-                                        )
+                                        ) ||
+                                            (isMiniMaxModel(model.value) &&
+                                                (mode.value === "frames" ||
+                                                    model.value ===
+                                                        "MiniMax-H3-Max"))
                                         ? "image/*"
                                         : "image/*,video/*,audio/*"}
                                     class="hidden"
@@ -1051,7 +1223,8 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        {!isZzdhModel(model.value) && (
+                        {!isZzdhModel(model.value) &&
+                            model.value !== "MiniMax-H3-Max" && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -1230,45 +1403,51 @@ export function Composer(props: {
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
                                     </div>
-                                    <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
-                                        {(
-                                            [
-                                                {
-                                                    value: "seconds",
-                                                    textId: "by_seconds",
-                                                },
-                                                {
-                                                    value: "smart",
-                                                    textId: "smart_duration",
-                                                },
-                                            ] as const
-                                        ).map((dm) => (
-                                            <button
-                                                key={dm.value}
-                                                type="button"
-                                                onClick={() =>
-                                                    durationMode.value =
-                                                        dm.value}
-                                                class={`h-9 rounded-md text-sm ${
-                                                    durationMode.value ===
-                                                            dm.value
-                                                        ? "bg-white shadow text-gray-900 font-medium"
-                                                        : "text-gray-500 hover:text-gray-700"
-                                                }`}
-                                            >
-                                                {get_text(
-                                                    dm.textId,
-                                                    language.value,
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    {!isMiniMaxModel(model.value) && (
+                                        <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
+                                            {(
+                                                [
+                                                    {
+                                                        value: "seconds",
+                                                        textId: "by_seconds",
+                                                    },
+                                                    {
+                                                        value: "smart",
+                                                        textId:
+                                                            "smart_duration",
+                                                    },
+                                                ] as const
+                                            ).map((dm) => (
+                                                <button
+                                                    key={dm.value}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        durationMode.value =
+                                                            dm.value}
+                                                    class={`h-9 rounded-md text-sm ${
+                                                        durationMode.value ===
+                                                                dm.value
+                                                            ? "bg-white shadow text-gray-900 font-medium"
+                                                            : "text-gray-500 hover:text-gray-700"
+                                                    }`}
+                                                >
+                                                    {get_text(
+                                                        dm.textId,
+                                                        language.value,
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                     {durationMode.value === "seconds" && (
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
                                                 min={isZzdhModel(model.value)
                                                     ? 1
+                                                    : model.value ===
+                                                            "MiniMax-H3-Max"
+                                                    ? 5
                                                     : 4}
                                                 max={15}
                                                 step={1}
@@ -1295,7 +1474,7 @@ export function Composer(props: {
                         </div>
 
                         {/* Audio toggle */}
-                        {!isZzdhModel(model.value) && (
+                        {isSeedanceModel(model.value) && (
                             <button
                                 type="button"
                                 onClick={() => audio.value = !audio.value}
@@ -1349,6 +1528,7 @@ export function Composer(props: {
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,
+                                    mode: mode.value,
                                 });
                                 clearAll();
                                 const gen = await gen_p;

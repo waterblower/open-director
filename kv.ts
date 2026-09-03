@@ -14,11 +14,12 @@ const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
 export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
-export type ApiProvider = "seedance" | "zzdh";
+export type ApiProvider = "seedance" | "zzdh" | "minimax";
 
 const API_KEY_BY_PROVIDER = {
     seedance: ["config", "seedance_api_key"],
     zzdh: ["config", "zzdh_api_key"],
+    minimax: ["config", "minimax_api_key"],
 } as const satisfies Record<ApiProvider, Deno.KvKey>;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
 

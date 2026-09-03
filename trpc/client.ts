@@ -304,6 +304,11 @@ const TEXTS = {
             "Estimated from the documented per-second ZZDH H3 promotional rate; the provider bill is authoritative.",
         Chinese: "按 ZZDH H3 限时优惠的文档秒价估算，实际以服务商账单为准。",
     },
+    minimax_cost_disclaimer: {
+        English:
+            "MiniMax cost is not estimated here; refer to your MiniMax bill for the actual amount.",
+        Chinese: "此处不估算 MiniMax 费用，实际金额以 MiniMax 账单为准。",
+    },
 
     // Composer
     image: { English: "Image", Chinese: "图片" },
