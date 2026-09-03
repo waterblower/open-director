@@ -1,20 +1,25 @@
 import { Head } from "fresh/runtime";
 import { z } from "zod";
 import { define } from "../../utils.ts";
-import { seedance_client } from "../../apigen/seedance/seedance_client.ts";
-import type {
-    ArkFile,
-    FileStatus,
-    Task,
-    TaskStatus,
+import {
+    type ArkFile,
+    type FileStatus,
+    SeedanceClient,
+    type Task,
+    type TaskStatus,
 } from "../../apigen/seedance/seedance.ts";
+import { getStoredApiKey } from "@/kv.ts";
 
 /** Fetch every task from Seedance, following pagination. */
 async function fetchAllTasks(): Promise<Task[] | Error> {
     const all: Task[] = [];
+    const apiKey = await getStoredApiKey("seedance");
+    if (!apiKey) {
+        return new Error("No API key stored for Seedance");
+    }
     // Cap the page count defensively so a bad `total` can't loop forever.
     for (let page = 1; page <= 50; page++) {
-        const res = await seedance_client.listTasks({
+        const res = await new SeedanceClient({ apiKey }).listTasks({
             page_num: page,
             page_size: 500,
         });
@@ -29,9 +34,13 @@ async function fetchAllTasks(): Promise<Task[] | Error> {
 async function fetchAllFiles(): Promise<ArkFile[] | Error> {
     const all: ArkFile[] = [];
     let after: string | undefined;
+    const apiKey = await getStoredApiKey("seedance");
+    if (!apiKey) {
+        return new Error("No API key stored for Seedance");
+    }
     // Cap the page count defensively in case the API repeats a cursor.
     for (let page = 1; page <= 50; page++) {
-        const res = await seedance_client.listFiles({
+        const res = await new SeedanceClient({ apiKey }).listFiles({
             limit: 100,
             after,
             order: "desc",

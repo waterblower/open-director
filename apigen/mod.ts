@@ -1,9 +1,9 @@
 import { z } from "zod";
 import {
     CreateTaskRequestSchema as SeedanceCreateTaskRequestSchema,
+    SeedanceClient,
     TaskSchema as SeedanceTaskSchema,
 } from "@/apigen/seedance/seedance.ts";
-import { seedance_client } from "@/apigen/seedance/seedance_client.ts";
 import {
     CreateTaskRequestSchema as ZzdhCreateTaskRequestSchema,
     ModelSchema as ZzdhModelSchema,
@@ -16,6 +16,7 @@ import {
     VideoModelSchema as MiniMaxVideoModelSchema,
     VideoTaskSchema as MiniMaxVideoTaskSchema,
 } from "@/apigen/minimax.ts";
+import { S } from "@/_fresh/client/assets/signals.module-DwPwiWj3.js";
 
 export const GenerateInputSchema = z.union([
     MiniMaxCreateVideoTaskRequestSchema,
@@ -51,7 +52,7 @@ export async function generate(
         });
         return await zzdhClient.createTask(input);
     } else {
-        return await seedance_client.generate(input);
+        return await new SeedanceClient({ apiKey }).generate(input);
     }
 }
 
@@ -69,7 +70,7 @@ export async function getTask(model: string, taskId: string, apiKey: string) {
         });
         return await zzdhClient.getTask(taskId);
     }
-    return await seedance_client.getTask(taskId);
+    return await new SeedanceClient({ apiKey }).getTask(taskId);
 }
 
 export async function getVideoContent(

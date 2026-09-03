@@ -33,7 +33,6 @@ import {
     unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
-import { setSeedanceApiKey } from "../apigen/seedance/seedance_client.ts";
 import { externalizeAttachments, storeDataUrl } from "../uploads.ts";
 import type {
     ContentItem,
@@ -596,7 +595,6 @@ export const appRouter = router({
             const provider = opts.input.provider ?? "seedance";
             const key = opts.input.apiKey;
             await setStoredApiKey(provider, key);
-            if (provider === "seedance") setSeedanceApiKey(key);
             return { hasKey: true, masked: maskKey(key) };
         }),
 
