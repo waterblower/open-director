@@ -65,6 +65,11 @@ export const UploadImageResponseSchema = z.object({
     base_resp: BaseResponseSchema,
 }).catchall(z.unknown());
 
+export const ListFilesResponseSchema = z.object({
+    files: z.array(FileSchema),
+    base_resp: BaseResponseSchema,
+}).catchall(z.unknown());
+
 export const VideoModelSchema = z.enum(["MiniMax-H3", "MiniMax-H3-Max"]);
 export const VideoResolutionSchema = z.enum(["480P", "768P", "2K"]);
 export const VideoRatioSchema = z.enum([
@@ -272,6 +277,24 @@ export const GetVideoTaskResponseSchema = z.object({
     task: VideoTaskSchema,
 }).catchall(z.unknown());
 
+export const ListVideoTasksRequestSchema = z.object({
+    page_num: z.number().int().positive().optional(),
+    page_size: z.number().int().positive().optional(),
+    status: VideoTaskStatusSchema.optional(),
+    task_ids: z.array(NonEmptyStringSchema).optional(),
+    model: NonEmptyStringSchema.optional(),
+    task_type: z.enum([
+        "generation",
+        "h3_context_ir",
+        "regeneration",
+    ]).optional(),
+}).strict();
+
+export const ListVideoTasksResponseSchema = z.object({
+    items: z.array(VideoTaskSchema),
+    total: z.number().int().nonnegative(),
+}).catchall(z.unknown());
+
 const OaiErrorResponseSchema = z.object({
     type: z.string().optional(),
     error: z.object({
@@ -286,6 +309,7 @@ export type FileId = z.infer<typeof FileIdSchema>;
 export type FilePurpose = z.infer<typeof FilePurposeSchema>;
 export type MiniMaxFile = z.infer<typeof FileSchema>;
 export type UploadImageResponse = z.infer<typeof UploadImageResponseSchema>;
+export type ListFilesResponse = z.infer<typeof ListFilesResponseSchema>;
 export type VideoModel = z.infer<typeof VideoModelSchema>;
 export type VideoResolution = z.infer<typeof VideoResolutionSchema>;
 export type VideoRatio = z.infer<typeof VideoRatioSchema>;
@@ -301,6 +325,12 @@ export type CreateVideoTaskResponse = z.infer<
 >;
 export type VideoTask = z.infer<typeof VideoTaskSchema>;
 export type GetVideoTaskResponse = z.infer<typeof GetVideoTaskResponseSchema>;
+export type ListVideoTasksRequest = z.infer<
+    typeof ListVideoTasksRequestSchema
+>;
+export type ListVideoTasksResponse = z.infer<
+    typeof ListVideoTasksResponseSchema
+>;
 
 export interface MiniMaxClientOptions {
     apiKey: string;
@@ -366,6 +396,65 @@ export class MiniMaxClient {
         return parsedResponse.success
             ? parsedResponse.data
             : parsedResponse.error;
+    }
+
+    /** GET /v2/query/video_generation */
+    async listVideoTasks(
+        input: ListVideoTasksRequest = {},
+    ): Promise<ListVideoTasksResponse | Error> {
+        const parsedInput = ListVideoTasksRequestSchema.safeParse(input);
+        if (!parsedInput.success) return parsedInput.error;
+
+        const query = new URLSearchParams();
+        const params = parsedInput.data;
+        if (params.page_num !== undefined) {
+            query.set("page_num", String(params.page_num));
+        }
+        if (params.page_size !== undefined) {
+            query.set("page_size", String(params.page_size));
+        }
+        if (params.status) query.set("filter.status", params.status);
+        for (const taskId of params.task_ids ?? []) {
+            query.append("filter.task_ids", taskId);
+        }
+        if (params.model) query.set("filter.model", params.model);
+        if (params.task_type) {
+            query.set("filter.task_type", params.task_type);
+        }
+
+        const suffix = query.size > 0 ? `?${query}` : "";
+        const response = await this.requestJson(
+            `/v2/query/video_generation${suffix}`,
+            { method: "GET" },
+        );
+        if (response instanceof Error) return response;
+
+        const parsedResponse = ListVideoTasksResponseSchema.safeParse(response);
+        return parsedResponse.success
+            ? parsedResponse.data
+            : parsedResponse.error;
+    }
+
+    /** GET /v1/files/list?purpose=video_generation_input */
+    async listVideoGenerationFiles(): Promise<ListFilesResponse | Error> {
+        const query = new URLSearchParams({
+            purpose: "video_generation_input",
+        });
+        const response = await this.requestJson(`/v1/files/list?${query}`, {
+            method: "GET",
+        });
+        if (response instanceof Error) return response;
+
+        const parsedResponse = ListFilesResponseSchema.safeParse(response);
+        if (!parsedResponse.success) return parsedResponse.error;
+        if (parsedResponse.data.base_resp.status_code !== 0) {
+            return new MiniMaxApiError(
+                200,
+                String(parsedResponse.data.base_resp.status_code),
+                parsedResponse.data.base_resp.status_msg,
+            );
+        }
+        return parsedResponse.data;
     }
 
     /**
