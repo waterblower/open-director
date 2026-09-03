@@ -301,11 +301,6 @@ const TEXTS = {
             "Cost is a rough estimate based on token usage; refer to your Volcano Engine bill for the actual amount.",
         Chinese: "费用为按 token 用量的粗略估算，实际以火山引擎账单为准。",
     },
-    zzdh_cost_disclaimer: {
-        English:
-            "Estimated from the documented per-second ZZDH H3 promotional rate; the provider bill is authoritative.",
-        Chinese: "按 ZZDH H3 限时优惠的文档秒价估算，实际以服务商账单为准。",
-    },
     minimax_cost_disclaimer: {
         English:
             "MiniMax cost is not estimated here; refer to your MiniMax bill for the actual amount.",
@@ -327,10 +322,6 @@ const TEXTS = {
     reference_images: {
         English: "Reference images",
         Chinese: "参考图片",
-    },
-    zzdh_multi_reference_images: {
-        English: "Add 1–9 reference images.",
-        Chinese: "添加 1–9 张参考图片。",
     },
     remove: { English: "Remove", Chinese: "移除" },
     no_assets_yet: {
