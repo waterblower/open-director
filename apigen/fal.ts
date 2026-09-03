@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { safeFetch } from "@/apigen/fetch.ts";
+import { delay } from "@std/async/delay";
 
 // https://fal.ai/models/minimax/h3/reference-to-video/api#schema-input
 const FalInputSchema = z.object({
@@ -112,4 +113,26 @@ export async function get_result(requestID: string, apikey: string) {
         return final_result.error;
     }
     return final_result.data;
+}
+
+async function wait_for_result(requestID: string, apikey: string) {
+    while (true) {
+        const result = await get_result(requestID, apikey);
+        if (result instanceof Error) {
+            return result;
+        }
+        if (result.status === 200) {
+            return result;
+        } else if (result.status == 400) {
+            if (result.detail == "Request is still in progress") {
+                await delay(10000);
+                continue;
+            }
+        } else if (result.status == 422) {
+            return result;
+        } else {
+            console.error(result);
+            throw new Error("Unexpected");
+        }
+    }
 }
