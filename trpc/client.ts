@@ -43,7 +43,7 @@ export async function loadConfig(): Promise<void> {
     try {
         ShowOpenDirectorDir.value = await trpc.getShowOpenDirectorDir.query();
     } catch (err) {
-        console.error(err);
+        console.error("[client] failed to load config:", err);
     }
 }
 
@@ -53,7 +53,10 @@ export async function setShowOpenDirectorDir(next: boolean): Promise<void> {
     try {
         await trpc.setShowOpenDirectorDir.mutate(next);
     } catch (err) {
-        console.error(err);
+        console.error(
+            "[client] failed to persist show-open-director setting:",
+            err,
+        );
     }
 }
 
@@ -67,12 +70,11 @@ function notHidden(entry: { name: string }): boolean {
 
 /** Read the (non-recursive) entries of `path` within the given project root. */
 export async function readDir(projectRoot: string, path: string) {
-    try {
-        const res = await trpc.readDir.query({ projectRoot, path });
-        return res.filter(notHidden);
-    } catch (err) {
-        return err as Error;
+    const res = await trpc.readDir.query({ projectRoot, path });
+    if (res.error) {
+        return new Error(res.message);
     }
+    return res.dirs.filter(notHidden);
 }
 
 /**

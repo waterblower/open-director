@@ -74,7 +74,12 @@ export function GenerationDetailModal(props: {
             if (reactionRevision.current !== revision) return;
             savedReaction.value = stored?.reaction ?? null;
             savedReason.value = stored?.reason ?? "";
-        }).catch((err) => console.error(err));
+        }).catch((err) =>
+            console.error(
+                "[GenerationDetailModal] failed to load saved reaction:",
+                err,
+            )
+        );
         return () => {
             reactionRevision.current++;
         };
@@ -124,7 +129,12 @@ export function GenerationDetailModal(props: {
             if (reactionBusy.value) return;
             reactionBusy.value = true;
             onClearReaction(generation, projectRoot)
-                .catch((err) => console.error(err))
+                .catch((err) =>
+                    console.error(
+                        "[GenerationDetailModal] failed to clear reaction:",
+                        err,
+                    )
+                )
                 .finally(() => reactionBusy.value = false);
             return;
         }
@@ -144,7 +154,10 @@ export function GenerationDetailModal(props: {
             );
             pendingReaction.value = null;
         } catch (err) {
-            console.error(err);
+            console.error(
+                "[GenerationDetailModal] failed to save reaction:",
+                err,
+            );
         } finally {
             reactionBusy.value = false;
         }
@@ -679,7 +692,7 @@ function CopyButton(props: { value: string }) {
             copied.value = true;
             setTimeout(() => copied.value = false, 1500);
         } catch (err) {
-            console.error(err);
+            console.error("[CopyButton] failed to copy to clipboard:", err);
         }
     };
 

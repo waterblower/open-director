@@ -36,7 +36,10 @@ export function McpInfoModal(props: { onClose: () => void }) {
                 info.value = serverInfo;
                 projectDir.value = dir;
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[McpInfoModal] failed to load MCP server info:",
+                    err,
+                );
                 error.value = err instanceof Error ? err.message : String(err);
             } finally {
                 loading.value = false;
@@ -241,7 +244,7 @@ function CopyField(
             copied.value = true;
             setTimeout(() => copied.value = false, 1500);
         } catch (err) {
-            console.error(err);
+            console.error("[CopyField] failed to copy to clipboard:", err);
         }
     };
 

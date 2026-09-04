@@ -40,7 +40,8 @@ Deno.test("generate", async () => {
 
 Deno.test("get", async () => {
     const res = await wait_for_result(
-        "01a06789-0f4a-7f83-a5fc-65f2cfa2df5b",
+        "01a06cca-a1b8-74c3-a28e-0dd8a0731e4e",
+        // "01a06789-0f4a-7f83-a5fc-65f2cfa2df5b",
         // "01a06771-e3de-7143-a8a0-ef152e3eb16c",
         // "01a0676f-aa0c-79f2-9bcf-c19ba7375e21",
         // "01a06752-78b2-75a2-a229-e47ad1688619",

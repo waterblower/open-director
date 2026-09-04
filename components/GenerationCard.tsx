@@ -79,7 +79,7 @@ export function GenerationCard(
         try {
             await onArchiveToggle(generation);
         } catch (err) {
-            console.error(err);
+            console.error("[GenerationCard] failed to toggle archive:", err);
         } finally {
             archiveBusy.value = false;
         }
@@ -91,7 +91,12 @@ export function GenerationCard(
             if (reactionBusy.value) return;
             reactionBusy.value = true;
             onClearReaction(generation)
-                .catch((err) => console.error(err))
+                .catch((err) =>
+                    console.error(
+                        "[GenerationCard] failed to clear reaction:",
+                        err,
+                    )
+                )
                 .finally(() => reactionBusy.value = false);
             return;
         }
@@ -110,7 +115,7 @@ export function GenerationCard(
             );
             reasonModal.value = null;
         } catch (err) {
-            console.error(err);
+            console.error("[GenerationCard] failed to save reaction:", err);
         } finally {
             reactionBusy.value = false;
         }
@@ -124,7 +129,10 @@ export function GenerationCard(
             generation.id,
         );
         if (res.error) {
-            console.error(res.error);
+            console.error(
+                "[GenerationCard] failed to load generation detail:",
+                res.error,
+            );
             return;
         }
         detail.value = res.result;
@@ -260,7 +268,10 @@ export function GenerationCard(
                                     reusePrompt.value = req;
                                 }
                             } catch (err) {
-                                console.error(err);
+                                console.error(
+                                    "[GenerationCard] failed to load request for reuse:",
+                                    err,
+                                );
                             }
                         }}
                         class="peer size-8 rounded-full bg-black/55 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm"

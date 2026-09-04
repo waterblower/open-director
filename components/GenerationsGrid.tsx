@@ -45,7 +45,10 @@ export function GenerationsGrid(
                     );
                 }
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[GenerationsGrid] failed to load archived generations:",
+                    err,
+                );
             } finally {
                 if (!cancelled) archivedLoading.value = false;
             }
@@ -78,7 +81,10 @@ export function GenerationsGrid(
                     );
                 }
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[GenerationsGrid] failed to load reacted generations:",
+                    err,
+                );
             } finally {
                 if (!cancelled) reactedLoading.value = false;
             }

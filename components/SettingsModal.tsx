@@ -48,7 +48,10 @@ export function SettingsModal(props: {
                 minimaxMasked.value = minimax.masked;
                 falMasked.value = fal.masked;
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[SettingsModal] failed to load API key status:",
+                    err,
+                );
             }
         })();
     }, []);
@@ -93,7 +96,7 @@ export function SettingsModal(props: {
             ));
             onClose();
         } catch (err) {
-            console.error(err);
+            console.error("[SettingsModal] failed to save API keys:", err);
             error.value = err instanceof Error
                 ? err.message
                 : get_text("save_failed", language.value);

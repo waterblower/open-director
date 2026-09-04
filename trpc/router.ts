@@ -136,24 +136,29 @@ interface DirEntry {
 }
 
 /** Read a directory into a sorted list (directories first, then alphabetical). */
-async function listDir(absPath: string): Promise<DirEntry[]> {
+async function listDir(absPath: string): Promise<DirEntry[] | Error> {
     const entries: DirEntry[] = [];
-    for await (const entry of Deno.readDir(absPath)) {
-        entries.push({
-            name: entry.name,
-            isDirectory: entry.isDirectory,
-            isFile: entry.isFile,
-            isSymlink: entry.isSymlink,
-        });
+    try {
+        for await (const entry of Deno.readDir(absPath)) {
+            entries.push({
+                name: entry.name,
+                isDirectory: entry.isDirectory,
+                isFile: entry.isFile,
+                isSymlink: entry.isSymlink,
+            });
+        }
+
+        entries.sort((a, b) =>
+            a.isDirectory === b.isDirectory
+                ? a.name.localeCompare(b.name)
+                : a.isDirectory
+                ? -1
+                : 1
+        );
+        return entries;
+    } catch (e) {
+        return e as Error
     }
-    entries.sort((a, b) =>
-        a.isDirectory === b.isDirectory
-            ? a.name.localeCompare(b.name)
-            : a.isDirectory
-            ? -1
-            : 1
-    );
-    return entries;
 }
 
 /** A generated-video entry as the grid consumes it. */
@@ -319,7 +324,7 @@ export const appRouter = router({
     // `path` is relative to the given project root; "" reads the root itself.
     readDir: publicProcedure
         .input(z.object({ projectRoot: z.string(), path: z.string() }))
-        .query(async (opts): Promise<DirEntry[]> => {
+        .query(async (opts) => {
             const target = await resolveInProject(
                 opts.input.projectRoot,
                 opts.input.path,
@@ -327,7 +332,18 @@ export const appRouter = router({
             if (target instanceof Error) {
                 throw target;
             }
-            return await listDir(target);
+            const dirs = await listDir(target)
+            if (dirs instanceof Error) {
+                console.error(dirs)
+                return {
+                    error: true as const,
+                    message: dirs.message,
+                }
+            }
+            return {
+                error: false as const,
+                dirs,
+            };
         }),
 
     // Load everything the file explorer needs in one round trip: the active
@@ -345,6 +361,13 @@ export const appRouter = router({
         const { expanded, selected } = savedState;
 
         const rootEntries = await listDir(rootPath);
+        if (rootEntries instanceof Error) {
+            console.error(rootEntries)
+            return {
+                error: true as const,
+                message: rootEntries.message,
+            }
+        }
 
         // Pre-load the children of each restored-expanded directory so the tree
         // paints fully expanded on first render.
@@ -355,12 +378,15 @@ export const appRouter = router({
                 console.error(target);
                 return asAPIError(target);
             }
-            try {
-                childrenByPath[rel] = await listDir(target);
-            } catch (e) {
-                console.warn(e);
-                // Directory removed since last session — drop it silently.
+            const dirs = await listDir(target)
+            if (dirs instanceof Error) {
+                console.error(dirs)
+                return {
+                    error: true as const,
+                    message: dirs.message,
+                }
             }
+            childrenByPath[rel] = dirs;
         }
 
         return {

@@ -610,7 +610,9 @@ export function Composer(props: {
         const req = reusePrompt.value;
         if (!req) return;
         reusePrompt.value = null; // consume once
-        applyReuse(req).catch((err) => console.error(err));
+        applyReuse(req).catch((err) =>
+            console.error("[Composer] failed to apply reused request:", err)
+        );
     });
 
     // Attachments with their display labels: Image1, Image2, Video1, …
@@ -795,7 +797,12 @@ export function Composer(props: {
         const projectPath = e.dataTransfer?.getData(PROJECT_FILE_MIME);
         if (projectPath) {
             e.preventDefault();
-            addProjectImage(projectPath).catch((err) => console.error(err));
+            addProjectImage(projectPath).catch((err) =>
+                console.error(
+                    "[Composer] failed to attach dropped project image:",
+                    err,
+                )
+            );
             return;
         }
 
@@ -1453,7 +1460,10 @@ export function Composer(props: {
                                 try {
                                     gen = await gen_p;
                                 } catch (err) {
-                                    console.error(err);
+                                    console.error(
+                                        "[Composer] generate request failed:",
+                                        err,
+                                    );
                                     genError.value = err instanceof Error
                                         ? err.message
                                         : String(err);

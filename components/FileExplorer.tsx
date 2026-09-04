@@ -135,7 +135,9 @@ export function FileExplorer(props: {
 
     const openInDefault = (path: string) => {
         menu.value = null;
-        trpc.openInDefaultApp.mutate(path).catch((err) => console.error(err));
+        trpc.openInDefaultApp.mutate(path).catch((err) =>
+            console.error("[FileExplorer] failed to open in default app:", err)
+        );
     };
 
     const copyImage = (path: string) => {
@@ -146,7 +148,12 @@ export function FileExplorer(props: {
             new ClipboardItem({
                 "image/png": fetchAsPng(projectFileUrl(path)),
             }),
-        ]).catch((err) => console.error(err));
+        ]).catch((err) =>
+            console.error(
+                "[FileExplorer] failed to copy image to clipboard:",
+                err,
+            )
+        );
     };
 
     /** Look up a loaded entry by its full path. */
@@ -201,7 +208,10 @@ export function FileExplorer(props: {
             // Root listing lives in `rootEntries` ("" = project root).
             const fresh = await readDir(pd.rootPath, "");
             if (fresh instanceof Error) {
-                return console.error(fresh);
+                return console.error(
+                    "[FileExplorer] failed to re-read root after copy:",
+                    fresh,
+                );
             }
             const rootEntries = fresh.some((e) => e.name === name)
                 ? fresh
@@ -225,7 +235,12 @@ export function FileExplorer(props: {
     const dropFile = (src: string, destDir: string, name?: string) => {
         trpc.copyIntoDir.mutate({ src, destDir, name })
             .then(({ dest }) => revealCopy(dest, destDir))
-            .catch((err) => console.error(err));
+            .catch((err) =>
+                console.error(
+                    "[FileExplorer] failed to copy dropped file:",
+                    err,
+                )
+            );
     };
 
     /** Save files dragged in from the OS into `destDir`, then reveal them. */
@@ -240,7 +255,7 @@ export function FileExplorer(props: {
                 });
                 await revealCopy(dest, destDir);
             } catch (err) {
-                console.error(err);
+                console.error("[FileExplorer] failed to import file:", err);
             }
         }
     };
@@ -290,7 +305,7 @@ export function FileExplorer(props: {
         try {
             await trpc.deleteFile.mutate({ path: target.path });
         } catch (err) {
-            console.error(err);
+            console.error("[FileExplorer] failed to delete:", err);
             return;
         }
         // Drop the selection if it pointed at the deleted entry, then refresh
@@ -310,7 +325,10 @@ export function FileExplorer(props: {
             if (!root) return;
             const files = await readDir(root, ""); // "" = project root
             if (files instanceof Error) {
-                return console.error(files);
+                return console.error(
+                    "[FileExplorer] failed to refresh root listing:",
+                    files,
+                );
             }
             if (!projectData.value) return;
             projectData.value = { ...projectData.value, rootEntries: files };
@@ -347,7 +365,10 @@ export function FileExplorer(props: {
                 promptGenerationId.value = id;
             }
         } catch (err) {
-            console.error(err);
+            console.error(
+                "[FileExplorer] failed to look up generation for file:",
+                err,
+            );
         }
     };
 
@@ -418,7 +439,10 @@ export function FileExplorer(props: {
                                     return;
                                 }
                                 if (data.error) {
-                                    console.error(data);
+                                    console.error(
+                                        "[FileExplorer] failed to load picked project:",
+                                        data,
+                                    );
                                     error.value = data.message;
                                     return;
                                 }
@@ -659,7 +683,10 @@ function FilePromptDetailsModal(
                 generationId,
             );
             if (result.error) {
-                console.error(result);
+                console.error(
+                    "[FilePromptDetailsModal] failed to load generation detail:",
+                    result,
+                );
                 return;
             }
             detail.value = result.result;
