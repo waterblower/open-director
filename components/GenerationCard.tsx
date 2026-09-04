@@ -2,10 +2,8 @@ import { type Signal, useSignal } from "@preact/signals";
 import type { GenerateInput } from "../apigen/mod.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import { get_text, language, trpc } from "../trpc/client.ts";
-import {
-    type GenerationDetail,
-    GenerationDetailModal,
-} from "./GenerationDetailModal.tsx";
+import { GenerationDetailModal } from "./GenerationDetailModal.tsx";
+import { Generation } from "@/db.ts";
 
 export type Reaction = "liked" | "disliked";
 
@@ -64,7 +62,7 @@ export function GenerationCard(
 
     // Details modal: null = closed. Fetched on demand when the info button is
     // clicked so the grid payload stays light.
-    const detail = useSignal<GenerationDetail | null>(null);
+    const detail = useSignal<Generation | null>(null);
     const detailOpen = useSignal(false);
     const detailLoading = useSignal(false);
     const archiveBusy = useSignal(false);
@@ -122,15 +120,15 @@ export function GenerationCard(
         detailOpen.value = true;
         if (detail.value || detailLoading.value) return;
         detailLoading.value = true;
-        try {
-            detail.value = await trpc.open.getGenerationDetail.query(
-                generation.id,
-            );
-        } catch (err) {
-            console.error(err);
-        } finally {
-            detailLoading.value = false;
+        const res = await trpc.open.getGenerationDetail.query(
+            generation.id,
+        );
+        if (res.error) {
+            console.error(res.error);
+            return;
         }
+        detail.value = res.result;
+        detailLoading.value = false;
     };
     // Project-relative path, e.g. ".open-director/vid1.mp4"
     const rel = url

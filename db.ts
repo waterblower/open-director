@@ -23,15 +23,38 @@ import { kv } from "./kv.ts";
 
 /**
  * A TEXT column holding JSON serialized from `schema`. Parses and validates it
- * to the typed value, yielding null when the column is null, the JSON is
- * malformed, or it no longer matches the schema — tolerant so one stale row
- * can't break a whole listing.
+ * to the typed value.
+ *
+ * Malformed JSON or a schema mismatch is reported as a regular Zod issue (via
+ * `ctx.addIssue` + `z.NEVER`) rather than thrown: a raw `throw` inside a
+ * `.transform()` escapes `safeParse` as a real exception, so callers could not
+ * rely on getting a result back. Compose with `.nullable().catch(null)` where a
+ * single stale row (e.g. one written under a since-removed model/provider)
+ * should degrade to `null` instead of failing the whole row or listing.
  */
 function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().transform((s): T => {
-        const value: unknown = JSON.parse(s);
+    return z.string().transform((s, ctx): T => {
+        let value: unknown;
+        try {
+            value = JSON.parse(s);
+        } catch (err) {
+            ctx.addIssue({
+                code: "custom",
+                message: `Malformed JSON: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            });
+            return z.NEVER;
+        }
         const result = schema.safeParse(value, { reportInput: true });
-        if (!result.success) throw result.error;
+        if (!result.success) {
+            ctx.addIssue({
+                code: "custom",
+                message: "Does not match schema",
+                params: { error: result.error },
+            });
+            return z.NEVER;
+        }
         return result.data;
     });
 }
@@ -111,9 +134,13 @@ export const GenerationRowSchema = z.object({
     id: z.ulid(),
     created_at: z.iso.datetime(),
     status: z.enum(["queued", "running", "succeeded", "failed"]),
-    request_json: jsonColumn(GenerateInputSchema),
+    // `.nullable().catch(null)`: a row whose stored JSON no longer parses (e.g.
+    // written under a since-removed model) degrades to null instead of failing
+    // the whole row — so one stale row can't break a whole listing.
+    request_json: jsonColumn(GenerateInputSchema).nullable().catch(null),
     task_id: z.string().nullable().optional(),
-    task_json: jsonColumn(GenerationTaskSchema).nullable().optional(),
+    task_json: jsonColumn(GenerationTaskSchema).nullable().catch(null)
+        .optional(),
     downloaded_at: z.iso.datetime().nullable().optional(),
     failed_reason: z.string().nullable().optional(),
 });
