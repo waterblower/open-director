@@ -436,11 +436,13 @@ export function getGenerationDetail(
 }
 
 /** All generations, newest created first. */
-export function listGenerations(db: DatabaseSync): Generation[] {
+export function listGenerations(db: DatabaseSync): Generation[] | Error {
     const rows = db.prepare(
         "SELECT * FROM Generations ORDER BY created_at DESC",
     ).all();
-    return z.array(GenerationRowSchema).parse(rows);
+    const result = z.array(GenerationRowSchema).safeParse(rows);
+    if (!result.success) return result.error;
+    return result.data;
 }
 
 /** A row of the `ArchivedGenerations` table. */

@@ -180,7 +180,7 @@ type VideoListScope = "active" | "archived" | "reacted";
 async function buildVideoList(
     projectRoot: string,
     scope: VideoListScope,
-): Promise<VideoListItem[]> {
+): Promise<VideoListItem[] | Error> {
     const resolvedDir = await resolveInProject(projectRoot, VIDEOS_DIR);
     if (resolvedDir instanceof Error) throw resolvedDir;
     const dir = resolvedDir;
@@ -189,6 +189,9 @@ async function buildVideoList(
 
     if (!db) return [];
     const rows = listGenerations(db);
+    if (rows instanceof Error) {
+        return rows;
+    }
     const rowById = new Map(rows.map((r) => [r.task_id, r]));
     const archivedIds = new Set(listArchivedGenerationIds(db));
     const reactions = listGenerationReactions(db);
@@ -335,7 +338,7 @@ export const appRouter = router({
 
         const savedState = await loadFileExplorerState(rootPath);
         if (savedState instanceof Error) {
-            throw savedState;
+            return asAPIError(savedState);
         }
         const { expanded, selected } = savedState;
 
@@ -348,7 +351,7 @@ export const appRouter = router({
             const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
                 console.error(target);
-                throw target;
+                return asAPIError(target);
             }
             try {
                 childrenByPath[rel] = await listDir(target);
@@ -358,7 +361,14 @@ export const appRouter = router({
             }
         }
 
-        return { rootPath, rootEntries, childrenByPath, expanded, selected };
+        return {
+            error: false as const,
+            rootPath,
+            rootEntries,
+            childrenByPath,
+            expanded,
+            selected,
+        };
     }),
 
     // Open a project file/dir with the OS default program.
@@ -962,9 +972,12 @@ export const appRouter = router({
                 }
                 const result = getGenerationDetail(db, opts.input);
                 if (result instanceof Error) {
-                    throw result;
+                    return asAPIError(result);
                 }
-                return result;
+                return {
+                    error: false as const,
+                    result,
+                };
             }),
 
         // The create request for a generation (by ULID id or task id), fetched on
@@ -1014,9 +1027,24 @@ export const appRouter = router({
 
         // List generated videos in `<project>/.project/generations` as Task-like
         // objects. Creates the directory if it doesn't exist yet.
-        listGeneratedVideos: publicProcedure.input(z.object({
-            project_root: z.string(),
-        })).query(({ input }) => buildVideoList(input.project_root, "active")),
+        listGeneratedVideos: publicProcedure
+            .input(z.object({
+                project_root: z.string(),
+            }))
+            .query(async ({ input }) => {
+                const result = await buildVideoList(
+                    input.project_root,
+                    "active",
+                );
+                if (result instanceof Error) {
+                    console.error(result);
+                    return asAPIError(result);
+                }
+                return {
+                    error: false as const,
+                    result,
+                };
+            }),
 
         // The active project folder (absolute path).
         getProjectDir: publicProcedure.query(async () => {
@@ -1217,4 +1245,11 @@ export async function resolveToDataUrl(
     const ext = dataUrlOrFilePath.split(".").pop()?.toLowerCase() ?? "";
     const mime = EXT_MIME[ext] ?? "application/octet-stream";
     return `data:${mime};base64,${bytesToBase64(bytes)}`;
+}
+
+function asAPIError(error: Error) {
+    return {
+        error: true as const,
+        ...error,
+    };
 }

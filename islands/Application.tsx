@@ -129,13 +129,12 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             const data = await loadProjectData();
-            if (data instanceof Error) {
-                console.error(data);
-
-                return;
-            }
             if (!data) {
                 console.log("no project opened");
+                return;
+            }
+            if (data.error) {
+                console.error(data);
                 return;
             }
             projectData.value = data;
@@ -160,11 +159,14 @@ export default function Application() {
             // reload loop (loadProjectData firing "like crazy").
             if (!projectData.peek()) return;
             const data = await loadProjectData();
-            if (data instanceof Error) {
+            if (!data) {
+                return;
+            }
+            if (data.error) {
                 console.error(data);
                 return;
             }
-            if (data) projectData.value = data;
+            projectData.value = data;
         })();
     });
 
@@ -185,7 +187,11 @@ export default function Application() {
             const vids = await trpc.open.listGeneratedVideos.query({
                 project_root: root,
             });
-            generated_videos.value = new Map(vids.map((v) => [v.id, v]));
+            if (vids.error) {
+                console.error(vids);
+                return;
+            }
+            generated_videos.value = new Map(vids.result.map((v) => [v.id, v]));
         })();
     });
 

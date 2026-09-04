@@ -9,10 +9,8 @@ import {
 } from "../trpc/client.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import type { GeneratedVideo } from "./GenerationCard.tsx";
-import {
-    type GenerationDetail,
-    GenerationDetailModal,
-} from "./GenerationDetailModal.tsx";
+import { GenerationDetailModal } from "./GenerationDetailModal.tsx";
+import { Generation } from "@/db.ts";
 
 /**
  * All file-explorer state that only makes sense once a project is open. When no
@@ -416,7 +414,10 @@ export function FileExplorer(props: {
                                 // Load the full state for the new folder.
                                 hydrated.current = false;
                                 const data = await loadProjectData();
-                                if (data instanceof Error) {
+                                if (!data) {
+                                    return;
+                                }
+                                if (data.error) {
                                     console.error(data);
                                     error.value = data.message;
                                     return;
@@ -649,20 +650,20 @@ function FilePromptDetailsModal(
     },
 ) {
     const { generationId, path, projectRoot, onClose } = props;
-    const detail = useSignal<GenerationDetail | null>(null);
+    const detail = useSignal<Generation | null>(null);
     const loading = useSignal(true);
 
     useEffect(() => {
         (async () => {
-            try {
-                detail.value = await trpc.open.getGenerationDetail.query(
-                    generationId,
-                );
-            } catch (err) {
-                console.error(err);
-            } finally {
-                loading.value = false;
+            const result = await trpc.open.getGenerationDetail.query(
+                generationId,
+            );
+            if (result.error) {
+                console.error(result);
+                return;
             }
+            detail.value = result.result;
+            loading.value = false;
         })();
     }, [generationId]);
 

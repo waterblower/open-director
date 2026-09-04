@@ -10,11 +10,7 @@ import {
     LikeIcon,
     type Reaction,
 } from "./GenerationCard.tsx";
-
-/** The full generation row returned by the details endpoint. */
-export type GenerationDetail = Awaited<
-    ReturnType<typeof trpc.open.getGenerationDetail.query>
->;
+import { type Generation } from "@/db.ts";
 
 /** Human-readable elapsed time, e.g. "1m 23s" or "12s". */
 function formatDuration(seconds: number, lang: Language): string {
@@ -45,7 +41,7 @@ function promptText(req: GenerateInput | null | undefined): string {
 export function GenerationDetailModal(props: {
     projectRoot: string;
     generation: GeneratedVideo;
-    detail: GenerationDetail | null;
+    detail: Generation | null;
     loading: boolean;
     onClose: () => void;
 }) {

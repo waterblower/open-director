@@ -80,26 +80,26 @@ export async function readDir(projectRoot: string, path: string) {
  * restored-expanded directories (children pre-loaded) and the saved selection.
  * Returns null when no project is open, or an Error on failure.
  */
-export async function loadProjectData(): Promise<ProjectData | null | Error> {
-    try {
-        const data = await trpc.loadProjectData.query();
-        if (!data) {
-            return null;
-        }
-        const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};
-        for (const [dir, entries] of Object.entries(data.childrenByPath)) {
-            childrenByPath[dir] = entries.filter(notHidden);
-        }
-        return {
-            rootPath: data.rootPath,
-            rootEntries: data.rootEntries.filter(notHidden),
-            childrenByPath,
-            expanded: new Set(data.expanded),
-            selected: data.selected,
-        };
-    } catch (err) {
-        return err as Error;
+export async function loadProjectData() {
+    const data = await trpc.loadProjectData.query();
+    if (!data) {
+        return null;
     }
+    if (data.error) {
+        return data;
+    }
+    const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};
+    for (const [dir, entries] of Object.entries(data.childrenByPath)) {
+        childrenByPath[dir] = entries.filter(notHidden);
+    }
+    return {
+        error: false as const,
+        rootPath: data.rootPath,
+        rootEntries: data.rootEntries.filter(notHidden),
+        childrenByPath,
+        expanded: new Set(data.expanded),
+        selected: data.selected,
+    };
 }
 
 // ---------------------------------------------------------------------------
