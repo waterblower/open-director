@@ -59,16 +59,16 @@ export async function check_and_download(): Promise<void | Error> {
         for (const gen of pending) {
             try {
                 const apiKey = await getStoredApiKeyFromModel(gen.model ?? "");
-                const task = await getTask(
+                const polled = await getTask(
                     gen.model ?? "",
                     gen.task_id,
                     apiKey ?? "",
                 );
-                if (task instanceof Error) {
+                if (polled instanceof Error) {
                     // 404 → Seedance has no such task (never persisted / purged):
                     // terminal, so mark failed and stop polling it. Other errors
                     // (network, 5xx) are transient — log and retry next pass.
-                    if (hasHttpStatus(task, 404)) {
+                    if (hasHttpStatus(polled, 404)) {
                         const e = updateGeneration(db, {
                             id: gen.id,
                             status: "failed",
@@ -77,10 +77,14 @@ export async function check_and_download(): Promise<void | Error> {
                         });
                         if (e instanceof Error) console.error(e);
                     } else {
-                        console.error(`get task ${gen.task_id} failed:`, task);
+                        console.error(
+                            `get task ${gen.task_id} failed:`,
+                            polled,
+                        );
                     }
                     continue;
                 }
+                const task = polled.task;
 
                 // Record terminal failures (with the reason) so they drop out
                 // of `pending` and we stop polling them.
@@ -133,18 +137,19 @@ export async function check_and_download(): Promise<void | Error> {
                         gen.model ?? "",
                     );
 
-                    const task = await getTask(
+                    const polled = await getTask(
                         gen.model ?? "",
                         gen.task_id,
                         apiKey ?? "",
                     );
-                    if (task instanceof Error) {
+                    if (polled instanceof Error) {
                         console.error(
                             `re-fetch task ${gen.task_id} failed:`,
-                            task,
+                            polled,
                         );
                         continue;
                     }
+                    const task = polled.task;
                     const status = localTaskStatus(task);
                     if (status !== "succeeded") {
                         console.error(

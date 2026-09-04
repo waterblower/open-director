@@ -2,8 +2,9 @@ import { z } from "zod";
 import {
     CreateTaskRequestSchema as SeedanceCreateTaskRequestSchema,
     SeedanceClient,
-    TaskSchema as SeedanceTaskSchema,
+    type SeedanceModel,
     SeedanceModelSchema,
+    TaskSchema as SeedanceTaskSchema,
 } from "@/apigen/seedance/seedance.ts";
 
 import {
@@ -86,31 +87,45 @@ export async function generate(
     }
 }
 
-type GetTaskResult = {
-    model: FalModel,
-    ...
-} | {
-    model: SeedanceModel,
-    ...
-} | {
-    model: MiniMaxModel,
-    ...
-}
+type FalModel = typeof FAL_REFERENCE_TO_VIDEO;
+type MiniMaxModel = z.infer<typeof MiniMaxVideoModelSchema>;
+type SeedanceTask = z.infer<typeof SeedanceTaskSchema>;
+type MiniMaxTask = z.infer<typeof MiniMaxVideoTaskSchema>;
 
-export async function getTask(model: string, taskId: string, apiKey: string): Promise<GetTaskResult> {
+/**
+ * A polled task, tagged with the model it came from so callers can narrow to
+ * the provider's own task shape instead of re-parsing `GenerationTask`.
+ *
+ * fal has no task resource of its own — its queue result is adapted to the
+ * Seedance task shape (see `falResultToTask`), which is also what gets stored
+ * in `task_json`.
+ */
+export type GetTaskResult =
+    | { model: FalModel; task: SeedanceTask }
+    | { model: SeedanceModel; task: SeedanceTask }
+    | { model: MiniMaxModel; task: MiniMaxTask }
+
+export async function getTask(
+    model: string,
+    taskId: string,
+    apiKey: string,
+): Promise<GetTaskResult | Error> {
     if (isFalModel(model)) {
         const result = await get_result(taskId, apiKey);
         return result instanceof Error
             ? result
-            : falResultToTask(model, taskId, result);
+            : { model, task: falResultToTask(model, taskId, result) };
     } else if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
             apiKey,
         });
         const response = await client.getVideoTask(taskId);
-        return response instanceof Error ? response : response.task;
+        return response instanceof Error
+            ? response
+            : { model, task: response.task };
     } else if (isSeedanceModel(model)) {
-        return await new SeedanceClient({ apiKey }).getTask(taskId);
+        const task = await new SeedanceClient({ apiKey }).getTask(taskId);
+        return task instanceof Error ? task : { model, task };
     } else {
         return new Error(`Unsupported model: ${model}`);
     }
@@ -155,7 +170,7 @@ export async function getVideoContent(
     }
 }
 
-export function isSeedanceModel(model: string) {
+export function isSeedanceModel(model: unknown): model is SeedanceModel {
     return SeedanceModelSchema.safeParse(model).success;
 }
 
@@ -187,7 +202,7 @@ function falResultToTask(
     model: string,
     requestId: string,
     result: Exclude<Awaited<ReturnType<typeof get_result>>, Error>,
-): GenerationTask {
+): SeedanceTask {
     const base = {
         id: requestId,
         model,

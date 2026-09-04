@@ -972,10 +972,11 @@ export const appRouter = router({
                     throw err;
                 }
 
-                const task = await getTask(request.model, taskId, apiKey);
-                if (task instanceof Error) {
-                    throw task;
+                const polled = await getTask(request.model, taskId, apiKey);
+                if (polled instanceof Error) {
+                    throw polled;
                 }
+                const task = polled.task;
                 const err2 = updateGeneration(db, {
                     id: generation.id,
                     task_json: task,
