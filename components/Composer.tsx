@@ -73,11 +73,27 @@ const MINIMAX_MODEL_OPTIONS = [
     shortLabel: string;
 }[];
 
+/** Models routed through fal.ai's queue API (see apigen/fal.ts). */
+const FAL_MODEL_OPTIONS = [
+    {
+        value: "fal/minimax/h3/reference-to-video",
+        label: "Fal · MiniMax H3 Reference",
+        shortLabel: "Fal H3",
+    },
+] as const satisfies readonly {
+    value: FalModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+type FalModel = "fal/minimax/h3/reference-to-video";
+
 const GENERATION_MODELS = [
     ...SEEDANCE_MODELS,
     ...MINIMAX_MODEL_OPTIONS,
+    ...FAL_MODEL_OPTIONS,
 ];
-type GenerationModel = SeedanceModel | MiniMaxVideoModel;
+type GenerationModel = SeedanceModel | MiniMaxVideoModel | FalModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -100,6 +116,10 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
 const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
     "MiniMax-H3": ["768P", "2K"],
     "MiniMax-H3-Max": ["480p", "768P"],
+};
+
+const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
+    "fal/minimax/h3/reference-to-video": ["480p", "768P"],
 };
 
 /** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
@@ -167,6 +187,10 @@ function isSeedanceModel(value: unknown): value is SeedanceModel {
 
 function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
     return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
+}
+
+function isFalModel(value: unknown): value is FalModel {
+    return FAL_MODEL_OPTIONS.some((model) => model.value === value);
 }
 
 function isMiniMaxRequest(
@@ -583,14 +607,25 @@ export function Composer(props: {
     const resolutions = useComputed(() => {
         if (isSeedanceModel(model.value)) {
             return MODEL_RESOLUTIONS[model.value];
-        }
-        if (isMiniMaxModel(model.value)) {
+        } else if (isMiniMaxModel(model.value)) {
             return MINIMAX_MODEL_RESOLUTIONS[model.value];
+        } else if (isFalModel(model.value)) {
+            return FAL_MODEL_RESOLUTIONS[model.value];
+        } else {
+            throw new Error(`unsupported model: ${model.value}`);
         }
-        return [];
     });
     useSignalEffect(() => {
-        if (isMiniMaxModel(model.value)) {
+        if (isFalModel(model.value)) {
+            const allowed = FAL_MODEL_RESOLUTIONS[model.value];
+            if (!allowed.includes(resolution.value)) resolution.value = "768P";
+            // fal's reference-to-video takes reference images only, and a
+            // concrete duration (max 15s).
+            mode.value = "reference";
+            durationMode.value = "seconds";
+            duration.value = Math.max(1, Math.min(15, duration.value));
+            return;
+        } else if (isMiniMaxModel(model.value)) {
             const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
             if (!allowed.includes(resolution.value)) {
                 resolution.value = "768P";
@@ -608,14 +643,19 @@ export function Composer(props: {
                 ratio.value = "16:9";
             }
             return;
-        } else {
+        } else if (isSeedanceModel(model.value)) {
             const clamped = clampResolution(model.value, resolution.value);
             if (clamped !== resolution.value) resolution.value = clamped;
+        } else {
+            throw new Error(`unsupported model: ${model.value}`);
         }
     });
 
     const canSubmit = useComputed(() => {
-        if (isMiniMaxModel(model.value)) {
+        if (isFalModel(model.value)) {
+            return prompt.value.trim().length > 0 &&
+                attachments.value.every((item) => item.kind === "image");
+        } else if (isMiniMaxModel(model.value)) {
             if (!prompt.value.trim()) return false;
             if (
                 attachments.value.length === 0 && ratio.value === "adaptive"
@@ -1078,7 +1118,8 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        {model.value !== "MiniMax-H3-Max" && (
+                        {model.value !== "MiniMax-H3-Max" &&
+                            !isFalModel(model.value) && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -1346,6 +1387,7 @@ export function Composer(props: {
                             aria-label={get_text("generate", language.value)}
                             onClick={async () => {
                                 genError.value = null;
+                                const selected = model.value;
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
@@ -1358,8 +1400,36 @@ export function Composer(props: {
                                         ),
                                     })),
                                 );
+
+                                // fal isn't wired up to the backend yet — log
+                                // the request we'd send and stop here.
+                                if (isFalModel(selected)) {
+                                    console.log("fal generate (not sent)", {
+                                        model: selected,
+                                        input: {
+                                            prompt: prompt.value.trim(),
+                                            duration: duration.value,
+                                            resolution:
+                                                resolution.value === "480p"
+                                                    ? "480P"
+                                                    : resolution.value,
+                                            enable_safety_checker: false,
+                                            prompt_expansion_mode: "fast",
+                                            aspect_ratio: ratio.value,
+                                            reference_image_urls: atts
+                                                .filter((a) =>
+                                                    a.kind === "image"
+                                                )
+                                                .map((a) =>
+                                                    a.dataUrlOrFilePath
+                                                ),
+                                        },
+                                    });
+                                    return;
+                                }
+
                                 const gen_p = trpc.open.generate.mutate({
-                                    model: model.value,
+                                    model: selected,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
