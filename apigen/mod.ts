@@ -11,11 +11,28 @@ import {
     VideoModelSchema as MiniMaxVideoModelSchema,
     VideoTaskSchema as MiniMaxVideoTaskSchema,
 } from "@/apigen/minimax.ts";
-import { S } from "@/_fresh/client/assets/signals.module-DwPwiWj3.js";
+import {
+    FAL_REFERENCE_TO_VIDEO,
+    FalInputSchema,
+    get_result,
+    reference_to_video,
+} from "@/apigen/fal.ts";
+
+/**
+ * fal requests don't follow the OpenAI-ish `content` shape the other providers
+ * use — they're a flat endpoint payload — so they're modelled as
+ * `{ model, input }`. Keeping `model` at the top level matters: the DB extracts
+ * it with `json_extract(request_json, '$.model')` to route polling.
+ */
+export const FalGenerateInputSchema = z.object({
+    model: z.literal(FAL_REFERENCE_TO_VIDEO),
+    input: FalInputSchema,
+});
 
 export const GenerateInputSchema = z.union([
     MiniMaxCreateVideoTaskRequestSchema,
     SeedanceCreateTaskRequestSchema,
+    FalGenerateInputSchema,
 ]);
 export const GenerationTaskSchema = z.union([
     MiniMaxVideoTaskSchema,
@@ -26,17 +43,11 @@ export type GenerateInput = z.infer<typeof GenerateInputSchema>;
 export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
-import { fal } from "@fal-ai/client";
-import { FalInput, reference_to_video } from "@/apigen/fal.ts";
-
 export async function generate(
-    input: GenerateInput | {
-        model: "fal/minimax/h3/reference-to-video";
-        input: FalInput;
-    },
+    input: GenerateInput,
     apiKey: string,
 ) {
-    if (input.model == "fal/minimax/h3/reference-to-video") {
+    if (isFalInput(input)) {
         const result = await reference_to_video(input.input, apiKey);
         console.log(result);
         if (result instanceof Error) {
@@ -75,6 +86,12 @@ export async function generate(
 }
 
 export async function getTask(model: string, taskId: string, apiKey: string) {
+    if (isFalModel(model)) {
+        const result = await get_result(taskId, apiKey);
+        return result instanceof Error
+            ? result
+            : falResultToTask(model, taskId, result);
+    }
     if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
             apiKey,
@@ -130,6 +147,62 @@ export function isMiniMaxModel(model: unknown): model is z.infer<
     return MiniMaxVideoModelSchema.safeParse(model).success;
 }
 
+export function isFalModel(
+    model: unknown,
+): model is typeof FAL_REFERENCE_TO_VIDEO {
+    return model === FAL_REFERENCE_TO_VIDEO;
+}
+
+export function isFalInput(
+    input: GenerateInput,
+): input is z.infer<typeof FalGenerateInputSchema> {
+    return isFalModel(input.model);
+}
+
+/**
+ * Adapt a fal queue result to the Seedance-shaped task the rest of the app
+ * polls, downloads and renders, so fal generations need no special-casing
+ * downstream. fal's queue reports "still in progress" as an HTTP 400 with a
+ * sentinel detail string rather than a status field.
+ */
+function falResultToTask(
+    model: string,
+    requestId: string,
+    result: Exclude<Awaited<ReturnType<typeof get_result>>, Error>,
+): GenerationTask {
+    const base = {
+        id: requestId,
+        model,
+        created_at: Math.floor(Date.now() / 1000),
+    };
+    if (result.status === 200) {
+        return {
+            ...base,
+            status: "succeeded",
+            content: { video_url: result.video.url },
+        };
+    }
+    if (result.status === 400) {
+        if (result.detail === "Request is still in progress") {
+            return { ...base, status: "running" };
+        }
+        return {
+            ...base,
+            status: "failed",
+            error: { code: "400", message: result.detail },
+        };
+    }
+    const first = result.detail[0];
+    return {
+        ...base,
+        status: "failed",
+        error: {
+            code: first?.type ?? "422",
+            message: first?.msg ?? "fal rejected the request",
+        },
+    };
+}
+
 export function isMiniMaxInput(
     input: GenerateInput,
 ): input is z.infer<typeof MiniMaxCreateVideoTaskRequestSchema> {
@@ -152,9 +225,9 @@ export function localTaskStatus(task: GenerationTask): LocalTaskStatus {
 }
 
 export function taskIdFromCreateResponse(
-    response: { id?: string; task_id?: string },
+    response: { id?: string; task_id?: string; request_id?: string },
 ): string | Error {
-    const taskId = response.id ?? response.task_id;
+    const taskId = response.id ?? response.task_id ?? response.request_id;
     return taskId || new Error("Create response did not contain a task id");
 }
 

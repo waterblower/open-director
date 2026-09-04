@@ -2,8 +2,11 @@ import { z } from "zod";
 import { safeFetch } from "@/apigen/fetch.ts";
 import { delay } from "@std/async/delay";
 
+/** The one fal endpoint we currently expose, used as a model identifier. */
+export const FAL_REFERENCE_TO_VIDEO = "fal/minimax/h3/reference-to-video";
+
 // https://fal.ai/models/minimax/h3/reference-to-video/api#schema-input
-const FalInputSchema = z.object({
+export const FalInputSchema = z.object({
     "prompt": z.string(),
     "duration": z.number().max(15),
     "resolution": z.enum(["480P", "768P"]),

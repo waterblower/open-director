@@ -42,10 +42,12 @@ import {
     generate,
     type GenerateInput,
     getTask,
+    isFalModel,
     isMiniMaxModel,
     localTaskStatus,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
+import type { FalInput } from "../apigen/fal.ts";
 import {
     type VideoGenerationContent,
     VideoModelSchema as MiniMaxVideoModelSchema,
@@ -584,7 +586,7 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "minimax"]).optional())
+        .input(z.enum(["seedance", "minimax", "fal"]).optional())
         .query(async ({ input }) => {
             const provider = input ?? "seedance";
             const key = await getStoredApiKey(provider);
@@ -598,7 +600,7 @@ export const appRouter = router({
     // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "minimax"]).optional(),
+            provider: z.enum(["seedance", "minimax", "fal"]).optional(),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
@@ -663,6 +665,7 @@ export const appRouter = router({
                         "doubao-seedance-2-0-260128",
                         "doubao-seedance-2-0-fast-260128",
                         "doubao-seedance-2-0-mini-260615",
+                        "fal/minimax/h3/reference-to-video"
                     ]),
                     MiniMaxVideoModelSchema,
                 ]),
@@ -717,7 +720,73 @@ export const appRouter = router({
 
                 let request: GenerateInput;
                 let storedRequest: GenerateInput;
-                if (isMiniMaxModel(model)) {
+                if (isFalModel(model)) {
+                    if (!prompt.trim()) {
+                        throw new Error("fal reference-to-video requires a prompt");
+                    }
+                    if (attachments.some((att) => att.kind !== "image")) {
+                        throw new Error(
+                            "fal reference-to-video accepts image references only",
+                        );
+                    }
+                    const falResolution = resolution === "480p"
+                        ? "480P"
+                        : resolution === "768P"
+                        ? "768P"
+                        : null;
+                    if (!falResolution) {
+                        throw new Error(
+                            `Unsupported fal resolution: ${resolution}`,
+                        );
+                    }
+                    if (duration > 15) {
+                        throw new Error("fal duration must be at most 15s");
+                    }
+                    const falRatio = ratio === "horizontal"
+                        ? "16:9"
+                        : ratio === "vertical"
+                        ? "9:16"
+                        : ratio;
+                    // fal fetches references by URL, and our uploads dir isn't
+                    // reachable from the internet — so send the bytes inline
+                    // and only externalize the copy we persist.
+                    const inlineUrls = await Promise.all(
+                        attachments.map((att) =>
+                            resolveToDataUrl(att.dataUrlOrFilePath)
+                        ),
+                    );
+                    const falInput: FalInput = {
+                        prompt: prompt.trim(),
+                        duration,
+                        resolution: falResolution,
+                        enable_safety_checker: false,
+                        prompt_expansion_mode: "fast",
+                        aspect_ratio: falRatio,
+                        reference_image_urls: inlineUrls,
+                    };
+                    request = { model, input: falInput };
+                    const storedUrls = await Promise.all(
+                        inlineUrls.map(async (url) => {
+                            if (!url.startsWith("data:")) return url;
+                            const stored = await storeDataUrl(
+                                projectRoot,
+                                url,
+                            );
+                            if (stored instanceof Error) {
+                                console.error(stored);
+                                return url;
+                            }
+                            return stored;
+                        }),
+                    );
+                    storedRequest = {
+                        model,
+                        input: {
+                            ...falInput,
+                            reference_image_urls: storedUrls,
+                        },
+                    };
+                } else if (isMiniMaxModel(model)) {
                     if (!prompt.trim()) {
                         throw new Error("MiniMax H3 requires a prompt");
                     }
@@ -890,10 +959,6 @@ export const appRouter = router({
 
                     return gen;
                 }
-                if (created.provider == "fal") {
-                    throw new Error("fal provider is not supported");
-                }
-
                 const taskId = taskIdFromCreateResponse(created.res);
                 if (taskId instanceof Error) throw taskId;
                 console.log("task created", created);
