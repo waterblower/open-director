@@ -16,3 +16,6 @@ db.script.ts
 /_dist
 /.vite
 .DS_Store
+*.jpeg
+*.mp4
+/apigen/data

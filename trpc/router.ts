@@ -33,14 +33,23 @@ import {
     unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
-import { seedance_client, setSeedanceApiKey } from "../seedance_client.ts";
-import { externalizeAttachments } from "../uploads.ts";
+import { externalizeAttachments, storeDataUrl } from "../uploads.ts";
 import type {
     ContentItem,
-    CreateTaskRequest,
-    Task,
-    TaskStatus,
-} from "../seedance/seedance.ts";
+    CreateTaskRequest as SeedanceCreateTaskRequest,
+} from "../apigen/seedance/seedance.ts";
+import {
+    generate,
+    type GenerateInput,
+    getTask,
+    isMiniMaxModel,
+    localTaskStatus,
+    taskIdFromCreateResponse,
+} from "../apigen/mod.ts";
+import {
+    type VideoGenerationContent,
+    VideoModelSchema as MiniMaxVideoModelSchema,
+} from "../apigen/minimax.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 import { pickAndLoadGenerationPlan } from "../generation_plan.ts";
@@ -70,7 +79,7 @@ export const global_event_bus = chan<
         gen: {
             id: string;
             status: string;
-            request_json: CreateTaskRequest;
+            request_json: GenerateInput;
             created_at: string;
         };
     }
@@ -149,7 +158,7 @@ async function listDir(absPath: string): Promise<DirEntry[]> {
 type VideoListItem = {
     id: string;
     created_at: string;
-    status: TaskStatus;
+    status: "queued" | "running" | "succeeded" | "failed";
     /** Whether a create request is stored (drives the reuse button);
      * the request itself is fetched on demand via getGenerationRequest. */
     has_request: boolean;
@@ -171,7 +180,7 @@ type VideoListScope = "active" | "archived" | "reacted";
 async function buildVideoList(
     projectRoot: string,
     scope: VideoListScope,
-): Promise<VideoListItem[]> {
+): Promise<VideoListItem[] | Error> {
     const resolvedDir = await resolveInProject(projectRoot, VIDEOS_DIR);
     if (resolvedDir instanceof Error) throw resolvedDir;
     const dir = resolvedDir;
@@ -180,6 +189,9 @@ async function buildVideoList(
 
     if (!db) return [];
     const rows = listGenerations(db);
+    if (rows instanceof Error) {
+        return rows;
+    }
     const rowById = new Map(rows.map((r) => [r.task_id, r]));
     const archivedIds = new Set(listArchivedGenerationIds(db));
     const reactions = listGenerationReactions(db);
@@ -326,7 +338,7 @@ export const appRouter = router({
 
         const savedState = await loadFileExplorerState(rootPath);
         if (savedState instanceof Error) {
-            throw savedState;
+            return asAPIError(savedState);
         }
         const { expanded, selected } = savedState;
 
@@ -338,16 +350,25 @@ export const appRouter = router({
         for (const rel of expanded) {
             const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
-                throw target;
+                console.error(target);
+                return asAPIError(target);
             }
             try {
                 childrenByPath[rel] = await listDir(target);
-            } catch {
+            } catch (e) {
+                console.warn(e);
                 // Directory removed since last session — drop it silently.
             }
         }
 
-        return { rootPath, rootEntries, childrenByPath, expanded, selected };
+        return {
+            error: false as const,
+            rootPath,
+            rootEntries,
+            childrenByPath,
+            expanded,
+            selected,
+        };
     }),
 
     // Open a project file/dir with the OS default program.
@@ -560,24 +581,30 @@ export const appRouter = router({
             return { ok: true };
         }),
 
-    // Whether a Seedance API key is configured, plus a masked preview for the
-    // settings modal. The full key is never sent to the client.
-    getApiKeyStatus: publicProcedure.query(async () => {
-        const key = await getStoredApiKey();
-        return {
-            hasKey: !!key,
-            masked: key ? maskKey(key) : null,
-        };
-    }),
+    // Whether a provider API key is configured, plus a masked preview. The full
+    // key is never sent to the client.
+    getApiKeyStatus: publicProcedure
+        .input(z.enum(["seedance", "minimax"]).optional())
+        .query(async ({ input }) => {
+            const provider = input ?? "seedance";
+            const key = await getStoredApiKey(provider);
+            return {
+                hasKey: !!key,
+                masked: key ? maskKey(key) : null,
+            };
+        }),
 
-    // Save the Seedance API key (machine-level in Deno KV) and rebuild the
-    // shared client so subsequent generations use it immediately.
+    // Save a provider API key. Seedance keeps its shared client in sync;
+    // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
-        .input(z.object({ apiKey: z.string().trim().min(1) }))
+        .input(z.object({
+            provider: z.enum(["seedance", "minimax"]).optional(),
+            apiKey: z.string().trim().min(1),
+        }))
         .mutation(async (opts) => {
+            const provider = opts.input.provider ?? "seedance";
             const key = opts.input.apiKey;
-            await setStoredApiKey(key);
-            setSeedanceApiKey(key);
+            await setStoredApiKey(provider, key);
             return { hasKey: true, masked: maskKey(key) };
         }),
 
@@ -625,16 +652,19 @@ export const appRouter = router({
 
     // Open APIs are available for both agents and the GUI.
     open: {
-        // Create a Seedance generation task and log it — the single round trip the
+        // Create a provider generation task and log it — the single round trip the
         // composer makes. Attachments arrive as data URLs (the browser inlines its
         // blob: bytes); the API call + key live server-side. task_checker later
         // polls + downloads the result, keyed by the same task id.
         generate: publicProcedure
             .input(z.object({
-                model: z.enum([
-                    "doubao-seedance-2-0-260128",
-                    "doubao-seedance-2-0-fast-260128",
-                    "doubao-seedance-2-0-mini-260615",
+                model: z.union([
+                    z.enum([
+                        "doubao-seedance-2-0-260128",
+                        "doubao-seedance-2-0-fast-260128",
+                        "doubao-seedance-2-0-mini-260615",
+                    ]),
+                    MiniMaxVideoModelSchema,
                 ]),
                 prompt: z.string(),
                 attachments: z.array(z.object({
@@ -649,11 +679,20 @@ export const appRouter = router({
                     "3:4",
                     "21:9",
                     "adaptive",
+                    "horizontal",
+                    "vertical",
                 ]),
-                resolution: z.enum(["1080p", "720p", "480p"]),
+                resolution: z.enum([
+                    "1080p",
+                    "720p",
+                    "480p",
+                    "768P",
+                    "2K",
+                ]),
                 durationMode: z.enum(["seconds", "smart"]),
                 duration: z.number(),
                 audio: z.boolean(),
+                mode: z.enum(["reference", "frames"]).default("reference"),
             }))
             .mutation(async (opts) => {
                 if (!db) {
@@ -668,57 +707,157 @@ export const appRouter = router({
                     audio,
                     resolution,
                     model,
+                    mode,
                 } = opts.input;
 
-                // Assemble the multimodal content: optional text, then each
-                // attachment as a typed reference. A client may send either an
-                // inline data URL or a filesystem path; resolveToDataUrl inlines
-                // the latter so the rest of the pipeline only deals with data URLs.
-                const content: ContentItem[] = [];
-                if (prompt) content.push({ type: "text", text: prompt });
-                for (const att of attachments) {
-                    const url = await resolveToDataUrl(att.dataUrlOrFilePath);
-                    if (att.kind === "image") {
-                        content.push({
-                            type: "image_url",
-                            image_url: { url },
-                            role: "reference_image",
-                        });
-                    } else if (att.kind === "video") {
-                        content.push({
-                            type: "video_url",
-                            video_url: { url },
-                            role: "reference_video",
-                        });
-                    } else {
-                        content.push({
-                            type: "audio_url",
-                            audio_url: { url },
-                            role: "reference_audio",
-                        });
-                    }
-                }
-
-                // The outbound request keeps attachments inline as data URLs —
-                // Seedance can't reach our local `/project-file` server. The stored
-                // request swaps each data URL for a content-addressed file reference
-                // so the DB row stays small (see uploads.ts).
-                const request: CreateTaskRequest = {
-                    model,
-                    content,
-                    generate_audio: audio,
-                    resolution,
-                    ratio,
-                    ...(durationMode === "seconds" ? { duration } : {}),
-                };
                 const projectRoot = (await getLastOpenedProject(kv))?.path;
                 if (!projectRoot) {
                     throw new Error("Project not initialized");
                 }
-                const storedRequest: CreateTaskRequest = {
-                    ...request,
-                    content: await externalizeAttachments(projectRoot, content),
-                };
+
+                let request: GenerateInput;
+                let storedRequest: GenerateInput;
+                if (isMiniMaxModel(model)) {
+                    if (!prompt.trim()) {
+                        throw new Error("MiniMax H3 requires a prompt");
+                    }
+
+                    const useFrames = mode === "frames" ||
+                        model === "MiniMax-H3-Max";
+                    if (
+                        useFrames &&
+                        (attachments.length > 2 ||
+                            attachments.some((att) => att.kind !== "image"))
+                    ) {
+                        throw new Error(
+                            "MiniMax frame generation accepts at most two images",
+                        );
+                    }
+                    const content: VideoGenerationContent[] = [{
+                        type: "text",
+                        text: prompt.trim(),
+                    }];
+                    for (const [index, att] of attachments.entries()) {
+                        const rawUrl = await resolveToDataUrl(
+                            att.dataUrlOrFilePath,
+                        );
+                        const url = normalizeMiniMaxDataUrl(rawUrl);
+                        if (useFrames) {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: index === 0
+                                    ? "first_frame"
+                                    : "last_frame",
+                            });
+                        } else if (att.kind === "image") {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: "reference_image",
+                            });
+                        } else if (att.kind === "video") {
+                            content.push({
+                                type: "video_url",
+                                video_url: { url },
+                                role: "reference_video",
+                            });
+                        } else {
+                            content.push({
+                                type: "audio_url",
+                                audio_url: { url },
+                                role: "reference_audio",
+                            });
+                        }
+                    }
+
+                    const outputResolution = resolution === "2K"
+                        ? "2K"
+                        : resolution === "768P"
+                        ? "768P"
+                        : resolution === "480p"
+                        ? "480P"
+                        : null;
+                    if (!outputResolution) {
+                        throw new Error(
+                            `Unsupported MiniMax resolution: ${resolution}`,
+                        );
+                    }
+                    const outputRatio = ratio === "horizontal"
+                        ? "16:9"
+                        : ratio === "vertical"
+                        ? "9:16"
+                        : ratio;
+                    request = {
+                        model,
+                        content,
+                        resolution: outputResolution,
+                        duration,
+                        ratio: useFrames && attachments.length > 0
+                            ? "adaptive"
+                            : outputRatio,
+                    };
+                    storedRequest = {
+                        ...request,
+                        content: await externalizeMiniMaxAttachments(
+                            projectRoot,
+                            content,
+                        ),
+                    };
+                } else {
+                    // Assemble Seedance multimodal content: optional text, then
+                    // each attachment as a typed reference.
+                    if (resolution === "768P" || resolution === "2K") {
+                        throw new Error(
+                            `Unsupported Seedance resolution: ${resolution}`,
+                        );
+                    }
+                    const content: ContentItem[] = [];
+                    if (prompt) content.push({ type: "text", text: prompt });
+                    for (const att of attachments) {
+                        const url = await resolveToDataUrl(
+                            att.dataUrlOrFilePath,
+                        );
+                        if (att.kind === "image") {
+                            content.push({
+                                type: "image_url",
+                                image_url: { url },
+                                role: "reference_image",
+                            });
+                        } else if (att.kind === "video") {
+                            content.push({
+                                type: "video_url",
+                                video_url: { url },
+                                role: "reference_video",
+                            });
+                        } else {
+                            content.push({
+                                type: "audio_url",
+                                audio_url: { url },
+                                role: "reference_audio",
+                            });
+                        }
+                    }
+                    const seedanceRequest = {
+                        model,
+                        content,
+                        generate_audio: audio,
+                        resolution,
+                        ratio: ratio as Exclude<
+                            typeof ratio,
+                            "horizontal" | "vertical"
+                        >,
+                        ...(durationMode === "seconds" ? { duration } : {}),
+                    } satisfies SeedanceCreateTaskRequest;
+                    request = seedanceRequest;
+                    storedRequest = {
+                        ...seedanceRequest,
+                        content: await externalizeAttachments(
+                            projectRoot,
+                            content,
+                        ),
+                    };
+                }
 
                 const generation = createGeneration(db, storedRequest);
                 if (generation instanceof Error) {
@@ -729,8 +868,11 @@ export const appRouter = router({
                     type: "generation_created",
                     gen: generation,
                 });
-
-                const created = await seedance_client.generate(request);
+                const apiKey = await getStoredApiKeyFromModel(request.model);
+                if (!apiKey) {
+                    throw new Error("no api key found for model");
+                }
+                const created = await generate(request, apiKey);
                 if (created instanceof Error) {
                     console.error(created);
                     const err = updateGeneration(db, {
@@ -748,23 +890,29 @@ export const appRouter = router({
 
                     return gen;
                 }
+                if (created.provider == "fal") {
+                    throw new Error("fal provider is not supported");
+                }
 
+                const taskId = taskIdFromCreateResponse(created.res);
+                if (taskId instanceof Error) throw taskId;
                 console.log("task created", created);
                 const err = updateGeneration(db, {
                     id: generation.id,
-                    task_id: created.id,
+                    task_id: taskId,
                 });
                 if (err instanceof Error) {
                     throw err;
                 }
 
-                const task = await seedance_client.getTask(created.id);
+                const task = await getTask(request.model, taskId, apiKey);
                 if (task instanceof Error) {
                     throw task;
                 }
                 const err2 = updateGeneration(db, {
                     id: generation.id,
                     task_json: task,
+                    status: localTaskStatus(task),
                 });
                 if (err2 instanceof Error) {
                     throw err2;
@@ -774,10 +922,10 @@ export const appRouter = router({
 
                 // Logging failure shouldn't fail the request — the task is created.
                 const recordErr = recordGeneration(db, {
-                    taskId: created.id,
+                    taskId,
                     requestJson: JSON.stringify(storedRequest),
                     createdAt: new Date().toISOString(),
-                    status: task.status,
+                    status: localTaskStatus(task),
                     task,
                 });
                 if (recordErr) {
@@ -824,9 +972,12 @@ export const appRouter = router({
                 }
                 const result = getGenerationDetail(db, opts.input);
                 if (result instanceof Error) {
-                    throw result;
+                    return asAPIError(result);
                 }
-                return result;
+                return {
+                    error: false as const,
+                    result,
+                };
             }),
 
         // The create request for a generation (by ULID id or task id), fetched on
@@ -876,9 +1027,24 @@ export const appRouter = router({
 
         // List generated videos in `<project>/.project/generations` as Task-like
         // objects. Creates the directory if it doesn't exist yet.
-        listGeneratedVideos: publicProcedure.input(z.object({
-            project_root: z.string(),
-        })).query(({ input }) => buildVideoList(input.project_root, "active")),
+        listGeneratedVideos: publicProcedure
+            .input(z.object({
+                project_root: z.string(),
+            }))
+            .query(async ({ input }) => {
+                const result = await buildVideoList(
+                    input.project_root,
+                    "active",
+                );
+                if (result instanceof Error) {
+                    console.error(result);
+                    return asAPIError(result);
+                }
+                return {
+                    error: false as const,
+                    result,
+                };
+            }),
 
         // The active project folder (absolute path).
         getProjectDir: publicProcedure.query(async () => {
@@ -985,6 +1151,7 @@ import { delay } from "@std/async";
 import {
     getShowOpenDirectorDir,
     getStoredApiKey,
+    getStoredApiKeyFromModel,
     kv,
     setShowOpenDirectorDir,
     setStoredApiKey,
@@ -1026,6 +1193,43 @@ function bytesToBase64(bytes: Uint8Array): string {
     return btoa(binary);
 }
 
+/** Normalize browser MIME aliases to the data-URI spellings MiniMax accepts. */
+function normalizeMiniMaxDataUrl(url: string): string {
+    return url
+        .replace(/^data:audio\/mpeg;base64,/, "data:audio/mp3;base64,")
+        .replace(
+            /^data:audio\/(?:x-wav|wave);base64,/,
+            "data:audio/wav;base64,",
+        );
+}
+
+/** Keep generation history small by replacing inline MiniMax media with files. */
+async function externalizeMiniMaxAttachments(
+    projectRoot: string,
+    content: VideoGenerationContent[],
+): Promise<VideoGenerationContent[]> {
+    return await Promise.all(content.map(async (item) => {
+        if (item.type === "text") return item;
+
+        const source = item.type === "image_url"
+            ? item.image_url.url
+            : item.type === "video_url"
+            ? item.video_url.url
+            : item.audio_url.url;
+        if (!source.startsWith("data:")) return item;
+
+        const url = await storeDataUrl(projectRoot, source);
+        if (url instanceof Error) throw url;
+        if (item.type === "image_url") {
+            return { ...item, image_url: { url } };
+        }
+        if (item.type === "video_url") {
+            return { ...item, video_url: { url } };
+        }
+        return { ...item, audio_url: { url } };
+    }));
+}
+
 /**
  * Resolve an attachment reference to an inline `data:` URL. A value that's
  * already a data URL is returned unchanged; anything else is treated as a
@@ -1041,4 +1245,11 @@ export async function resolveToDataUrl(
     const ext = dataUrlOrFilePath.split(".").pop()?.toLowerCase() ?? "";
     const mime = EXT_MIME[ext] ?? "application/octet-stream";
     return `data:${mime};base64,${bytesToBase64(bytes)}`;
+}
+
+function asAPIError(error: Error) {
+    return {
+        error: true as const,
+        ...error,
+    };
 }

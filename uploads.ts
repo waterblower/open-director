@@ -11,7 +11,7 @@
  * across generations writes the file once and dedupes automatically.
  */
 import { join } from "@std/path";
-import { ContentItem } from "./seedance/seedance.ts";
+import { ContentItem } from "./apigen/seedance/seedance.ts";
 import { resolveInProject } from "./project.ts";
 
 /** Project-relative uploads dir. Forward slashes — also used to build URLs. */
@@ -22,6 +22,8 @@ const MIME_EXT: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
+    "image/heic": "heic",
+    "image/heif": "heif",
     "image/gif": "gif",
     "image/webp": "webp",
     "video/mp4": "mp4",
@@ -29,6 +31,7 @@ const MIME_EXT: Record<string, string> = {
     "video/webm": "webm",
     "video/x-matroska": "mkv",
     "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
     "audio/mp4": "m4a",
     "audio/wav": "wav",
     "audio/x-wav": "wav",

@@ -16,8 +16,10 @@ export function SettingsModal(props: {
 }) {
     const { onClose, onStatusChange } = props;
 
-    const apiKey = useSignal("");
-    const masked = useSignal<string | null>(null);
+    const seedanceApiKey = useSignal("");
+    const minimaxApiKey = useSignal("");
+    const seedanceMasked = useSignal<string | null>(null);
+    const minimaxMasked = useSignal<string | null>(null);
     const saving = useSignal(false);
     const error = useSignal<string | null>(null);
     const gitHash = import.meta.env.VITE_GIT_HASH ?? "unknown";
@@ -35,8 +37,12 @@ export function SettingsModal(props: {
     useEffect(() => {
         (async () => {
             try {
-                const status = await trpc.getApiKeyStatus.query();
-                masked.value = status.masked;
+                const [seedance, minimax] = await Promise.all([
+                    trpc.getApiKeyStatus.query("seedance"),
+                    trpc.getApiKeyStatus.query("minimax"),
+                ]);
+                seedanceMasked.value = seedance.masked;
+                minimaxMasked.value = minimax.masked;
             } catch (err) {
                 console.error(err);
             }
@@ -44,17 +50,34 @@ export function SettingsModal(props: {
     }, []);
 
     const save = async () => {
-        const key = apiKey.value.trim();
-        if (!key) {
+        const seedanceKey = seedanceApiKey.value.trim();
+        const minimaxKey = minimaxApiKey.value.trim();
+        if (!seedanceKey && !minimaxKey) {
             error.value = get_text("please_enter_an_api_key", language.value);
             return;
         }
         saving.value = true;
         error.value = null;
         try {
-            const res = await trpc.setApiKey.mutate({ apiKey: key });
-            masked.value = res.masked;
-            onStatusChange?.(res.hasKey);
+            const results = await Promise.all([
+                seedanceKey
+                    ? trpc.setApiKey.mutate({
+                        provider: "seedance",
+                        apiKey: seedanceKey,
+                    })
+                    : null,
+                minimaxKey
+                    ? trpc.setApiKey.mutate({
+                        provider: "minimax",
+                        apiKey: minimaxKey,
+                    })
+                    : null,
+            ]);
+            if (results[0]) seedanceMasked.value = results[0].masked;
+            if (results[1]) minimaxMasked.value = results[1].masked;
+            onStatusChange?.(Boolean(
+                seedanceMasked.value || minimaxMasked.value,
+            ));
             onClose();
         } catch (err) {
             console.error(err);
@@ -90,7 +113,7 @@ export function SettingsModal(props: {
                         </h2>
                         <p class="text-sm text-gray-500 mt-0.5">
                             {get_text(
-                                "configure_seedance_api_key",
+                                "configure_provider_api_keys",
                                 language.value,
                             )}
                         </p>
@@ -100,12 +123,12 @@ export function SettingsModal(props: {
                         <label class="block text-sm font-medium text-gray-700">
                             Seedance API Key
                         </label>
-                        {masked.value && (
+                        {seedanceMasked.value && (
                             <p class="text-[11px] text-gray-500">
                                 {get_text("currently_saved", language.value)}
                                 {" "}
                                 <span class="font-mono">
-                                    {masked.value}
+                                    {seedanceMasked.value}
                                 </span>
                             </p>
                         )}
@@ -113,16 +136,17 @@ export function SettingsModal(props: {
                             type="password"
                             autoComplete="off"
                             spellcheck={false}
-                            value={apiKey.value}
-                            placeholder={masked.value
+                            value={seedanceApiKey.value}
+                            placeholder={seedanceMasked.value
                                 ? get_text(
                                     "enter_a_new_key_to_replace_it",
                                     language.value,
                                 )
                                 : "ark-..."}
                             onInput={(e) =>
-                                apiKey.value = (e.target as HTMLInputElement)
-                                    .value}
+                                seedanceApiKey.value =
+                                    (e.target as HTMLInputElement)
+                                        .value}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") save();
                             }}
@@ -135,6 +159,40 @@ export function SettingsModal(props: {
                         )}
                     </div>
 
+                    <div class="space-y-1.5">
+                        <label class="block text-sm font-medium text-gray-700">
+                            MiniMax API Key
+                        </label>
+                        {minimaxMasked.value && (
+                            <p class="text-[11px] text-gray-500">
+                                {get_text("currently_saved", language.value)}
+                                {" "}
+                                <span class="font-mono">
+                                    {minimaxMasked.value}
+                                </span>
+                            </p>
+                        )}
+                        <input
+                            type="password"
+                            autoComplete="off"
+                            spellcheck={false}
+                            value={minimaxApiKey.value}
+                            placeholder={minimaxMasked.value
+                                ? get_text(
+                                    "enter_a_new_key_to_replace_it",
+                                    language.value,
+                                )
+                                : "YOUR_API_KEY"}
+                            onInput={(e) =>
+                                minimaxApiKey.value =
+                                    (e.target as HTMLInputElement).value}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") save();
+                            }}
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+
                     {
                         /* Toggle showing the .open-director data folder. Applies
                     immediately (persisted to KV) — independent of Save. */
@@ -143,10 +201,9 @@ export function SettingsModal(props: {
                         <input
                             type="checkbox"
                             checked={ShowOpenDirectorDir.value}
-                            onChange={(e) =>
-                                setShowOpenDirectorDir(
-                                    (e.target as HTMLInputElement).checked,
-                                )}
+                            onChange={(e) => setShowOpenDirectorDir(
+                                (e.target as HTMLInputElement).checked,
+                            )}
                             class="mt-0.5 size-4 accent-indigo-500 cursor-pointer"
                         />
                         <span class="text-sm">

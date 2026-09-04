@@ -1,6 +1,6 @@
 import { type Signal, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
 import { GenerationTabs } from "./GenerationTabs.tsx";
 import { get_text, language, trpc } from "@/trpc/client.ts";
@@ -14,7 +14,7 @@ export function GenerationsGrid(
         results: Signal<Map<string, GeneratedVideo>>;
         bottomInset: Signal<number>;
         /** Set to a generation's request when its reuse button is clicked. */
-        reusePrompt: Signal<CreateTaskRequest | null>;
+        reusePrompt: Signal<GenerateInput | null>;
         /** Active project's root path — sent with project-scoped mutations. */
         projectRoot: string | null;
     },

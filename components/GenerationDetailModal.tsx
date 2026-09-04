@@ -1,7 +1,8 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
-import { estimateCost } from "../seedance/pricing.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
+import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
+import { estimateCost } from "../apigen/seedance/pricing.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import {
     DislikeIcon,
@@ -9,11 +10,7 @@ import {
     LikeIcon,
     type Reaction,
 } from "./GenerationCard.tsx";
-
-/** The full generation row returned by the details endpoint. */
-export type GenerationDetail = Awaited<
-    ReturnType<typeof trpc.open.getGenerationDetail.query>
->;
+import { type Generation } from "@/db.ts";
 
 /** Human-readable elapsed time, e.g. "1m 23s" or "12s". */
 function formatDuration(seconds: number, lang: Language): string {
@@ -25,8 +22,15 @@ function formatDuration(seconds: number, lang: Language): string {
 }
 
 /** Concatenated text of the prompt's text content items. */
-function promptText(req: CreateTaskRequest | null | undefined): string {
-    if (!req) return "";
+function isMiniMaxRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: MiniMaxVideoModel }> {
+    return request.model === "MiniMax-H3" ||
+        request.model === "MiniMax-H3-Max";
+}
+
+function promptText(req: GenerateInput | null | undefined): string {
+    if (!req || !("content" in req)) return "";
     return req.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
@@ -37,7 +41,7 @@ function promptText(req: CreateTaskRequest | null | undefined): string {
 export function GenerationDetailModal(props: {
     projectRoot: string;
     generation: GeneratedVideo;
-    detail: GenerationDetail | null;
+    detail: Generation | null;
     loading: boolean;
     onClose: () => void;
 }) {
@@ -150,13 +154,30 @@ export function GenerationDetailModal(props: {
 
     // created_at / updated_at are unix seconds; their gap is the time spent
     // queued + running on the server.
-    const elapsed = task?.created_at != null && task.updated_at != null
-        ? task.updated_at - task.created_at
+    const createdAt = typeof task?.created_at === "number"
+        ? task.created_at
+        : null;
+    const updatedAt = typeof task?.updated_at === "number"
+        ? task.updated_at
+        : null;
+    const elapsed = createdAt != null && updatedAt != null
+        ? updatedAt - createdAt
         : null;
 
-    const totalTokens = task?.usage?.total_tokens ?? null;
-    const completionTokens = task?.usage?.completion_tokens ?? null;
-    const cost = totalTokens != null && req
+    const usage = task?.usage && typeof task.usage === "object"
+        ? task.usage
+        : null;
+    const totalTokens = usage && "total_tokens" in usage &&
+            typeof usage.total_tokens === "number"
+        ? usage.total_tokens
+        : null;
+    const completionTokens = usage && "completion_tokens" in usage &&
+            typeof usage.completion_tokens === "number"
+        ? usage.completion_tokens
+        : null;
+    const cost = req && isMiniMaxRequest(req)
+        ? null
+        : totalTokens != null && req && "content" in req
         ? estimateCost(totalTokens, req)
         : null;
 
@@ -165,18 +186,21 @@ export function GenerationDetailModal(props: {
     // Reference inputs attached to the request, with their (servable
     // /project-file or data:) URLs, in prompt order.
     type Reference = { kind: "image" | "video" | "audio"; url: string };
-    const references = (req?.content ?? []).flatMap((c): Reference[] => {
-        if (c.type === "image_url") {
-            return [{ kind: "image", url: c.image_url.url }];
-        }
-        if (c.type === "video_url") {
-            return [{ kind: "video", url: c.video_url.url }];
-        }
-        if (c.type === "audio_url") {
-            return [{ kind: "audio", url: c.audio_url.url }];
-        }
-        return [];
-    });
+    const references: Reference[] = (req && "content" in req ? req.content : [])
+        .flatMap(
+            (c): Reference[] => {
+                if (c.type === "image_url") {
+                    return [{ kind: "image", url: c.image_url.url }];
+                }
+                if (c.type === "video_url") {
+                    return [{ kind: "video", url: c.video_url.url }];
+                }
+                if (c.type === "audio_url") {
+                    return [{ kind: "audio", url: c.audio_url.url }];
+                }
+                return [];
+            },
+        );
 
     return (
         <div
@@ -315,7 +339,7 @@ export function GenerationDetailModal(props: {
                                         value={cost != null
                                             ? `¥${cost.rmb.toFixed(2)}`
                                             : "—"}
-                                        hint={cost != null
+                                        hint={cost != null && "usd" in cost
                                             ? `≈ $${cost.usd.toFixed(2)}`
                                             : undefined}
                                     />
@@ -420,7 +444,8 @@ export function GenerationDetailModal(props: {
                                             )}
                                             value={req.model}
                                         />
-                                        {req.resolution && (
+                                        {"resolution" in req &&
+                                            req.resolution && (
                                             <Stat
                                                 label={get_text(
                                                     "resolution",
@@ -429,7 +454,7 @@ export function GenerationDetailModal(props: {
                                                 value={req.resolution}
                                             />
                                         )}
-                                        {req.ratio && (
+                                        {"ratio" in req && req.ratio && (
                                             <Stat
                                                 label={get_text(
                                                     "aspect_ratio",
@@ -452,7 +477,8 @@ export function GenerationDetailModal(props: {
                                                 }`}
                                             />
                                         )}
-                                        {req.generate_audio != null && (
+                                        {"generate_audio" in req &&
+                                            req.generate_audio != null && (
                                             <Stat
                                                 label={get_text(
                                                     "audio",
@@ -469,7 +495,8 @@ export function GenerationDetailModal(props: {
                                                     )}
                                             />
                                         )}
-                                        {req.seed != null && req.seed >= 0 && (
+                                        {"seed" in req && req.seed != null &&
+                                            req.seed >= 0 && (
                                             <Stat
                                                 label={get_text(
                                                     "seed",
@@ -483,7 +510,9 @@ export function GenerationDetailModal(props: {
 
                                 <p class="text-[11px] text-gray-500">
                                     {get_text(
-                                        "cost_disclaimer",
+                                        req && isMiniMaxRequest(req)
+                                            ? "minimax_cost_disclaimer"
+                                            : "cost_disclaimer",
                                         language.value,
                                     )}
                                 </p>

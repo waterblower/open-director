@@ -10,9 +10,11 @@ import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
     ContentItem,
-    CreateTaskRequest,
     SeedanceModel,
-} from "../seedance/seedance.ts";
+} from "../apigen/seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
+
+import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
@@ -28,7 +30,7 @@ type Attachment = {
 };
 
 type Mode = "reference" | "frames";
-type Resolution = "480p" | "720p" | "1080p";
+type Resolution = "480p" | "720p" | "1080p" | "768P" | "2K";
 type DurationMode = "seconds" | "smart";
 type Popover = "model" | "mode" | "settings" | null;
 
@@ -54,6 +56,29 @@ const SEEDANCE_MODELS = [
     shortLabel: string;
 }[];
 
+const MINIMAX_MODEL_OPTIONS = [
+    {
+        value: "MiniMax-H3",
+        label: "MiniMax H3",
+        shortLabel: "H3",
+    },
+    {
+        value: "MiniMax-H3-Max",
+        label: "MiniMax H3 Max",
+        shortLabel: "H3 Max",
+    },
+] as const satisfies readonly {
+    value: MiniMaxVideoModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+const GENERATION_MODELS = [
+    ...SEEDANCE_MODELS,
+    ...MINIMAX_MODEL_OPTIONS,
+];
+type GenerationModel = SeedanceModel | MiniMaxVideoModel;
+
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
     { value: "16:9", w: 16, h: 9 },
@@ -70,6 +95,11 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
     "doubao-seedance-2-0-260128": ["480p", "720p", "1080p"],
     "doubao-seedance-2-0-fast-260128": ["480p", "720p"],
     "doubao-seedance-2-0-mini-260615": ["480p", "720p"],
+};
+
+const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
+    "MiniMax-H3": ["768P", "2K"],
+    "MiniMax-H3-Max": ["480p", "768P"],
 };
 
 /** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
@@ -100,7 +130,7 @@ const COMPOSER_STATE_KEY = "composer.state.v1";
 /** Persisted composer fields (attachments are intentionally excluded). */
 interface ComposerState {
     prompt: string;
-    model: SeedanceModel;
+    model: GenerationModel;
     mode: Mode;
     ratio: AspectRatio;
     resolution: Resolution;
@@ -135,9 +165,19 @@ function isSeedanceModel(value: unknown): value is SeedanceModel {
     return SEEDANCE_MODELS.some((model) => model.value === value);
 }
 
-function getModelOption(value: SeedanceModel) {
-    return SEEDANCE_MODELS.find((model) => model.value === value) ??
-        SEEDANCE_MODELS[0];
+function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
+    return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
+}
+
+function isMiniMaxRequest(
+    request: GenerateInput,
+): request is Extract<GenerateInput, { model: MiniMaxVideoModel }> {
+    return isMiniMaxModel(request.model);
+}
+
+function getModelOption(value: GenerationModel) {
+    return GENERATION_MODELS.find((model) => model.value === value) ??
+        GENERATION_MODELS[0];
 }
 
 // The API can't fetch blob: object URLs, so inline the bytes as a data URL
@@ -302,14 +342,14 @@ export function Composer(props: {
     /** Composer reports its measured height here (used to pad the results grid). */
     composerInset: Signal<number>;
     /** A past generation's request to load in; consumed (cleared) when applied. */
-    reusePrompt: Signal<CreateTaskRequest | null>;
+    reusePrompt: Signal<GenerateInput | null>;
     generated_videos: Signal<Map<string, GeneratedVideo>>;
 }) {
     const { genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
     const attachments = useSignal<Attachment[]>([]);
-    const model = useSignal<SeedanceModel>("doubao-seedance-2-0-260128");
+    const model = useSignal<GenerationModel>("doubao-seedance-2-0-260128");
     const mode = useSignal<Mode>("reference");
     const ratio = useSignal<AspectRatio>("21:9");
     const resolution = useSignal<Resolution>("480p");
@@ -356,7 +396,6 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            if (isSeedanceModel(saved.model)) model.value = saved.model;
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
             if (saved.resolution) resolution.value = saved.resolution;
@@ -386,62 +425,129 @@ export function Composer(props: {
     // Replace the composer's content (prompt text + reference media) and
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
-    const applyReuse = async (req: CreateTaskRequest) => {
-        const content = req.content;
-        const text = content
-            .filter((c): c is Extract<ContentItem, { type: "text" }> =>
-                c.type === "text"
-            )
-            .map((c) => c.text)
-            .join("\n");
-        prompt.value = text;
-        const ta = promptRef.current;
-        if (ta) {
-            ta.value = text;
-            autoGrow(ta);
-        }
-
-        // Settings — mirror how the request was assembled on submit: `duration`
-        // is only present in "seconds" mode, omitted in "smart" mode.
-        model.value = req.model;
-        if (req.ratio) ratio.value = req.ratio;
-        if (req.resolution) resolution.value = req.resolution;
-        if (typeof req.duration === "number") {
+    const applyReuse = async (req: GenerateInput) => {
+        if (isMiniMaxRequest(req)) {
+            const text = req.content
+                .filter((item) => item.type === "text")
+                .map((item) => item.text)
+                .join("\n");
+            prompt.value = text;
+            model.value = req.model;
+            ratio.value = req.ratio ?? "adaptive";
+            resolution.value = req.resolution === "480P"
+                ? "480p"
+                : req.resolution;
             durationMode.value = "seconds";
             duration.value = req.duration;
-        } else {
-            durationMode.value = "smart";
-        }
-        if (typeof req.generate_audio === "boolean") {
-            audio.value = req.generate_audio;
-        }
+            mode.value = req.content.some((item) =>
+                    item.type === "image_url" &&
+                    (item.role === "first_frame" ||
+                        item.role === "last_frame" || item.role === undefined)
+                )
+                ? "frames"
+                : "reference";
+            audio.value = false;
 
-        // Reference media is stored as data URLs; rebuild each into a revocable
-        // object URL so it behaves like a normally-attached file.
-        const media = content
-            .map((c) => {
-                if (c.type === "image_url") {
-                    return { kind: "image" as const, url: c.image_url.url };
-                }
-                if (c.type === "video_url") {
-                    return { kind: "video" as const, url: c.video_url.url };
-                }
-                if (c.type === "audio_url") {
-                    return { kind: "audio" as const, url: c.audio_url.url };
-                }
-                return null;
-            })
-            .filter((m): m is { kind: AttachmentKind; url: string } =>
-                m !== null
+            const media: { kind: AttachmentKind; url: string }[] = req.content
+                .flatMap((item): { kind: AttachmentKind; url: string }[] => {
+                    if (item.type === "image_url") {
+                        return [{
+                            kind: "image" as const,
+                            url: item.image_url.url,
+                        }];
+                    }
+                    if (item.type === "video_url") {
+                        return [{
+                            kind: "video" as const,
+                            url: item.video_url.url,
+                        }];
+                    }
+                    if (item.type === "audio_url") {
+                        return [{
+                            kind: "audio" as const,
+                            url: item.audio_url.url,
+                        }];
+                    }
+                    return [];
+                });
+            attachments.value.forEach((attachment) =>
+                URL.revokeObjectURL(attachment.url)
             );
+            attachments.value = await Promise.all(media.map(async (item) => ({
+                id: nextId.current++,
+                kind: item.kind,
+                name: kindLabel(item.kind, language.value),
+                url: URL.createObjectURL(await (await fetch(item.url)).blob()),
+            })));
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = text;
+                autoGrow(ta);
+            }
+            return;
+        } else if (
+            req.model == "doubao-seedance-2-0-260128" ||
+            req.model == "doubao-seedance-2-0-fast-260128" ||
+            req.model == "doubao-seedance-2-0-mini-260615"
+        ) {
+            const content = req.content;
+            const text = content
+                .filter((c): c is Extract<ContentItem, { type: "text" }> =>
+                    c.type === "text"
+                )
+                .map((c) => c.text)
+                .join("\n");
+            prompt.value = text;
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = text;
+                autoGrow(ta);
+            }
 
-        attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
-        attachments.value = await Promise.all(media.map(async (m) => ({
-            id: nextId.current++,
-            kind: m.kind,
-            name: kindLabel(m.kind, language.value),
-            url: URL.createObjectURL(await (await fetch(m.url)).blob()),
-        })));
+            // Settings — mirror how the request was assembled on submit: `duration`
+            // is only present in "seconds" mode, omitted in "smart" mode.
+            model.value = req.model;
+            if (req.ratio) ratio.value = req.ratio;
+            if (req.resolution) resolution.value = req.resolution;
+            if (typeof req.duration === "number") {
+                durationMode.value = "seconds";
+                duration.value = req.duration;
+            } else {
+                durationMode.value = "smart";
+            }
+            if (typeof req.generate_audio === "boolean") {
+                audio.value = req.generate_audio;
+            }
+
+            // Reference media is stored as data URLs; rebuild each into a revocable
+            // object URL so it behaves like a normally-attached file.
+            const media = content
+                .map((c) => {
+                    if (c.type === "image_url") {
+                        return { kind: "image" as const, url: c.image_url.url };
+                    }
+                    if (c.type === "video_url") {
+                        return { kind: "video" as const, url: c.video_url.url };
+                    }
+                    if (c.type === "audio_url") {
+                        return { kind: "audio" as const, url: c.audio_url.url };
+                    }
+                    return null;
+                })
+                .filter((m): m is { kind: AttachmentKind; url: string } =>
+                    m !== null
+                );
+
+            attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
+            attachments.value = await Promise.all(media.map(async (m) => ({
+                id: nextId.current++,
+                kind: m.kind,
+                name: kindLabel(m.kind, language.value),
+                url: URL.createObjectURL(await (await fetch(m.url)).blob()),
+            })));
+        } else {
+            throw new Error("Unsupported model: " + req.model);
+        }
     };
 
     useSignalEffect(() => {
@@ -474,15 +580,68 @@ export function Composer(props: {
 
     // Resolutions allowed for the current model. Keep the selection valid when
     // the model changes (e.g. switching to 2.0 Fast drops 1080p → 720p).
-    const resolutions = useComputed(() => MODEL_RESOLUTIONS[model.value]);
+    const resolutions = useComputed(() => {
+        if (isSeedanceModel(model.value)) {
+            return MODEL_RESOLUTIONS[model.value];
+        }
+        if (isMiniMaxModel(model.value)) {
+            return MINIMAX_MODEL_RESOLUTIONS[model.value];
+        }
+        return [];
+    });
     useSignalEffect(() => {
-        const clamped = clampResolution(model.value, resolution.value);
-        if (clamped !== resolution.value) resolution.value = clamped;
+        if (isMiniMaxModel(model.value)) {
+            const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
+            if (!allowed.includes(resolution.value)) {
+                resolution.value = "768P";
+            }
+            const minimum = model.value === "MiniMax-H3-Max" ? 5 : 4;
+            duration.value = Math.max(
+                minimum,
+                Math.min(15, duration.value),
+            );
+            durationMode.value = "seconds";
+            if (model.value === "MiniMax-H3-Max") mode.value = "frames";
+            if (
+                attachments.value.length === 0 && ratio.value === "adaptive"
+            ) {
+                ratio.value = "16:9";
+            }
+            return;
+        } else {
+            const clamped = clampResolution(model.value, resolution.value);
+            if (clamped !== resolution.value) resolution.value = clamped;
+        }
     });
 
-    const canSubmit = useComputed(() =>
-        prompt.value.trim().length > 0 || attachments.value.length > 0
-    );
+    const canSubmit = useComputed(() => {
+        if (isMiniMaxModel(model.value)) {
+            if (!prompt.value.trim()) return false;
+            if (
+                attachments.value.length === 0 && ratio.value === "adaptive"
+            ) return false;
+            if (
+                mode.value === "frames" ||
+                model.value === "MiniMax-H3-Max"
+            ) {
+                return attachments.value.length <= 2 &&
+                    attachments.value.every((item) => item.kind === "image");
+            }
+            const imageCount = attachments.value.filter((item) =>
+                item.kind === "image"
+            ).length;
+            const videoCount = attachments.value.filter((item) =>
+                item.kind === "video"
+            ).length;
+            const audioCount = attachments.value.filter((item) =>
+                item.kind === "audio"
+            ).length;
+            return imageCount <= 9 && videoCount <= 3 && audioCount <= 3;
+        } else {
+            return prompt.value.trim().length > 0 ||
+                attachments.value.length > 0;
+        }
+    });
 
     const togglePopover = (which: Exclude<Popover, null>) => {
         popover.value = popover.value === which ? null : which;
@@ -490,7 +649,13 @@ export function Composer(props: {
 
     const addFiles = (files: FileList | File[] | null) => {
         if (!files) return;
-        const added = Array.from(files).map((file) => ({
+        const miniMaxFrames = isMiniMaxModel(model.value) &&
+            (mode.value === "frames" || model.value === "MiniMax-H3-Max");
+        const accepted = miniMaxFrames
+            ? Array.from(files).filter((file) => file.type.startsWith("image/"))
+                .slice(0, Math.max(0, 2 - attachments.value.length))
+            : Array.from(files);
+        const added = accepted.map((file) => ({
             id: nextId.current++,
             kind: kindOf(file),
             name: file.name,
@@ -504,9 +669,15 @@ export function Composer(props: {
     // object URL so it behaves like a file attachment (revocable, and the bytes
     // are held client-side for sending on to remote servers).
     const addProjectImage = async (path: string) => {
+        if (
+            isMiniMaxModel(model.value) &&
+            (mode.value === "frames" || model.value === "MiniMax-H3-Max") &&
+            attachments.value.length >= 2
+        ) return;
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
         const blob = await (await fetch(url)).blob();
+
         attachments.value = [...attachments.value, {
             id: nextId.current++,
             kind: "image",
@@ -681,14 +852,25 @@ export function Composer(props: {
                         >
                             <span class="text-lg leading-none">+</span>
                             <span class="text-[10px]">
-                                {get_text("image_video_audio", language.value)}
+                                {get_text(
+                                    isMiniMaxModel(model.value) &&
+                                        (mode.value === "frames" ||
+                                            model.value === "MiniMax-H3-Max")
+                                        ? "reference_images"
+                                        : "image_video_audio",
+                                    language.value,
+                                )}
                             </span>
                         </button>
                         <input
                             ref={fileInput}
                             type="file"
                             multiple
-                            accept="image/*,video/*,audio/*"
+                            accept={isMiniMaxModel(model.value) &&
+                                    (mode.value === "frames" ||
+                                        model.value === "MiniMax-H3-Max")
+                                ? "image/*"
+                                : "image/*,video/*,audio/*"}
                             class="hidden"
                             onChange={(e) => {
                                 addFiles(e.currentTarget.files);
@@ -861,7 +1043,7 @@ export function Composer(props: {
                                             language.value,
                                         )}
                                     </div>
-                                    {SEEDANCE_MODELS.map((item) => (
+                                    {GENERATION_MODELS.map((item) => (
                                         <button
                                             key={item.value}
                                             type="button"
@@ -896,76 +1078,80 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        <div class="relative">
-                            <button
-                                type="button"
-                                onClick={() => togglePopover("mode")}
-                                class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                                <VideoIcon class="size-4" />
-                                {mode.value === "reference"
-                                    ? get_text("reference", language.value)
-                                    : get_text(
-                                        "first_last_frame",
-                                        language.value,
-                                    )}
-                                <ChevronIcon up={popover.value === "mode"} />
-                            </button>
-
-                            {popover.value === "mode" && (
-                                <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
-                                    <div class="px-3 py-2 text-sm text-gray-400">
-                                        {get_text(
-                                            "select_mode",
+                        {model.value !== "MiniMax-H3-Max" && (
+                            <div class="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => togglePopover("mode")}
+                                    class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                    <VideoIcon class="size-4" />
+                                    {mode.value === "reference"
+                                        ? get_text("reference", language.value)
+                                        : get_text(
+                                            "first_last_frame",
                                             language.value,
                                         )}
-                                    </div>
-                                    {(
-                                        [
-                                            {
-                                                value: "reference",
-                                                textId: "reference",
-                                                icon: (
-                                                    <VideoIcon class="size-4" />
-                                                ),
-                                            },
-                                            {
-                                                value: "frames",
-                                                textId: "first_last_frame",
-                                                icon: (
-                                                    <FramesIcon class="size-4" />
-                                                ),
-                                            },
-                                        ] as const
-                                    ).map((item) => (
-                                        <button
-                                            key={item.value}
-                                            type="button"
-                                            onClick={() => {
-                                                mode.value = item.value;
-                                                popover.value = null;
-                                            }}
-                                            class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
-                                                mode.value === item.value
-                                                    ? "bg-indigo-50 hover:bg-indigo-50"
-                                                    : ""
-                                            }`}
-                                        >
-                                            {item.icon}
+                                    <ChevronIcon
+                                        up={popover.value === "mode"}
+                                    />
+                                </button>
+
+                                {popover.value === "mode" && (
+                                    <div class="absolute left-0 bottom-full mb-2 z-20 w-56 bg-white rounded-xl shadow-xl border border-gray-100 p-2">
+                                        <div class="px-3 py-2 text-sm text-gray-400">
                                             {get_text(
-                                                item.textId,
+                                                "select_mode",
                                                 language.value,
                                             )}
-                                            {mode.value === item.value && (
-                                                <span class="ml-auto">
-                                                    <CheckIcon />
-                                                </span>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                        </div>
+                                        {(
+                                            [
+                                                {
+                                                    value: "reference",
+                                                    textId: "reference",
+                                                    icon: (
+                                                        <VideoIcon class="size-4" />
+                                                    ),
+                                                },
+                                                {
+                                                    value: "frames",
+                                                    textId: "first_last_frame",
+                                                    icon: (
+                                                        <FramesIcon class="size-4" />
+                                                    ),
+                                                },
+                                            ] as const
+                                        ).map((item) => (
+                                            <button
+                                                key={item.value}
+                                                type="button"
+                                                onClick={() => {
+                                                    mode.value = item.value;
+                                                    popover.value = null;
+                                                }}
+                                                class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
+                                                    mode.value === item.value
+                                                        ? "bg-indigo-50 hover:bg-indigo-50"
+                                                        : ""
+                                                }`}
+                                            >
+                                                {item.icon}
+                                                {get_text(
+                                                    item.textId,
+                                                    language.value,
+                                                )}
+                                                {mode.value === item.value && (
+                                                    <span class="ml-auto">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Output settings */}
                         <div class="relative">
@@ -977,7 +1163,9 @@ export function Composer(props: {
                                 <span class="px-2.5 flex items-center gap-1.5">
                                     {ratio.value}
                                 </span>
-                                <span class="px-2.5">{resolution.value}</span>
+                                <span class="px-2.5">
+                                    {resolution.value}
+                                </span>
                                 <span class="px-2.5">
                                     {durationLabel.value}
                                 </span>
@@ -1021,7 +1209,10 @@ export function Composer(props: {
                                     </div>
 
                                     <div class="text-sm text-gray-500 mb-2">
-                                        {get_text("resolution", language.value)}
+                                        {get_text(
+                                            "resolution",
+                                            language.value,
+                                        )}
                                     </div>
                                     <div
                                         class="grid bg-gray-100 rounded-lg p-1 mb-5"
@@ -1030,14 +1221,17 @@ export function Composer(props: {
                                                 `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
                                         }}
                                     >
-                                        {resolutions.value.map((res) => (
+                                        {resolutions.value.map((
+                                            res,
+                                        ) => (
                                             <button
                                                 key={res}
                                                 type="button"
                                                 onClick={() =>
                                                     resolution.value = res}
                                                 class={`h-9 rounded-md text-sm ${
-                                                    resolution.value === res
+                                                    resolution.value ===
+                                                            res
                                                         ? "bg-white shadow text-gray-900 font-medium"
                                                         : "text-gray-500 hover:text-gray-700"
                                                 }`}
@@ -1050,44 +1244,50 @@ export function Composer(props: {
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
                                     </div>
-                                    <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
-                                        {(
-                                            [
-                                                {
-                                                    value: "seconds",
-                                                    textId: "by_seconds",
-                                                },
-                                                {
-                                                    value: "smart",
-                                                    textId: "smart_duration",
-                                                },
-                                            ] as const
-                                        ).map((dm) => (
-                                            <button
-                                                key={dm.value}
-                                                type="button"
-                                                onClick={() =>
-                                                    durationMode.value =
-                                                        dm.value}
-                                                class={`h-9 rounded-md text-sm ${
-                                                    durationMode.value ===
-                                                            dm.value
-                                                        ? "bg-white shadow text-gray-900 font-medium"
-                                                        : "text-gray-500 hover:text-gray-700"
-                                                }`}
-                                            >
-                                                {get_text(
-                                                    dm.textId,
-                                                    language.value,
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    {!isMiniMaxModel(model.value) && (
+                                        <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
+                                            {(
+                                                [
+                                                    {
+                                                        value: "seconds",
+                                                        textId: "by_seconds",
+                                                    },
+                                                    {
+                                                        value: "smart",
+                                                        textId:
+                                                            "smart_duration",
+                                                    },
+                                                ] as const
+                                            ).map((dm) => (
+                                                <button
+                                                    key={dm.value}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        durationMode.value =
+                                                            dm.value}
+                                                    class={`h-9 rounded-md text-sm ${
+                                                        durationMode.value ===
+                                                                dm.value
+                                                            ? "bg-white shadow text-gray-900 font-medium"
+                                                            : "text-gray-500 hover:text-gray-700"
+                                                    }`}
+                                                >
+                                                    {get_text(
+                                                        dm.textId,
+                                                        language.value,
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                     {durationMode.value === "seconds" && (
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
-                                                min={4}
+                                                min={model.value ===
+                                                        "MiniMax-H3-Max"
+                                                    ? 5
+                                                    : 4}
                                                 max={15}
                                                 step={1}
                                                 value={duration.value}
@@ -1113,17 +1313,19 @@ export function Composer(props: {
                         </div>
 
                         {/* Audio toggle */}
-                        <button
-                            type="button"
-                            onClick={() => audio.value = !audio.value}
-                            class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
-                                audio.value
-                                    ? "border-indigo-300 bg-indigo-50 text-indigo-600"
-                                    : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                            }`}
-                        >
-                            <SpeakerIcon />
-                        </button>
+                        {isSeedanceModel(model.value) && (
+                            <button
+                                type="button"
+                                onClick={() => audio.value = !audio.value}
+                                class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
+                                    audio.value
+                                        ? "border-indigo-300 bg-indigo-50 text-indigo-600"
+                                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                                }`}
+                            >
+                                <SpeakerIcon />
+                            </button>
+                        )}
 
                         <div class="flex-1" />
 
@@ -1165,6 +1367,7 @@ export function Composer(props: {
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,
+                                    mode: mode.value,
                                 });
                                 clearAll();
                                 const gen = await gen_p;

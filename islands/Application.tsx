@@ -1,7 +1,7 @@
 import { Signal, signal, useSignal, useSignalEffect } from "@preact/signals";
 
 import { useEffect, useRef } from "preact/hooks";
-import type { CreateTaskRequest } from "../seedance/seedance.ts";
+import type { GenerateInput } from "../apigen/mod.ts";
 import {
     loadConfig,
     loadProjectData,
@@ -36,7 +36,7 @@ export default function Application() {
     const generated_videos = useSignal<Map<string, GeneratedVideo>>(new Map());
     // A past generation's request (prompt + settings) the grid asks the
     // composer to reuse. The composer consumes (and clears) it.
-    const reusePrompt = useSignal<CreateTaskRequest | null>(null);
+    const reusePrompt = useSignal<GenerateInput | null>(null);
     // Composer reports its measured height here to pad the results grid.
     const composerInset = useSignal(0);
     const sidebarWidth = useSignal(DEFAULT_SIDEBAR_WIDTH);
@@ -102,12 +102,17 @@ export default function Application() {
         };
     }, []);
 
-    // Prompt for the Seedance API key on mount when none is configured yet.
+    // Prompt for provider credentials when no generation service is configured.
     useEffect(() => {
         (async () => {
             try {
-                const status = await trpc.getApiKeyStatus.query();
-                if (!status.hasKey) settingsOpen.value = true;
+                const [seedance, minimax] = await Promise.all([
+                    trpc.getApiKeyStatus.query("seedance"),
+                    trpc.getApiKeyStatus.query("minimax"),
+                ]);
+                if (!seedance.hasKey && !minimax.hasKey) {
+                    settingsOpen.value = true;
+                }
             } catch (err) {
                 console.error(err);
             }
@@ -124,12 +129,12 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             const data = await loadProjectData();
-            if (data instanceof Error) {
-                console.error(data);
-                return;
-            }
             if (!data) {
                 console.log("no project opened");
+                return;
+            }
+            if (data.error) {
+                console.error(data);
                 return;
             }
             projectData.value = data;
@@ -154,11 +159,14 @@ export default function Application() {
             // reload loop (loadProjectData firing "like crazy").
             if (!projectData.peek()) return;
             const data = await loadProjectData();
-            if (data instanceof Error) {
+            if (!data) {
+                return;
+            }
+            if (data.error) {
                 console.error(data);
                 return;
             }
-            if (data) projectData.value = data;
+            projectData.value = data;
         })();
     });
 
@@ -179,7 +187,11 @@ export default function Application() {
             const vids = await trpc.open.listGeneratedVideos.query({
                 project_root: root,
             });
-            generated_videos.value = new Map(vids.map((v) => [v.id, v]));
+            if (vids.error) {
+                console.error(vids);
+                return;
+            }
+            generated_videos.value = new Map(vids.result.map((v) => [v.id, v]));
         })();
     });
 

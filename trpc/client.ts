@@ -80,24 +80,26 @@ export async function readDir(projectRoot: string, path: string) {
  * restored-expanded directories (children pre-loaded) and the saved selection.
  * Returns null when no project is open, or an Error on failure.
  */
-export async function loadProjectData(): Promise<ProjectData | null | Error> {
-    try {
-        const data = await trpc.loadProjectData.query();
-        if (!data) return null;
-        const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};
-        for (const [dir, entries] of Object.entries(data.childrenByPath)) {
-            childrenByPath[dir] = entries.filter(notHidden);
-        }
-        return {
-            rootPath: data.rootPath,
-            rootEntries: data.rootEntries.filter(notHidden),
-            childrenByPath,
-            expanded: new Set(data.expanded),
-            selected: data.selected,
-        };
-    } catch (err) {
-        return err as Error;
+export async function loadProjectData() {
+    const data = await trpc.loadProjectData.query();
+    if (!data) {
+        return null;
     }
+    if (data.error) {
+        return data;
+    }
+    const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};
+    for (const [dir, entries] of Object.entries(data.childrenByPath)) {
+        childrenByPath[dir] = entries.filter(notHidden);
+    }
+    return {
+        error: false as const,
+        rootPath: data.rootPath,
+        rootEntries: data.rootEntries.filter(notHidden),
+        childrenByPath,
+        expanded: new Set(data.expanded),
+        selected: data.selected,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,10 @@ const TEXTS = {
     configure_seedance_api_key: {
         English: "Configure your Seedance API key to generate videos.",
         Chinese: "配置 Seedance API Key 以生成视频。",
+    },
+    configure_provider_api_keys: {
+        English: "Configure API keys for the video providers you use.",
+        Chinese: "配置你所使用的视频生成服务 API Key。",
     },
     currently_saved: { English: "Currently saved:", Chinese: "当前已保存：" },
     enter_a_new_key_to_replace_it: {
@@ -295,6 +301,11 @@ const TEXTS = {
             "Cost is a rough estimate based on token usage; refer to your Volcano Engine bill for the actual amount.",
         Chinese: "费用为按 token 用量的粗略估算，实际以火山引擎账单为准。",
     },
+    minimax_cost_disclaimer: {
+        English:
+            "MiniMax cost is not estimated here; refer to your MiniMax bill for the actual amount.",
+        Chinese: "此处不估算 MiniMax 费用，实际金额以 MiniMax 账单为准。",
+    },
 
     // Composer
     image: { English: "Image", Chinese: "图片" },
@@ -307,6 +318,10 @@ const TEXTS = {
     image_video_audio: {
         English: "Image / Video / Audio",
         Chinese: "图片/视频/音频",
+    },
+    reference_images: {
+        English: "Reference images",
+        Chinese: "参考图片",
     },
     remove: { English: "Remove", Chinese: "移除" },
     no_assets_yet: {
