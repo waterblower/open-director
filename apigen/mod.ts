@@ -112,9 +112,8 @@ export async function getTask(
     apiKey: string,
 ): Promise<GetTaskResult | Error> {
     if (isFalModel(model)) {
-        console.log("fal", taskId)
         const result = await get_result(taskId, apiKey);
-        if(result instanceof Error) {
+        if (result instanceof Error) {
             return result;
         }
         return { model, task: falResultToTask(model, taskId, result) };

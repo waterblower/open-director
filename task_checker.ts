@@ -57,65 +57,61 @@ export async function check_and_download(): Promise<void | Error> {
         //    Each row is handled in its own try/catch so one bad row (e.g. an
         //    unparseable request_json) can't crash the whole polling loop.
         for (const gen of pending) {
-            try {
-                const apiKey = await getStoredApiKeyFromModel(gen.model ?? "");
-                const polled = await getTask(
-                    gen.model ?? "",
-                    gen.task_id,
-                    apiKey ?? "",
-                );
-                if (polled instanceof Error) {
-                    // 404 → Seedance has no such task (never persisted / purged):
-                    // terminal, so mark failed and stop polling it. Other errors
-                    // (network, 5xx) are transient — log and retry next pass.
-                    if (hasHttpStatus(polled, 404)) {
-                        const e = updateGeneration(db, {
-                            id: gen.id,
-                            status: "failed",
-                            failed_reason:
-                                `生成服务未找到任务 ${gen.task_id}（任务不存在）`,
-                        });
-                        if (e instanceof Error) console.error(e);
-                    } else {
-                        console.error(
-                            `get task ${gen.task_id} failed:`,
-                            polled,
-                        );
-                    }
-                    continue;
-                }
-                const task = polled.task;
-
-                // Record terminal failures (with the reason) so they drop out
-                // of `pending` and we stop polling them.
-                const status = localTaskStatus(task);
-                if (status === "failed") {
-                    const reason = taskFailureReason(task);
-                    console.log(task, "failed", reason ?? "");
-                    recordTaskStatus(db, {
-                        taskId: gen.task_id,
-                        status,
-                        taskJson: JSON.stringify(task),
-                        failedReason: reason,
+            const apiKey = await getStoredApiKeyFromModel(gen.model ?? "");
+            const polled = await getTask(
+                gen.model ?? "",
+                gen.task_id,
+                apiKey ?? "",
+            );
+            if (polled instanceof Error) {
+                // 404 → Seedance has no such task (never persisted / purged):
+                // terminal, so mark failed and stop polling it. Other errors
+                // (network, 5xx) are transient — log and retry next pass.
+                if (hasHttpStatus(polled, 404)) {
+                    const e = updateGeneration(db, {
+                        id: gen.id,
+                        status: "failed",
+                        failed_reason:
+                            `生成服务未找到任务 ${gen.task_id}（任务不存在）`,
                     });
-                    continue;
+                    if (e instanceof Error) console.error(e);
+                } else {
+                    console.error(
+                        `get task ${gen.task_id} failed:`,
+                        polled,
+                    );
                 }
-
-                // Not ready yet (queued/running/…) — try again next pass.
-                if (status !== "succeeded") continue;
-
-                await downloadAndRecord(
-                    db,
-                    project_path,
-                    gen.id,
-                    gen.task_id,
-                    gen.model ?? "",
-                    task,
-                    apiKey ?? "",
-                );
-            } catch (err) {
-                console.error(`polling generation ${gen.task_id} failed:`, err);
+                continue;
             }
+            const task = polled.task;
+
+            // Record terminal failures (with the reason) so they drop out
+            // of `pending` and we stop polling them.
+            const status = localTaskStatus(task);
+            if (status === "failed") {
+                const reason = taskFailureReason(task);
+                console.log(task, "failed", reason ?? "");
+                recordTaskStatus(db, {
+                    taskId: gen.task_id,
+                    status,
+                    taskJson: JSON.stringify(task),
+                    failedReason: reason,
+                });
+                continue;
+            }
+
+            // Not ready yet (queued/running/…) — try again next pass.
+            if (status !== "succeeded") continue;
+
+            await downloadAndRecord(
+                db,
+                project_path,
+                gen.id,
+                gen.task_id,
+                gen.model ?? "",
+                task,
+                apiKey ?? "",
+            );
         }
 
         // 3. Heal dirty data: rows we believe are downloaded but whose file is

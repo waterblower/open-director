@@ -38,7 +38,7 @@ const OutputSchema = z.object({
 });
 
 export async function reference_to_video(input: FalInput, apikey: string) {
-    if(!apikey) {
+    if (!apikey) {
         return new Error("apikey is required");
     }
     const res = await safeFetch(
@@ -106,7 +106,7 @@ const ResultSchema = z.union([
 ]);
 
 export async function get_result(requestID: string, apikey: string) {
-    if(!apikey) {
+    if (!apikey) {
         return new Error("apikey is required");
     }
     const res = await safeFetch(
@@ -135,7 +135,7 @@ export async function get_result(requestID: string, apikey: string) {
 }
 
 export async function wait_for_result(requestID: string, apikey: string) {
-    if(!apikey) {
+    if (!apikey) {
         return new Error("apikey is required");
     }
     while (true) {
