@@ -30,6 +30,8 @@ function isMiniMaxRequest(
 }
 
 function promptText(req: GenerateInput | null | undefined): string {
+    // fal requests carry a flat endpoint payload instead of `content` items.
+    if (req && "input" in req) return req.input.prompt.trim();
     if (!req || !("content" in req)) return "";
     return req.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -183,24 +185,43 @@ export function GenerationDetailModal(props: {
 
     const prompt = promptText(req);
 
+    // fal nests its settings under `input`; flatten so the stats below read one
+    // shape regardless of provider.
+    const stats = !req ? null : "input" in req
+        ? {
+            resolution: req.input.resolution,
+            ratio: req.input.aspect_ratio,
+            duration: req.input.duration,
+        }
+        : {
+            resolution: "resolution" in req ? req.resolution : undefined,
+            ratio: "ratio" in req ? req.ratio : undefined,
+            duration: "duration" in req ? req.duration : undefined,
+        };
+
     // Reference inputs attached to the request, with their (servable
     // /project-file or data:) URLs, in prompt order.
     type Reference = { kind: "image" | "video" | "audio"; url: string };
-    const references: Reference[] = (req && "content" in req ? req.content : [])
-        .flatMap(
-            (c): Reference[] => {
-                if (c.type === "image_url") {
-                    return [{ kind: "image", url: c.image_url.url }];
-                }
-                if (c.type === "video_url") {
-                    return [{ kind: "video", url: c.video_url.url }];
-                }
-                if (c.type === "audio_url") {
-                    return [{ kind: "audio", url: c.audio_url.url }];
-                }
-                return [];
-            },
-        );
+    const references: Reference[] = req && "input" in req
+        ? req.input.reference_image_urls.map((url) => ({
+            kind: "image" as const,
+            url,
+        }))
+        : (req && "content" in req ? req.content : [])
+            .flatMap(
+                (c): Reference[] => {
+                    if (c.type === "image_url") {
+                        return [{ kind: "image", url: c.image_url.url }];
+                    }
+                    if (c.type === "video_url") {
+                        return [{ kind: "video", url: c.video_url.url }];
+                    }
+                    if (c.type === "audio_url") {
+                        return [{ kind: "audio", url: c.audio_url.url }];
+                    }
+                    return [];
+                },
+            );
 
     return (
         <div
@@ -444,32 +465,31 @@ export function GenerationDetailModal(props: {
                                             )}
                                             value={req.model}
                                         />
-                                        {"resolution" in req &&
-                                            req.resolution && (
+                                        {stats?.resolution && (
                                             <Stat
                                                 label={get_text(
                                                     "resolution",
                                                     language.value,
                                                 )}
-                                                value={req.resolution}
+                                                value={stats.resolution}
                                             />
                                         )}
-                                        {"ratio" in req && req.ratio && (
+                                        {stats?.ratio && (
                                             <Stat
                                                 label={get_text(
                                                     "aspect_ratio",
                                                     language.value,
                                                 )}
-                                                value={req.ratio}
+                                                value={stats.ratio}
                                             />
                                         )}
-                                        {req.duration != null && (
+                                        {stats?.duration != null && (
                                             <Stat
                                                 label={get_text(
                                                     "duration",
                                                     language.value,
                                                 )}
-                                                value={`${req.duration}${
+                                                value={`${stats.duration}${
                                                     get_text(
                                                         "s_unit",
                                                         language.value,

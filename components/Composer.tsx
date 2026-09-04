@@ -450,6 +450,38 @@ export function Composer(props: {
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
+        if (req.model === "fal/minimax/h3/reference-to-video") {
+            const input = req.input;
+            prompt.value = input.prompt;
+            model.value = req.model;
+            ratio.value = input.aspect_ratio;
+            resolution.value = input.resolution === "480P"
+                ? "480p"
+                : input.resolution;
+            durationMode.value = "seconds";
+            duration.value = input.duration;
+            mode.value = "reference";
+
+            attachments.value.forEach((attachment) =>
+                URL.revokeObjectURL(attachment.url)
+            );
+            attachments.value = await Promise.all(
+                input.reference_image_urls.map(async (url) => ({
+                    id: nextId.current++,
+                    kind: "image" as const,
+                    name: kindLabel("image", language.value),
+                    url: URL.createObjectURL(
+                        await (await fetch(url)).blob(),
+                    ),
+                })),
+            );
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = input.prompt;
+                autoGrow(ta);
+            }
+            return;
+        }
         if (isMiniMaxRequest(req)) {
             const text = req.content
                 .filter((item) => item.type === "text")
@@ -1400,33 +1432,6 @@ export function Composer(props: {
                                         ),
                                     })),
                                 );
-
-                                // fal isn't wired up to the backend yet — log
-                                // the request we'd send and stop here.
-                                if (isFalModel(selected)) {
-                                    console.log("fal generate (not sent)", {
-                                        model: selected,
-                                        input: {
-                                            prompt: prompt.value.trim(),
-                                            duration: duration.value,
-                                            resolution:
-                                                resolution.value === "480p"
-                                                    ? "480P"
-                                                    : resolution.value,
-                                            enable_safety_checker: false,
-                                            prompt_expansion_mode: "fast",
-                                            aspect_ratio: ratio.value,
-                                            reference_image_urls: atts
-                                                .filter((a) =>
-                                                    a.kind === "image"
-                                                )
-                                                .map((a) =>
-                                                    a.dataUrlOrFilePath
-                                                ),
-                                        },
-                                    });
-                                    return;
-                                }
 
                                 const gen_p = trpc.open.generate.mutate({
                                     model: selected,

@@ -54,10 +54,13 @@ export type Resolution = "480p" | "720p" | "1080p";
 
 export type ServiceTier = "default" | "flex";
 
-export type SeedanceModel =
-    | "doubao-seedance-2-0-260128"
-    | "doubao-seedance-2-0-fast-260128"
-    | "doubao-seedance-2-0-mini-260615";
+export const SeedanceModelSchema = z.enum([
+    "doubao-seedance-2-0-260128",
+    "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-0-mini-260615",
+]);
+
+export type SeedanceModel = z.infer<typeof SeedanceModelSchema>;
 
 /** Tool the model may call. Only supported by Seedance 2.0 & 2.0 fast. */
 export interface SeedanceTool {
@@ -241,11 +244,7 @@ const ResolutionSchema = z.enum(["480p", "720p", "1080p"]) satisfies z.ZodType<
 const ServiceTierSchema = z.enum(["default", "flex"]) satisfies z.ZodType<
     ServiceTier
 >;
-const SeedanceModelSchema = z.enum([
-    "doubao-seedance-2-0-260128",
-    "doubao-seedance-2-0-fast-260128",
-    "doubao-seedance-2-0-mini-260615",
-]) satisfies z.ZodType<SeedanceModel>;
+
 const TaskStatusSchema = z.enum([
     "queued",
     "running",

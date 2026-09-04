@@ -3,6 +3,7 @@ import {
     CreateTaskRequestSchema as SeedanceCreateTaskRequestSchema,
     SeedanceClient,
     TaskSchema as SeedanceTaskSchema,
+    SeedanceModelSchema,
 } from "@/apigen/seedance/seedance.ts";
 
 import {
@@ -85,21 +86,34 @@ export async function generate(
     }
 }
 
-export async function getTask(model: string, taskId: string, apiKey: string) {
+type GetTaskResult = {
+    model: FalModel,
+    ...
+} | {
+    model: SeedanceModel,
+    ...
+} | {
+    model: MiniMaxModel,
+    ...
+}
+
+export async function getTask(model: string, taskId: string, apiKey: string): Promise<GetTaskResult> {
     if (isFalModel(model)) {
         const result = await get_result(taskId, apiKey);
         return result instanceof Error
             ? result
             : falResultToTask(model, taskId, result);
-    }
-    if (isMiniMaxModel(model)) {
+    } else if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
             apiKey,
         });
         const response = await client.getVideoTask(taskId);
         return response instanceof Error ? response : response.task;
+    } else if (isSeedanceModel(model)) {
+        return await new SeedanceClient({ apiKey }).getTask(taskId);
+    } else {
+        return new Error(`Unsupported model: ${model}`);
     }
-    return await new SeedanceClient({ apiKey }).getTask(taskId);
 }
 
 export async function getVideoContent(
@@ -139,6 +153,10 @@ export async function getVideoContent(
     } catch (error) {
         return error instanceof Error ? error : new Error(String(error));
     }
+}
+
+export function isSeedanceModel(model: string) {
+    return SeedanceModelSchema.safeParse(model).success;
 }
 
 export function isMiniMaxModel(model: unknown): model is z.infer<

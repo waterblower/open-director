@@ -665,7 +665,7 @@ export const appRouter = router({
                         "doubao-seedance-2-0-260128",
                         "doubao-seedance-2-0-fast-260128",
                         "doubao-seedance-2-0-mini-260615",
-                        "fal/minimax/h3/reference-to-video"
+                        "fal/minimax/h3/reference-to-video",
                     ]),
                     MiniMaxVideoModelSchema,
                 ]),
@@ -722,7 +722,9 @@ export const appRouter = router({
                 let storedRequest: GenerateInput;
                 if (isFalModel(model)) {
                     if (!prompt.trim()) {
-                        throw new Error("fal reference-to-video requires a prompt");
+                        throw new Error(
+                            "fal reference-to-video requires a prompt",
+                        );
                     }
                     if (attachments.some((att) => att.kind !== "image")) {
                         throw new Error(
