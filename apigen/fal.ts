@@ -65,29 +65,8 @@ export async function reference_to_video(input: FalInput, apikey: string) {
 
 const ResultSchema = z.union([
     z.object({
-        status: z.literal(404),
-        detail: z.string(),
-    }),
-    z.object({
-        status: z.literal(422),
-        detail: z.array(
-            z.object({
-                loc: z.array(z.union([z.string(), z.number()])),
-                msg: z.string(),
-                type: z.enum([
-                    "content_policy_violation",
-                    "file_download_error",
-                ]),
-                url: z.string(),
-                input: z.union([
-                    z.string(),
-                    z.object({
-                        text: z.array(z.string()),
-                        image_url: z.array(z.string()),
-                    }),
-                ]),
-            }),
-        ),
+        status: z.union([z.literal(404), z.literal(422), z.literal(504)]),
+        detail: z.unknown(),
     }),
     z.object({
         status: z.literal(400),
@@ -105,7 +84,7 @@ const ResultSchema = z.union([
             file_name: z.string(),
             file_size: z.number(),
         }),
-        expanded_prompt: z.string(),
+        expanded_prompt: z.string().optional(),
     }),
 ]);
 
@@ -154,12 +133,11 @@ export async function wait_for_result(requestID: string, apikey: string) {
             if (result.detail == "Request is still in progress") {
                 await delay(10000);
                 continue;
+            } else {
+                return new Error(JSON.stringify(result));
             }
-        } else if (result.status == 422) {
-            return result;
         } else {
-            console.error("[apigen/fal] unexpected task result:", result);
-            throw new Error("Unexpected");
+            return new Error(JSON.stringify(result));
         }
     }
 }

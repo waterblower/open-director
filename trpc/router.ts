@@ -1159,13 +1159,13 @@ export const appRouter = router({
         listReactedGenerations: publicProcedure.input(z.object({
             project_root: z.string(),
         })).query(({ input }) => {
-            const res = buildVideoList(input.project_root, "reacted")
-            if(res instanceof Error) {
-                console.error(res)
-                return asAPIError(res)
+            const res = buildVideoList(input.project_root, "reacted");
+            if (res instanceof Error) {
+                console.error(res);
+                return asAPIError(res);
             }
             return {
-                error:false as const,
+                error: false as const,
                 ...res,
             };
         }),

@@ -218,24 +218,12 @@ function falResultToTask(
             status: "failed",
             error: { code: "400", message: result.detail },
         };
-    } else if (result.status === 404) {
-        return {
-            ...base,
-            status: "failed",
-            error: { code: "404", message: result.detail },
-        };
-    } else if (result.status == 422) {
-        const first = result.detail[0];
-        return {
-            ...base,
-            status: "failed",
-            error: {
-                code: first?.type ?? "422",
-                message: first?.msg ?? "fal rejected the request",
-            },
-        };
     } else {
-        throw new Error(`unknown data: ${JSON.stringify(result)}`);
+        return {
+            ...base,
+            status: "failed",
+            error: { code: "404", message: JSON.stringify(result.detail) },
+        };
     }
 }
 
