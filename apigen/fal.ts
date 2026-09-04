@@ -65,6 +65,10 @@ export async function reference_to_video(input: FalInput, apikey: string) {
 
 const ResultSchema = z.union([
     z.object({
+        status: z.literal(404),
+        detail: z.string(),
+    }),
+    z.object({
         status: z.literal(422),
         detail: z.array(
             z.object({
@@ -123,10 +127,11 @@ export async function get_result(requestID: string, apikey: string) {
     }
     const text = await res.text();
     const json = JSON.parse(text);
-    // console.log(res.status, json);
     const final_result = ResultSchema.safeParse({
         status: res.status,
         ...json,
+    }, {
+        reportInput: true,
     });
     if (final_result.error) {
         return final_result.error;
