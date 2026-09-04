@@ -35,23 +35,22 @@ export function GenerationsGrid(
         let cancelled = false;
         archivedLoading.value = true;
         (async () => {
-            try {
-                const rows = await trpc.listArchivedGenerations.query({
-                    project_root: projectRoot,
-                });
+            const rows = await trpc.listArchivedGenerations.query({
+                project_root: projectRoot,
+            });
+            if (rows.error) {
+                console.error(
+                    "[GenerationsGrid] failed to load archived generations:",
+                    row,
+                );
+            } else {
                 if (!cancelled) {
                     archivedResults.value = new Map(
                         rows.map((v) => [v.id, v]),
                     );
                 }
-            } catch (err) {
-                console.error(
-                    "[GenerationsGrid] failed to load archived generations:",
-                    err,
-                );
-            } finally {
-                if (!cancelled) archivedLoading.value = false;
             }
+            if (!cancelled) archivedLoading.value = false;
         })();
         return () => {
             cancelled = true;

@@ -157,7 +157,7 @@ async function listDir(absPath: string): Promise<DirEntry[] | Error> {
         );
         return entries;
     } catch (e) {
-        return e as Error
+        return e as Error;
     }
 }
 
@@ -292,9 +292,20 @@ export const appRouter = router({
 
     // Archived generations for the same project, in the same shape — shown in
     // the grid's "Archived" tab.
-    listArchivedGenerations: publicProcedure.input(z.object({
-        project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, "archived")),
+    listArchivedGenerations: publicProcedure
+        .input(z.object({
+            project_root: z.string(),
+        }))
+        .query(({ input }) => {
+            const res = buildVideoList(input.project_root, "archived");
+            if (res instanceof Error) {
+                return asAPIError(res);
+            }
+            return {
+                error: true as const,
+                ...res,
+            };
+        }),
 
     // Look up a generation by a project file's content — hashes the file at
     // `path` and matches it against recorded video hashes, so a copy or
@@ -332,18 +343,18 @@ export const appRouter = router({
             if (target instanceof Error) {
                 throw target;
             }
-            const dirs = await listDir(target)
+            const dirs = await listDir(target);
             if (dirs instanceof Error) {
                 console.error("[trpc] failed to list directory 2:", dirs);
                 return {
                     error: true as const,
                     message: dirs.message,
-                }
+                };
             }
             return {
                 error: false as const,
                 dirs,
-            }
+            };
         }),
 
     // Load everything the file explorer needs in one round trip: the active
@@ -379,7 +390,7 @@ export const appRouter = router({
                 console.error("[trpc] failed to resolve project path:", target);
                 return asAPIError(target);
             }
-            const dirs = await listDir(target)
+            const dirs = await listDir(target);
             if (dirs instanceof Error) {
                 console.error("[trpc] failed to list directory 1:", dirs);
                 continue;
@@ -1147,7 +1158,17 @@ export const appRouter = router({
         // shown in the grid's "Liked & disliked" tab.
         listReactedGenerations: publicProcedure.input(z.object({
             project_root: z.string(),
-        })).query(({ input }) => buildVideoList(input.project_root, "reacted")),
+        })).query(({ input }) => {
+            const res = buildVideoList(input.project_root, "reacted")
+            if(res instanceof Error) {
+                console.error(res)
+                return asAPIError(res)
+            }
+            return {
+                error:false as const,
+                ...res,
+            };
+        }),
 
         // List generated videos in `<project>/.project/generations` as Task-like
         // objects. Creates the directory if it doesn't exist yet.
