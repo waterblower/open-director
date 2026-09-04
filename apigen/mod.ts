@@ -19,6 +19,7 @@ import {
     get_result,
     reference_to_video,
 } from "@/apigen/fal.ts";
+import { safeFetch } from "@/apigen/fetch.ts";
 
 /**
  * fal requests don't follow the OpenAI-ish `content` shape the other providers
@@ -103,7 +104,7 @@ type MiniMaxTask = z.infer<typeof MiniMaxVideoTaskSchema>;
 export type GetTaskResult =
     | { model: FalModel; task: SeedanceTask }
     | { model: SeedanceModel; task: SeedanceTask }
-    | { model: MiniMaxModel; task: MiniMaxTask }
+    | { model: MiniMaxModel; task: MiniMaxTask };
 
 export async function getTask(
     model: string,
@@ -142,31 +143,24 @@ export async function getVideoContent(
         if (!parsed.success) return parsed.error;
         const url = parsed.data.content?.url;
         if (!url) return new Error(`Task ${taskId} has no video URL`);
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                return new Error(
-                    `[${response.status}] ${await response.text()}`,
-                );
-            }
-            return response;
-        } catch (error) {
-            return error instanceof Error ? error : new Error(String(error));
-        }
-    }
-
-    const parsed = SeedanceTaskSchema.safeParse(task);
-    if (!parsed.success) return parsed.error;
-    const url = parsed.data.content?.video_url;
-    if (!url) return new Error(`Task ${taskId} has no video URL`);
-    try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            return new Error(`[${response.status}] ${await response.text()}`);
-        }
-        return response;
-    } catch (error) {
-        return error instanceof Error ? error : new Error(String(error));
+        return await safeFetch(url);
+    } else if (isFalModel(model)) {
+        // fal queue results are adapted into the Seedance task shape by
+        // `falResultToTask`, so the URL sits at the same place. fal serves the
+        // file from its public CDN, so no `apiKey` is needed to download it.
+        const parsed = SeedanceTaskSchema.safeParse(task);
+        if (!parsed.success) return parsed.error;
+        const url = parsed.data.content?.video_url;
+        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        return await safeFetch(url);
+    } else if (isSeedanceModel(model)) {
+        const parsed = SeedanceTaskSchema.safeParse(task);
+        if (!parsed.success) return parsed.error;
+        const url = parsed.data.content?.video_url;
+        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        return await safeFetch(url);
+    } else {
+        return new Error(`Unknown model: ${model}`);
     }
 }
 
