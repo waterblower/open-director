@@ -112,10 +112,12 @@ export async function getTask(
     apiKey: string,
 ): Promise<GetTaskResult | Error> {
     if (isFalModel(model)) {
+        console.log("fal", taskId)
         const result = await get_result(taskId, apiKey);
-        return result instanceof Error
-            ? result
-            : { model, task: falResultToTask(model, taskId, result) };
+        if(result instanceof Error) {
+            return result;
+        }
+        return { model, task: falResultToTask(model, taskId, result) };
     } else if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
             apiKey,

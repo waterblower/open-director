@@ -38,6 +38,9 @@ const OutputSchema = z.object({
 });
 
 export async function reference_to_video(input: FalInput, apikey: string) {
+    if(!apikey) {
+        return new Error("apikey is required");
+    }
     const res = await safeFetch(
         "https://queue.fal.run/minimax/h3/reference-to-video",
         {
@@ -103,6 +106,9 @@ const ResultSchema = z.union([
 ]);
 
 export async function get_result(requestID: string, apikey: string) {
+    if(!apikey) {
+        return new Error("apikey is required");
+    }
     const res = await safeFetch(
         `https://queue.fal.run/minimax/h3/requests/${requestID}`,
         {
@@ -129,6 +135,9 @@ export async function get_result(requestID: string, apikey: string) {
 }
 
 export async function wait_for_result(requestID: string, apikey: string) {
+    if(!apikey) {
+        return new Error("apikey is required");
+    }
     while (true) {
         const result = await get_result(requestID, apikey);
         if (result instanceof Error) {

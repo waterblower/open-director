@@ -930,6 +930,17 @@ export const appRouter = router({
                     };
                 }
 
+                // Resolve the key *before* logging the generation: a row with
+                // no task id looks "queued" to task_checker, which only gives
+                // up after a 5 minute grace and then reports the generic
+                // "never submitted" reason instead of the real cause.
+                const apiKey = await getStoredApiKeyFromModel(request.model);
+                if (!apiKey) {
+                    throw new Error(
+                        `No API key configured for ${request.model} — add one in Settings`,
+                    );
+                }
+
                 const generation = createGeneration(db, storedRequest);
                 if (generation instanceof Error) {
                     throw generation;
@@ -939,30 +950,37 @@ export const appRouter = router({
                     type: "generation_created",
                     gen: generation,
                 });
-                const apiKey = await getStoredApiKeyFromModel(request.model);
-                if (!apiKey) {
-                    throw new Error("no api key found for model");
-                }
-                const created = await generate(request, apiKey);
-                if (created instanceof Error) {
-                    console.error(created);
-                    const err = updateGeneration(db, {
+
+                /**
+                 * Mark the just-created row failed with the real reason. Any
+                 * throw from here on would otherwise strand it in "queued".
+                 */
+                const failGeneration = (reason: string) => {
+                    console.error(
+                        `generation ${generation.id} failed:`,
+                        reason,
+                    );
+                    const err = updateGeneration(db!, {
                         id: generation.id,
-                        failed_reason: created.message,
+                        failed_reason: reason,
                         status: "failed",
                     });
-                    if (err instanceof Error) {
-                        throw err;
-                    }
-                    const gen = getGenerationById(db, generation.id);
-                    if (gen instanceof Error) {
-                        throw gen;
-                    }
-
+                    if (err instanceof Error) throw err;
+                    const gen = getGenerationById(db!, generation.id);
+                    if (gen instanceof Error) throw gen;
                     return gen;
+                };
+
+                const created = await generate(request, apiKey).catch((err) =>
+                    err instanceof Error ? err : new Error(String(err))
+                );
+                if (created instanceof Error) {
+                    return failGeneration(created.message);
                 }
                 const taskId = taskIdFromCreateResponse(created.res);
-                if (taskId instanceof Error) throw taskId;
+                if (taskId instanceof Error) {
+                    return failGeneration(taskId.message);
+                }
                 console.log("task created", created);
                 const err = updateGeneration(db, {
                     id: generation.id,
@@ -974,7 +992,12 @@ export const appRouter = router({
 
                 const polled = await getTask(request.model, taskId, apiKey);
                 if (polled instanceof Error) {
-                    throw polled;
+                    // The task exists (we have its id) — leave it for
+                    // task_checker to poll rather than failing the row.
+                    console.error(`first poll of ${taskId} failed:`, polled);
+                    const gen = getGenerationById(db, generation.id);
+                    if (gen instanceof Error) throw gen;
+                    return gen;
                 }
                 const task = polled.task;
                 const err2 = updateGeneration(db, {

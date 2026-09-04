@@ -1445,7 +1445,22 @@ export function Composer(props: {
                                     mode: mode.value,
                                 });
                                 clearAll();
-                                const gen = await gen_p;
+                                // A rejected mutation (no API key, network
+                                // down, …) never produces a generation row, so
+                                // surface it here — otherwise it's an unhandled
+                                // rejection and the user sees nothing at all.
+                                let gen;
+                                try {
+                                    gen = await gen_p;
+                                } catch (err) {
+                                    console.error(err);
+                                    genError.value = err instanceof Error
+                                        ? err.message
+                                        : String(err);
+                                    await delay(5000);
+                                    genError.value = null;
+                                    return;
+                                }
                                 console.log("generating", gen);
                                 if (gen.status == "failed") {
                                     genError.value = gen.failed_reason!;
