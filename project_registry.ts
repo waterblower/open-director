@@ -29,7 +29,10 @@ export async function listProjects(kv: Deno.Kv): Promise<ProjectRecord[]> {
     ) {
         const parsed = ProjectRecordSchema.safeParse(entry.value);
         if (!parsed.success) {
-            console.error(parsed.error);
+            console.error(
+                "[project-registry] invalid stored project:",
+                parsed.error,
+            );
             await kv.atomic().check(entry).delete(entry.key).commit();
             continue;
         }

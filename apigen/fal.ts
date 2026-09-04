@@ -158,7 +158,7 @@ export async function wait_for_result(requestID: string, apikey: string) {
         } else if (result.status == 422) {
             return result;
         } else {
-            console.error(result);
+            console.error("[apigen/fal] unexpected task result:", result);
             throw new Error("Unexpected");
         }
     }

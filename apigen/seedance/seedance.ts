@@ -602,7 +602,7 @@ export class SeedanceClient {
         form.append("purpose", request.purpose);
         const res = await this.postForm("/files", form);
         if (res instanceof Error) return res;
-        console.log(res);
+        console.log("[apigen/seedance] file uploaded:", res);
         const parsed = ArkFileSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }

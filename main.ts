@@ -4,7 +4,7 @@ import { check_and_download } from "./task_checker.ts";
 
 // Resume polling/downloading any unfinished generation tasks at server boot.
 check_and_download().then((_) => {
-    console.error("should never reach here", _);
+    console.error("[server] task checker stopped unexpectedly:", _);
 });
 
 export const app = new App<State>();
@@ -27,7 +27,7 @@ app.get("/api2/:name", (ctx) => {
 
 // this can also be defined via a file. feel free to delete this!
 const exampleLoggerMiddleware = define.middleware((ctx) => {
-    console.log(`${ctx.req.method} ${ctx.req.url}`);
+    console.log("[server] request:", `${ctx.req.method} ${ctx.req.url}`);
     return ctx.next();
 });
 app.use(exampleLoggerMiddleware);

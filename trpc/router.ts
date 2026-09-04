@@ -334,7 +334,7 @@ export const appRouter = router({
             }
             const dirs = await listDir(target)
             if (dirs instanceof Error) {
-                console.error(dirs)
+                console.error("[trpc] failed to list directory 2:", dirs);
                 return {
                     error: true as const,
                     message: dirs.message,
@@ -343,7 +343,7 @@ export const appRouter = router({
             return {
                 error: false as const,
                 dirs,
-            };
+            }
         }),
 
     // Load everything the file explorer needs in one round trip: the active
@@ -351,6 +351,7 @@ export const appRouter = router({
     // expanded directories (with their children pre-loaded) and the saved
     // selection. Returns null when no project is open.
     loadProjectData: publicProcedure.query(async () => {
+        console.log("[trpc] loadProjectData called");
         const rootPath = (await getLastOpenedProject(kv))?.path;
         if (!rootPath) return null;
 
@@ -362,11 +363,11 @@ export const appRouter = router({
 
         const rootEntries = await listDir(rootPath);
         if (rootEntries instanceof Error) {
-            console.error(rootEntries)
+            console.error("[trpc] failed to list root directory:", rootEntries);
             return {
                 error: true as const,
                 message: rootEntries.message,
-            }
+            };
         }
 
         // Pre-load the children of each restored-expanded directory so the tree
@@ -375,16 +376,13 @@ export const appRouter = router({
         for (const rel of expanded) {
             const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
-                console.error(target);
+                console.error("[trpc] failed to resolve project path:", target);
                 return asAPIError(target);
             }
             const dirs = await listDir(target)
             if (dirs instanceof Error) {
-                console.error(dirs)
-                return {
-                    error: true as const,
-                    message: dirs.message,
-                }
+                console.error("[trpc] failed to list directory 1:", dirs);
+                continue;
             }
             childrenByPath[rel] = dirs;
         }
@@ -394,7 +392,7 @@ export const appRouter = router({
             rootPath,
             rootEntries,
             childrenByPath,
-            expanded,
+            expanded: Object.keys(childrenByPath),
             selected,
         };
     }),
@@ -542,7 +540,7 @@ export const appRouter = router({
             try {
                 await Deno.rename(srcAbs, destAbs);
             } catch (err) {
-                console.log(err);
+                console.error("[trpc] failed to move file:", err);
             }
             return { path: dest };
         }),
@@ -801,7 +799,10 @@ export const appRouter = router({
                                 url,
                             );
                             if (stored instanceof Error) {
-                                console.error(stored);
+                                console.error(
+                                    "[trpc] failed to store generated asset:",
+                                    stored,
+                                );
                                 return url;
                             }
                             return stored;
@@ -971,7 +972,7 @@ export const appRouter = router({
                 if (generation instanceof Error) {
                     throw generation;
                 }
-                console.log("generation_created");
+                console.log("[trpc] generation created:", generation.id);
                 await global_event_bus.put({
                     type: "generation_created",
                     gen: generation,
@@ -983,7 +984,7 @@ export const appRouter = router({
                  */
                 const failGeneration = (reason: string) => {
                     console.error(
-                        `generation ${generation.id} failed:`,
+                        `[trpc] generation ${generation.id} failed:`,
                         reason,
                     );
                     const err = updateGeneration(db!, {
@@ -1007,7 +1008,7 @@ export const appRouter = router({
                 if (taskId instanceof Error) {
                     return failGeneration(taskId.message);
                 }
-                console.log("task created", created);
+                console.log("[trpc] task created:", created);
                 const err = updateGeneration(db, {
                     id: generation.id,
                     task_id: taskId,
@@ -1020,7 +1021,10 @@ export const appRouter = router({
                 if (polled instanceof Error) {
                     // The task exists (we have its id) — leave it for
                     // task_checker to poll rather than failing the row.
-                    console.error(`first poll of ${taskId} failed:`, polled);
+                    console.error(
+                        `[trpc] first poll of ${taskId} failed:`,
+                        polled,
+                    );
                     const gen = getGenerationById(db, generation.id);
                     if (gen instanceof Error) throw gen;
                     return gen;
@@ -1035,7 +1039,7 @@ export const appRouter = router({
                     throw err2;
                 }
 
-                console.log("task", task);
+                console.log("[trpc] task result:", task);
 
                 // Logging failure shouldn't fail the request — the task is created.
                 const recordErr = recordGeneration(db, {
@@ -1046,7 +1050,10 @@ export const appRouter = router({
                     task,
                 });
                 if (recordErr) {
-                    console.error(recordErr);
+                    console.error(
+                        "[trpc] failed to record task log:",
+                        recordErr,
+                    );
                 }
                 const gen = getGenerationById(db, generation.id);
                 if (gen instanceof Error) {
@@ -1154,7 +1161,10 @@ export const appRouter = router({
                     "active",
                 );
                 if (result instanceof Error) {
-                    console.error(result);
+                    console.error(
+                        "[trpc] failed to resolve project path:",
+                        result,
+                    );
                     return asAPIError(result);
                 }
                 return {

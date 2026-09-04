@@ -88,6 +88,7 @@ export async function loadProjectData() {
         return null;
     }
     if (data.error) {
+        console.error("loadProjectData failed:", data);
         return data;
     }
     const childrenByPath: Record<string, ProjectData["rootEntries"]> = {};

@@ -52,7 +52,7 @@ export async function generate(
 ) {
     if (isFalInput(input)) {
         const result = await reference_to_video(input.input, apiKey);
-        console.log(result);
+        console.log("[apigen] fal task created:", result);
         if (result instanceof Error) {
             return result;
         }

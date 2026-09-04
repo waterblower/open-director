@@ -13,7 +13,7 @@ function handle(req: Request): Response | Promise<Response> {
         // sees a sanitized message, so without this they're invisible).
         onError: ({ error, type, path }) => {
             console.error(
-                `[tRPC] ${type} ${path ?? "<no-path>"} failed:`,
+                `[trpc] ${type} ${path ?? "<no-path>"} failed:`,
                 error,
             );
         },

@@ -45,7 +45,7 @@ export async function check_and_download(): Promise<void | Error> {
     for (;;) {
         const project_path = (await getLastOpenedProject(kv))?.path;
         if (!db || !project_path) {
-            console.log("no project openned, waiting...");
+            console.log("[task-checker] no project opened; waiting...");
             await delay(5000);
             continue;
         }
@@ -74,10 +74,15 @@ export async function check_and_download(): Promise<void | Error> {
                         failed_reason:
                             `生成服务未找到任务 ${gen.task_id}（任务不存在）`,
                     });
-                    if (e instanceof Error) console.error(e);
+                    if (e instanceof Error) {
+                        console.error(
+                            "[task-checker] failed to mark generation as failed:",
+                            e,
+                        );
+                    }
                 } else {
                     console.error(
-                        `get task ${gen.task_id} failed:`,
+                        `[task-checker] get task ${gen.task_id} failed:`,
                         polled,
                     );
                 }
@@ -90,7 +95,7 @@ export async function check_and_download(): Promise<void | Error> {
             const status = localTaskStatus(task);
             if (status === "failed") {
                 const reason = taskFailureReason(task);
-                console.log(task, "failed", reason ?? "");
+                console.log("[task-checker] task failed:", task, reason ?? "");
                 recordTaskStatus(db, {
                     taskId: gen.task_id,
                     status,
@@ -127,7 +132,7 @@ export async function check_and_download(): Promise<void | Error> {
                 );
                 if (!(await fileExists(dest))) {
                     console.log(
-                        `missing on disk, re-downloading ${gen.task_id}.mp4`,
+                        `[task-checker] missing on disk; re-downloading ${gen.task_id}.mp4`,
                     );
                     const apiKey = await getStoredApiKeyFromModel(
                         gen.model ?? "",
@@ -140,7 +145,7 @@ export async function check_and_download(): Promise<void | Error> {
                     );
                     if (polled instanceof Error) {
                         console.error(
-                            `re-fetch task ${gen.task_id} failed:`,
+                            `[task-checker] re-fetch task ${gen.task_id} failed:`,
                             polled,
                         );
                         continue;
@@ -149,7 +154,7 @@ export async function check_and_download(): Promise<void | Error> {
                     const status = localTaskStatus(task);
                     if (status !== "succeeded") {
                         console.error(
-                            `cannot re-download ${gen.task_id}: status ${status}`,
+                            `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
                         );
                         continue;
                     }
@@ -171,7 +176,10 @@ export async function check_and_download(): Promise<void | Error> {
                     await hashAndRecord(db, gen.id, dest);
                 }
             } catch (err) {
-                console.error(`healing generation ${gen.task_id} failed:`, err);
+                console.error(
+                    `[task-checker] healing generation ${gen.task_id} failed:`,
+                    err,
+                );
             }
         }
 
@@ -186,7 +194,7 @@ export async function check_and_download(): Promise<void | Error> {
                 if (ageMs <= QUEUED_GRACE_MS) continue; // still being submitted
 
                 console.log(
-                    `failing stuck queued generation ${gen.id} (never submitted)`,
+                    `[task-checker] failing stuck queued generation ${gen.id} (never submitted)`,
                 );
                 const err = updateGeneration(db, {
                     id: gen.id,
@@ -195,11 +203,14 @@ export async function check_and_download(): Promise<void | Error> {
                         "创建任务失败：未提交到生成服务（无 task id）",
                 });
                 if (err instanceof Error) {
-                    console.error(`fail stuck generation ${gen.id}:`, err);
+                    console.error(
+                        `[task-checker] fail stuck generation ${gen.id}:`,
+                        err,
+                    );
                 }
             } catch (err) {
                 console.error(
-                    `healing queued generation ${gen.id} failed:`,
+                    `[task-checker] healing queued generation ${gen.id} failed:`,
                     err,
                 );
             }
@@ -226,16 +237,16 @@ async function downloadAndRecord(
 ): Promise<void> {
     const response = await getVideoContent(model, taskId, task, apiKey);
     if (response instanceof Error) {
-        console.error(`download ${taskId} failed:`, response);
+        console.error(`[task-checker] download ${taskId} failed:`, response);
         return;
     }
     const dest = join(projectPath, VIDEOS_DIR, `${taskId}.mp4`);
     const err = await writeVideoResponse(response, dest);
     if (err instanceof Error) {
-        console.error(`download ${taskId} failed:`, err);
+        console.error(`[task-checker] download ${taskId} failed:`, err);
         return;
     }
-    console.log("downloaded", `${taskId}.mp4`);
+    console.log("[task-checker] downloaded:", `${taskId}.mp4`);
     await hashAndRecord(db, genId, dest);
 
     markDownloaded(db, {
@@ -249,7 +260,10 @@ async function downloadAndRecord(
     if (generation instanceof Error) {
         // The video is downloaded and recorded; only the live "finished" event
         // is lost (the GUI still sees it on its next listing), so don't throw.
-        console.error(`load generation ${genId} failed:`, generation);
+        console.error(
+            `[task-checker] load generation ${genId} failed:`,
+            generation,
+        );
         return;
     }
     await global_event_bus.put({
@@ -272,10 +286,13 @@ async function hashAndRecord(
         const hash = await sha256Hex(await Deno.readFile(dest));
         const err = recordContentHash(db, genId, hash);
         if (err instanceof Error) {
-            console.error(`record content hash for ${genId} failed:`, err);
+            console.error(
+                `[task-checker] record content hash for ${genId} failed:`,
+                err,
+            );
         }
     } catch (err) {
-        console.error(`hash ${dest} failed:`, err);
+        console.error(`[task-checker] hash ${dest} failed:`, err);
     }
 }
 

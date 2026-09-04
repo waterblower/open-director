@@ -291,7 +291,7 @@ export async function pickProjectFolder(): Promise<string | null> {
         )
         : out;
     // macOS `POSIX path` has a trailing slash; trim it (but keep root "/").
-    console.log("pickProjectFolder", path);
+    console.log("[project] picked project folder:", path);
     return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
