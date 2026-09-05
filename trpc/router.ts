@@ -297,14 +297,14 @@ export const appRouter = router({
         .input(z.object({
             project_root: z.string(),
         }))
-        .query(({ input }) => {
-            const res = buildVideoList(input.project_root, "archived");
+        .query(async ({ input }) => {
+            const res = await buildVideoList(input.project_root, "archived");
             if (res instanceof Error) {
                 return asAPIError(res);
             }
             return {
-                error: true as const,
-                ...res,
+                error: false as const,
+                data: res,
             };
         }),
 
@@ -1162,15 +1162,15 @@ export const appRouter = router({
         // shown in the grid's "Liked & disliked" tab.
         listReactedGenerations: publicProcedure.input(z.object({
             project_root: z.string(),
-        })).query(({ input }) => {
-            const res = buildVideoList(input.project_root, "reacted");
+        })).query(async ({ input }) => {
+            const res = await buildVideoList(input.project_root, "reacted");
             if (res instanceof Error) {
                 console.error(res);
                 return asAPIError(res);
             }
             return {
                 error: false as const,
-                ...res,
+                data: res,
             };
         }),
 

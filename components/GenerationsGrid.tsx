@@ -41,12 +41,12 @@ export function GenerationsGrid(
             if (rows.error) {
                 console.error(
                     "[GenerationsGrid] failed to load archived generations 1:",
-                    row,
+                    rows,
                 );
             } else {
                 if (!cancelled) {
                     archivedResults.value = new Map(
-                        rows.map((v) => [v.id, v]),
+                        rows.data.map((v) => [v.id, v]),
                     );
                 }
             }
@@ -70,23 +70,18 @@ export function GenerationsGrid(
         let cancelled = false;
         reactedLoading.value = true;
         (async () => {
-            try {
-                const rows = await trpc.open.listReactedGenerations.query({
-                    project_root: projectRoot,
-                });
-                if (!cancelled) {
-                    reactedResults.value = new Map(
-                        rows.map((v) => [v.id, v]),
-                    );
-                }
-            } catch (err) {
-                console.error(
-                    "[GenerationsGrid] failed to load reacted generations 2:",
-                    err,
+            const rows = await trpc.open.listReactedGenerations.query({
+                project_root: projectRoot,
+            });
+            if (rows.error) {
+                console.error(rows);
+            } else if (!cancelled) {
+                reactedResults.value = new Map(
+                    rows.data.map((v) => [v.id, v]),
                 );
-            } finally {
-                if (!cancelled) reactedLoading.value = false;
             }
+
+            if (!cancelled) reactedLoading.value = false;
         })();
         return () => {
             cancelled = true;
