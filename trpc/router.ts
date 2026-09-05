@@ -11,6 +11,7 @@ import {
     loadFileExplorerState,
     pickProjectFolder,
     resolveInProject,
+    saveFileExplorerState,
 } from "../project.ts";
 import {
     archiveGeneration,
@@ -398,6 +399,11 @@ export const appRouter = router({
             childrenByPath[rel] = dirs;
         }
 
+        await saveFileExplorerState(rootPath, {
+            expanded: Object.keys(childrenByPath),
+            selected,
+        });
+
         return {
             error: false as const,
             rootPath,
@@ -669,12 +675,10 @@ export const appRouter = router({
                 throw new Error("Project not initialized");
             }
             const dir = await resolveInProject(projectDir, ".open-director");
-            if (dir instanceof Error) throw dir;
-            await Deno.mkdir(dir, { recursive: true });
-            await Deno.writeTextFile(
-                join(dir, "file-explorer.json"),
-                JSON.stringify(opts.input),
-            );
+            if (dir instanceof Error) {
+                throw dir;
+            }
+            await saveFileExplorerState(dir, opts.input);
         }),
 
     backend_events: publicProcedure.subscription(async function* () {

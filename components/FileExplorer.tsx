@@ -113,7 +113,7 @@ export function FileExplorer(props: {
             expanded: [...pd.expanded].sort(),
             selected: pd.selected,
         };
-        return JSON.stringify(state);
+        return state;
     });
     // The save itself is a side effect, so it lives in a plain `useEffect` keyed
     // on the computed value: the component re-renders on every `projectData`
@@ -129,7 +129,7 @@ export function FileExplorer(props: {
             hydrated.current = true;
             return;
         }
-        trpc.saveExplorerState.mutate(JSON.parse(key) as ExplorerState)
+        trpc.saveExplorerState.mutate(key)
             .catch(console.error);
     }, [persistKey.value]);
 

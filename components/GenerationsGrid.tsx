@@ -40,7 +40,7 @@ export function GenerationsGrid(
             });
             if (rows.error) {
                 console.error(
-                    "[GenerationsGrid] failed to load archived generations:",
+                    "[GenerationsGrid] failed to load archived generations 1:",
                     row,
                 );
             } else {
@@ -81,7 +81,7 @@ export function GenerationsGrid(
                 }
             } catch (err) {
                 console.error(
-                    "[GenerationsGrid] failed to load reacted generations:",
+                    "[GenerationsGrid] failed to load reacted generations 2:",
                     err,
                 );
             } finally {

@@ -1,4 +1,11 @@
-import { basename, dirname, isAbsolute, relative, resolve } from "@std/path";
+import {
+    basename,
+    dirname,
+    isAbsolute,
+    join,
+    relative,
+    resolve,
+} from "@std/path";
 import { z } from "zod";
 
 const FileExplorerStateSchema = z.object({
@@ -333,4 +340,15 @@ export async function loadFileExplorerState(
             ? null
             : migrateExplorerPath(parsed.data.selected),
     };
+}
+
+export async function saveFileExplorerState(
+    dir: string,
+    state: FileExplorerState,
+) {
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(
+        join(dir, "file-explorer.json"),
+        JSON.stringify(state, null, 2),
+    );
 }
