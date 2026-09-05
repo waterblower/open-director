@@ -18,8 +18,10 @@ export function SettingsModal(props: {
 
     const seedanceApiKey = useSignal("");
     const minimaxApiKey = useSignal("");
+    const falApiKey = useSignal("");
     const seedanceMasked = useSignal<string | null>(null);
     const minimaxMasked = useSignal<string | null>(null);
+    const falMasked = useSignal<string | null>(null);
     const saving = useSignal(false);
     const error = useSignal<string | null>(null);
     const gitHash = import.meta.env.VITE_GIT_HASH ?? "unknown";
@@ -37,14 +39,19 @@ export function SettingsModal(props: {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, minimax] = await Promise.all([
+                const [seedance, minimax, fal] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
                     trpc.getApiKeyStatus.query("minimax"),
+                    trpc.getApiKeyStatus.query("fal"),
                 ]);
                 seedanceMasked.value = seedance.masked;
                 minimaxMasked.value = minimax.masked;
+                falMasked.value = fal.masked;
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[SettingsModal] failed to load API key status:",
+                    err,
+                );
             }
         })();
     }, []);
@@ -52,7 +59,8 @@ export function SettingsModal(props: {
     const save = async () => {
         const seedanceKey = seedanceApiKey.value.trim();
         const minimaxKey = minimaxApiKey.value.trim();
-        if (!seedanceKey && !minimaxKey) {
+        const falKey = falApiKey.value.trim();
+        if (!seedanceKey && !minimaxKey && !falKey) {
             error.value = get_text("please_enter_an_api_key", language.value);
             return;
         }
@@ -72,15 +80,23 @@ export function SettingsModal(props: {
                         apiKey: minimaxKey,
                     })
                     : null,
+                falKey
+                    ? trpc.setApiKey.mutate({
+                        provider: "fal",
+                        apiKey: falKey,
+                    })
+                    : null,
             ]);
             if (results[0]) seedanceMasked.value = results[0].masked;
             if (results[1]) minimaxMasked.value = results[1].masked;
+            if (results[2]) falMasked.value = results[2].masked;
             onStatusChange?.(Boolean(
-                seedanceMasked.value || minimaxMasked.value,
+                seedanceMasked.value || minimaxMasked.value ||
+                    falMasked.value,
             ));
             onClose();
         } catch (err) {
-            console.error(err);
+            console.error("[SettingsModal] failed to save API keys:", err);
             error.value = err instanceof Error
                 ? err.message
                 : get_text("save_failed", language.value);
@@ -185,6 +201,40 @@ export function SettingsModal(props: {
                                 : "YOUR_API_KEY"}
                             onInput={(e) =>
                                 minimaxApiKey.value =
+                                    (e.target as HTMLInputElement).value}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") save();
+                            }}
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <label class="block text-sm font-medium text-gray-700">
+                            Fal API Key
+                        </label>
+                        {falMasked.value && (
+                            <p class="text-[11px] text-gray-500">
+                                {get_text("currently_saved", language.value)}
+                                {" "}
+                                <span class="font-mono">
+                                    {falMasked.value}
+                                </span>
+                            </p>
+                        )}
+                        <input
+                            type="password"
+                            autoComplete="off"
+                            spellcheck={false}
+                            value={falApiKey.value}
+                            placeholder={falMasked.value
+                                ? get_text(
+                                    "enter_a_new_key_to_replace_it",
+                                    language.value,
+                                )
+                                : "<key-id>:<key-secret>"}
+                            onInput={(e) =>
+                                falApiKey.value =
                                     (e.target as HTMLInputElement).value}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") save();

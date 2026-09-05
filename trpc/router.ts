@@ -11,6 +11,7 @@ import {
     loadFileExplorerState,
     pickProjectFolder,
     resolveInProject,
+    saveFileExplorerState,
 } from "../project.ts";
 import {
     archiveGeneration,
@@ -42,10 +43,12 @@ import {
     generate,
     type GenerateInput,
     getTask,
+    isFalModel,
     isMiniMaxModel,
     localTaskStatus,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
+import type { FalInput } from "../apigen/fal.ts";
 import {
     type VideoGenerationContent,
     VideoModelSchema as MiniMaxVideoModelSchema,
@@ -134,24 +137,29 @@ interface DirEntry {
 }
 
 /** Read a directory into a sorted list (directories first, then alphabetical). */
-async function listDir(absPath: string): Promise<DirEntry[]> {
+async function listDir(absPath: string): Promise<DirEntry[] | Error> {
     const entries: DirEntry[] = [];
-    for await (const entry of Deno.readDir(absPath)) {
-        entries.push({
-            name: entry.name,
-            isDirectory: entry.isDirectory,
-            isFile: entry.isFile,
-            isSymlink: entry.isSymlink,
-        });
+    try {
+        for await (const entry of Deno.readDir(absPath)) {
+            entries.push({
+                name: entry.name,
+                isDirectory: entry.isDirectory,
+                isFile: entry.isFile,
+                isSymlink: entry.isSymlink,
+            });
+        }
+
+        entries.sort((a, b) =>
+            a.isDirectory === b.isDirectory
+                ? a.name.localeCompare(b.name)
+                : a.isDirectory
+                ? -1
+                : 1
+        );
+        return entries;
+    } catch (e) {
+        return e as Error;
     }
-    entries.sort((a, b) =>
-        a.isDirectory === b.isDirectory
-            ? a.name.localeCompare(b.name)
-            : a.isDirectory
-            ? -1
-            : 1
-    );
-    return entries;
 }
 
 /** A generated-video entry as the grid consumes it. */
@@ -285,9 +293,20 @@ export const appRouter = router({
 
     // Archived generations for the same project, in the same shape — shown in
     // the grid's "Archived" tab.
-    listArchivedGenerations: publicProcedure.input(z.object({
-        project_root: z.string(),
-    })).query(({ input }) => buildVideoList(input.project_root, "archived")),
+    listArchivedGenerations: publicProcedure
+        .input(z.object({
+            project_root: z.string(),
+        }))
+        .query(async ({ input }) => {
+            const res = await buildVideoList(input.project_root, "archived");
+            if (res instanceof Error) {
+                return asAPIError(res);
+            }
+            return {
+                error: false as const,
+                data: res,
+            };
+        }),
 
     // Look up a generation by a project file's content — hashes the file at
     // `path` and matches it against recorded video hashes, so a copy or
@@ -317,7 +336,7 @@ export const appRouter = router({
     // `path` is relative to the given project root; "" reads the root itself.
     readDir: publicProcedure
         .input(z.object({ projectRoot: z.string(), path: z.string() }))
-        .query(async (opts): Promise<DirEntry[]> => {
+        .query(async (opts) => {
             const target = await resolveInProject(
                 opts.input.projectRoot,
                 opts.input.path,
@@ -325,7 +344,18 @@ export const appRouter = router({
             if (target instanceof Error) {
                 throw target;
             }
-            return await listDir(target);
+            const dirs = await listDir(target);
+            if (dirs instanceof Error) {
+                console.error("[trpc] failed to list directory 2:", dirs);
+                return {
+                    error: true as const,
+                    message: dirs.message,
+                };
+            }
+            return {
+                error: false as const,
+                dirs,
+            };
         }),
 
     // Load everything the file explorer needs in one round trip: the active
@@ -333,6 +363,7 @@ export const appRouter = router({
     // expanded directories (with their children pre-loaded) and the saved
     // selection. Returns null when no project is open.
     loadProjectData: publicProcedure.query(async () => {
+        console.log("[trpc] loadProjectData called");
         const rootPath = (await getLastOpenedProject(kv))?.path;
         if (!rootPath) return null;
 
@@ -343,6 +374,13 @@ export const appRouter = router({
         const { expanded, selected } = savedState;
 
         const rootEntries = await listDir(rootPath);
+        if (rootEntries instanceof Error) {
+            console.error("[trpc] failed to list root directory:", rootEntries);
+            return {
+                error: true as const,
+                message: rootEntries.message,
+            };
+        }
 
         // Pre-load the children of each restored-expanded directory so the tree
         // paints fully expanded on first render.
@@ -350,23 +388,28 @@ export const appRouter = router({
         for (const rel of expanded) {
             const target = await resolveInProject(rootPath, rel);
             if (target instanceof Error) {
-                console.error(target);
+                console.error("[trpc] failed to resolve project path:", target);
                 return asAPIError(target);
             }
-            try {
-                childrenByPath[rel] = await listDir(target);
-            } catch (e) {
-                console.warn(e);
-                // Directory removed since last session — drop it silently.
+            const dirs = await listDir(target);
+            if (dirs instanceof Error) {
+                console.error("[trpc] failed to list directory 1:", dirs);
+                continue;
             }
+            childrenByPath[rel] = dirs;
         }
+
+        await saveFileExplorerState(rootPath, {
+            expanded: Object.keys(childrenByPath),
+            selected,
+        });
 
         return {
             error: false as const,
             rootPath,
             rootEntries,
             childrenByPath,
-            expanded,
+            expanded: Object.keys(childrenByPath),
             selected,
         };
     }),
@@ -514,7 +557,7 @@ export const appRouter = router({
             try {
                 await Deno.rename(srcAbs, destAbs);
             } catch (err) {
-                console.log(err);
+                console.error("[trpc] failed to move file:", err);
             }
             return { path: dest };
         }),
@@ -584,7 +627,7 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "minimax"]).optional())
+        .input(z.enum(["seedance", "minimax", "fal"]).optional())
         .query(async ({ input }) => {
             const provider = input ?? "seedance";
             const key = await getStoredApiKey(provider);
@@ -598,7 +641,7 @@ export const appRouter = router({
     // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "minimax"]).optional(),
+            provider: z.enum(["seedance", "minimax", "fal"]).optional(),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
@@ -632,12 +675,10 @@ export const appRouter = router({
                 throw new Error("Project not initialized");
             }
             const dir = await resolveInProject(projectDir, ".open-director");
-            if (dir instanceof Error) throw dir;
-            await Deno.mkdir(dir, { recursive: true });
-            await Deno.writeTextFile(
-                join(dir, "file-explorer.json"),
-                JSON.stringify(opts.input),
-            );
+            if (dir instanceof Error) {
+                throw dir;
+            }
+            await saveFileExplorerState(dir, opts.input);
         }),
 
     backend_events: publicProcedure.subscription(async function* () {
@@ -663,6 +704,7 @@ export const appRouter = router({
                         "doubao-seedance-2-0-260128",
                         "doubao-seedance-2-0-fast-260128",
                         "doubao-seedance-2-0-mini-260615",
+                        "fal/minimax/h3/reference-to-video",
                     ]),
                     MiniMaxVideoModelSchema,
                 ]),
@@ -717,7 +759,78 @@ export const appRouter = router({
 
                 let request: GenerateInput;
                 let storedRequest: GenerateInput;
-                if (isMiniMaxModel(model)) {
+                if (isFalModel(model)) {
+                    if (!prompt.trim()) {
+                        throw new Error(
+                            "fal reference-to-video requires a prompt",
+                        );
+                    }
+                    if (attachments.some((att) => att.kind !== "image")) {
+                        throw new Error(
+                            "fal reference-to-video accepts image references only",
+                        );
+                    }
+                    const falResolution = resolution === "480p"
+                        ? "480P"
+                        : resolution === "768P"
+                        ? "768P"
+                        : null;
+                    if (!falResolution) {
+                        throw new Error(
+                            `Unsupported fal resolution: ${resolution}`,
+                        );
+                    }
+                    if (duration > 15) {
+                        throw new Error("fal duration must be at most 15s");
+                    }
+                    const falRatio = ratio === "horizontal"
+                        ? "16:9"
+                        : ratio === "vertical"
+                        ? "9:16"
+                        : ratio;
+                    // fal fetches references by URL, and our uploads dir isn't
+                    // reachable from the internet — so send the bytes inline
+                    // and only externalize the copy we persist.
+                    const inlineUrls = await Promise.all(
+                        attachments.map((att) =>
+                            resolveToDataUrl(att.dataUrlOrFilePath)
+                        ),
+                    );
+                    const falInput: FalInput = {
+                        prompt: prompt.trim(),
+                        duration,
+                        resolution: falResolution,
+                        enable_safety_checker: false,
+                        prompt_expansion_mode: "fast",
+                        aspect_ratio: falRatio,
+                        reference_image_urls: inlineUrls,
+                    };
+                    request = { model, input: falInput };
+                    const storedUrls = await Promise.all(
+                        inlineUrls.map(async (url) => {
+                            if (!url.startsWith("data:")) return url;
+                            const stored = await storeDataUrl(
+                                projectRoot,
+                                url,
+                            );
+                            if (stored instanceof Error) {
+                                console.error(
+                                    "[trpc] failed to store generated asset:",
+                                    stored,
+                                );
+                                return url;
+                            }
+                            return stored;
+                        }),
+                    );
+                    storedRequest = {
+                        model,
+                        input: {
+                            ...falInput,
+                            reference_image_urls: storedUrls,
+                        },
+                    };
+                } else if (isMiniMaxModel(model)) {
                     if (!prompt.trim()) {
                         throw new Error("MiniMax H3 requires a prompt");
                     }
@@ -859,44 +972,58 @@ export const appRouter = router({
                     };
                 }
 
+                // Resolve the key *before* logging the generation: a row with
+                // no task id looks "queued" to task_checker, which only gives
+                // up after a 5 minute grace and then reports the generic
+                // "never submitted" reason instead of the real cause.
+                const apiKey = await getStoredApiKeyFromModel(request.model);
+                if (!apiKey) {
+                    throw new Error(
+                        `No API key configured for ${request.model} — add one in Settings`,
+                    );
+                }
+
                 const generation = createGeneration(db, storedRequest);
                 if (generation instanceof Error) {
                     throw generation;
                 }
-                console.log("generation_created");
+                console.log("[trpc] generation created:", generation.id);
                 await global_event_bus.put({
                     type: "generation_created",
                     gen: generation,
                 });
-                const apiKey = await getStoredApiKeyFromModel(request.model);
-                if (!apiKey) {
-                    throw new Error("no api key found for model");
-                }
-                const created = await generate(request, apiKey);
-                if (created instanceof Error) {
-                    console.error(created);
-                    const err = updateGeneration(db, {
+
+                /**
+                 * Mark the just-created row failed with the real reason. Any
+                 * throw from here on would otherwise strand it in "queued".
+                 */
+                const failGeneration = (reason: string) => {
+                    console.error(
+                        `[trpc] generation ${generation.id} failed:`,
+                        reason,
+                    );
+                    const err = updateGeneration(db!, {
                         id: generation.id,
-                        failed_reason: created.message,
+                        failed_reason: reason,
                         status: "failed",
                     });
-                    if (err instanceof Error) {
-                        throw err;
-                    }
-                    const gen = getGenerationById(db, generation.id);
-                    if (gen instanceof Error) {
-                        throw gen;
-                    }
-
+                    if (err instanceof Error) throw err;
+                    const gen = getGenerationById(db!, generation.id);
+                    if (gen instanceof Error) throw gen;
                     return gen;
-                }
-                if (created.provider == "fal") {
-                    throw new Error("fal provider is not supported");
-                }
+                };
 
+                const created = await generate(request, apiKey).catch((err) =>
+                    err instanceof Error ? err : new Error(String(err))
+                );
+                if (created instanceof Error) {
+                    return failGeneration(created.message);
+                }
                 const taskId = taskIdFromCreateResponse(created.res);
-                if (taskId instanceof Error) throw taskId;
-                console.log("task created", created);
+                if (taskId instanceof Error) {
+                    return failGeneration(taskId.message);
+                }
+                console.log("[trpc] task created:", created);
                 const err = updateGeneration(db, {
                     id: generation.id,
                     task_id: taskId,
@@ -905,10 +1032,19 @@ export const appRouter = router({
                     throw err;
                 }
 
-                const task = await getTask(request.model, taskId, apiKey);
-                if (task instanceof Error) {
-                    throw task;
+                const polled = await getTask(request.model, taskId, apiKey);
+                if (polled instanceof Error) {
+                    // The task exists (we have its id) — leave it for
+                    // task_checker to poll rather than failing the row.
+                    console.error(
+                        `[trpc] first poll of ${taskId} failed:`,
+                        polled,
+                    );
+                    const gen = getGenerationById(db, generation.id);
+                    if (gen instanceof Error) throw gen;
+                    return gen;
                 }
+                const task = polled.task;
                 const err2 = updateGeneration(db, {
                     id: generation.id,
                     task_json: task,
@@ -918,7 +1054,7 @@ export const appRouter = router({
                     throw err2;
                 }
 
-                console.log("task", task);
+                console.log("[trpc] task result:", task);
 
                 // Logging failure shouldn't fail the request — the task is created.
                 const recordErr = recordGeneration(db, {
@@ -929,7 +1065,10 @@ export const appRouter = router({
                     task,
                 });
                 if (recordErr) {
-                    console.error(recordErr);
+                    console.error(
+                        "[trpc] failed to record task log:",
+                        recordErr,
+                    );
                 }
                 const gen = getGenerationById(db, generation.id);
                 if (gen instanceof Error) {
@@ -1023,7 +1162,17 @@ export const appRouter = router({
         // shown in the grid's "Liked & disliked" tab.
         listReactedGenerations: publicProcedure.input(z.object({
             project_root: z.string(),
-        })).query(({ input }) => buildVideoList(input.project_root, "reacted")),
+        })).query(async ({ input }) => {
+            const res = await buildVideoList(input.project_root, "reacted");
+            if (res instanceof Error) {
+                console.error(res);
+                return asAPIError(res);
+            }
+            return {
+                error: false as const,
+                data: res,
+            };
+        }),
 
         // List generated videos in `<project>/.project/generations` as Task-like
         // objects. Creates the directory if it doesn't exist yet.
@@ -1037,7 +1186,10 @@ export const appRouter = router({
                     "active",
                 );
                 if (result instanceof Error) {
-                    console.error(result);
+                    console.error(
+                        "[trpc] failed to resolve project path:",
+                        result,
+                    );
                     return asAPIError(result);
                 }
                 return {

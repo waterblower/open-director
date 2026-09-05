@@ -14,11 +14,12 @@ const KV_DIR = join(homedir(), ".open-director");
 Deno.mkdirSync(KV_DIR, { recursive: true });
 export const kv = await Deno.openKv(join(KV_DIR, "kv.sqlite3"));
 
-export type ApiProvider = "seedance" | "minimax";
+export type ApiProvider = "seedance" | "minimax" | "fal";
 
 const API_KEY_BY_PROVIDER = {
     seedance: ["config", "seedance_api_key"],
     minimax: ["config", "minimax_api_key"],
+    fal: ["config", "fal_api_key"],
 } as const satisfies Record<ApiProvider, Deno.KvKey>;
 const SHOW_OPEN_DIRECTORY_KEY = ["config", "show_open_directory"] as const;
 
@@ -34,9 +35,12 @@ export async function getStoredApiKey(
 export async function getStoredApiKeyFromModel(
     model: string,
 ): Promise<string | null> {
-    type ApiProvider = "seedance" | "minimax";
     let provider: ApiProvider = "seedance";
-    if (model.includes("minimax")) {
+    // Check fal first: its model ids embed the upstream vendor's name
+    // ("fal/minimax/h3/..."), but the request is billed against a fal key.
+    if (model.startsWith("fal/")) {
+        provider = "fal";
+    } else if (model.includes("minimax")) {
         provider = "minimax";
     } else if (model.includes("seedance")) {
         provider = "seedance";

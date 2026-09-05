@@ -115,7 +115,10 @@ export async function externalizeAttachments(
             ) {
                 const url = await storeDataUrl(projectRoot, item.image_url.url);
                 if (url instanceof Error) {
-                    console.error(url);
+                    console.error(
+                        "[uploads] failed to store image data URL:",
+                        url,
+                    );
                     return item;
                 }
                 return { ...item, image_url: { url } };
@@ -126,7 +129,10 @@ export async function externalizeAttachments(
             ) {
                 const url = await storeDataUrl(projectRoot, item.video_url.url);
                 if (url instanceof Error) {
-                    console.error(url);
+                    console.error(
+                        "[uploads] failed to store video data URL:",
+                        url,
+                    );
                     return item;
                 }
                 return { ...item, video_url: { url } };
@@ -137,7 +143,10 @@ export async function externalizeAttachments(
             ) {
                 const url = await storeDataUrl(projectRoot, item.audio_url.url);
                 if (url instanceof Error) {
-                    console.error(url);
+                    console.error(
+                        "[uploads] failed to store audio data URL:",
+                        url,
+                    );
                     return item;
                 }
                 return { ...item, audio_url: { url } };

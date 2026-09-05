@@ -35,20 +35,22 @@ export function GenerationsGrid(
         let cancelled = false;
         archivedLoading.value = true;
         (async () => {
-            try {
-                const rows = await trpc.listArchivedGenerations.query({
-                    project_root: projectRoot,
-                });
+            const rows = await trpc.listArchivedGenerations.query({
+                project_root: projectRoot,
+            });
+            if (rows.error) {
+                console.error(
+                    "[GenerationsGrid] failed to load archived generations 1:",
+                    rows,
+                );
+            } else {
                 if (!cancelled) {
                     archivedResults.value = new Map(
-                        rows.map((v) => [v.id, v]),
+                        rows.data.map((v) => [v.id, v]),
                     );
                 }
-            } catch (err) {
-                console.error(err);
-            } finally {
-                if (!cancelled) archivedLoading.value = false;
             }
+            if (!cancelled) archivedLoading.value = false;
         })();
         return () => {
             cancelled = true;
@@ -68,20 +70,18 @@ export function GenerationsGrid(
         let cancelled = false;
         reactedLoading.value = true;
         (async () => {
-            try {
-                const rows = await trpc.open.listReactedGenerations.query({
-                    project_root: projectRoot,
-                });
-                if (!cancelled) {
-                    reactedResults.value = new Map(
-                        rows.map((v) => [v.id, v]),
-                    );
-                }
-            } catch (err) {
-                console.error(err);
-            } finally {
-                if (!cancelled) reactedLoading.value = false;
+            const rows = await trpc.open.listReactedGenerations.query({
+                project_root: projectRoot,
+            });
+            if (rows.error) {
+                console.error(rows);
+            } else if (!cancelled) {
+                reactedResults.value = new Map(
+                    rows.data.map((v) => [v.id, v]),
+                );
             }
+
+            if (!cancelled) reactedLoading.value = false;
         })();
         return () => {
             cancelled = true;

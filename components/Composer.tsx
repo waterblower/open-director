@@ -73,11 +73,27 @@ const MINIMAX_MODEL_OPTIONS = [
     shortLabel: string;
 }[];
 
+/** Models routed through fal.ai's queue API (see apigen/fal.ts). */
+const FAL_MODEL_OPTIONS = [
+    {
+        value: "fal/minimax/h3/reference-to-video",
+        label: "Fal · MiniMax H3 Reference",
+        shortLabel: "Fal H3",
+    },
+] as const satisfies readonly {
+    value: FalModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+type FalModel = "fal/minimax/h3/reference-to-video";
+
 const GENERATION_MODELS = [
     ...SEEDANCE_MODELS,
     ...MINIMAX_MODEL_OPTIONS,
+    ...FAL_MODEL_OPTIONS,
 ];
-type GenerationModel = SeedanceModel | MiniMaxVideoModel;
+type GenerationModel = SeedanceModel | MiniMaxVideoModel | FalModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -100,6 +116,10 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
 const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
     "MiniMax-H3": ["768P", "2K"],
     "MiniMax-H3-Max": ["480p", "768P"],
+};
+
+const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
+    "fal/minimax/h3/reference-to-video": ["480p", "768P"],
 };
 
 /** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
@@ -167,6 +187,10 @@ function isSeedanceModel(value: unknown): value is SeedanceModel {
 
 function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
     return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
+}
+
+function isFalModel(value: unknown): value is FalModel {
+    return FAL_MODEL_OPTIONS.some((model) => model.value === value);
 }
 
 function isMiniMaxRequest(
@@ -426,6 +450,38 @@ export function Composer(props: {
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
+        if (req.model === "fal/minimax/h3/reference-to-video") {
+            const input = req.input;
+            prompt.value = input.prompt;
+            model.value = req.model;
+            ratio.value = input.aspect_ratio;
+            resolution.value = input.resolution === "480P"
+                ? "480p"
+                : input.resolution;
+            durationMode.value = "seconds";
+            duration.value = input.duration;
+            mode.value = "reference";
+
+            attachments.value.forEach((attachment) =>
+                URL.revokeObjectURL(attachment.url)
+            );
+            attachments.value = await Promise.all(
+                input.reference_image_urls.map(async (url) => ({
+                    id: nextId.current++,
+                    kind: "image" as const,
+                    name: kindLabel("image", language.value),
+                    url: URL.createObjectURL(
+                        await (await fetch(url)).blob(),
+                    ),
+                })),
+            );
+            const ta = promptRef.current;
+            if (ta) {
+                ta.value = input.prompt;
+                autoGrow(ta);
+            }
+            return;
+        }
         if (isMiniMaxRequest(req)) {
             const text = req.content
                 .filter((item) => item.type === "text")
@@ -554,7 +610,9 @@ export function Composer(props: {
         const req = reusePrompt.value;
         if (!req) return;
         reusePrompt.value = null; // consume once
-        applyReuse(req).catch((err) => console.error(err));
+        applyReuse(req).catch((err) =>
+            console.error("[Composer] failed to apply reused request:", err)
+        );
     });
 
     // Attachments with their display labels: Image1, Image2, Video1, …
@@ -583,14 +641,25 @@ export function Composer(props: {
     const resolutions = useComputed(() => {
         if (isSeedanceModel(model.value)) {
             return MODEL_RESOLUTIONS[model.value];
-        }
-        if (isMiniMaxModel(model.value)) {
+        } else if (isMiniMaxModel(model.value)) {
             return MINIMAX_MODEL_RESOLUTIONS[model.value];
+        } else if (isFalModel(model.value)) {
+            return FAL_MODEL_RESOLUTIONS[model.value];
+        } else {
+            throw new Error(`unsupported model: ${model.value}`);
         }
-        return [];
     });
     useSignalEffect(() => {
-        if (isMiniMaxModel(model.value)) {
+        if (isFalModel(model.value)) {
+            const allowed = FAL_MODEL_RESOLUTIONS[model.value];
+            if (!allowed.includes(resolution.value)) resolution.value = "768P";
+            // fal's reference-to-video takes reference images only, and a
+            // concrete duration (max 15s).
+            mode.value = "reference";
+            durationMode.value = "seconds";
+            duration.value = Math.max(1, Math.min(15, duration.value));
+            return;
+        } else if (isMiniMaxModel(model.value)) {
             const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
             if (!allowed.includes(resolution.value)) {
                 resolution.value = "768P";
@@ -608,14 +677,19 @@ export function Composer(props: {
                 ratio.value = "16:9";
             }
             return;
-        } else {
+        } else if (isSeedanceModel(model.value)) {
             const clamped = clampResolution(model.value, resolution.value);
             if (clamped !== resolution.value) resolution.value = clamped;
+        } else {
+            throw new Error(`unsupported model: ${model.value}`);
         }
     });
 
     const canSubmit = useComputed(() => {
-        if (isMiniMaxModel(model.value)) {
+        if (isFalModel(model.value)) {
+            return prompt.value.trim().length > 0 &&
+                attachments.value.every((item) => item.kind === "image");
+        } else if (isMiniMaxModel(model.value)) {
             if (!prompt.value.trim()) return false;
             if (
                 attachments.value.length === 0 && ratio.value === "adaptive"
@@ -723,7 +797,12 @@ export function Composer(props: {
         const projectPath = e.dataTransfer?.getData(PROJECT_FILE_MIME);
         if (projectPath) {
             e.preventDefault();
-            addProjectImage(projectPath).catch((err) => console.error(err));
+            addProjectImage(projectPath).catch((err) =>
+                console.error(
+                    "[Composer] failed to attach dropped project image:",
+                    err,
+                )
+            );
             return;
         }
 
@@ -1078,7 +1157,8 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        {model.value !== "MiniMax-H3-Max" && (
+                        {model.value !== "MiniMax-H3-Max" &&
+                            !isFalModel(model.value) && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -1346,6 +1426,7 @@ export function Composer(props: {
                             aria-label={get_text("generate", language.value)}
                             onClick={async () => {
                                 genError.value = null;
+                                const selected = model.value;
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
@@ -1358,8 +1439,9 @@ export function Composer(props: {
                                         ),
                                     })),
                                 );
+
                                 const gen_p = trpc.open.generate.mutate({
-                                    model: model.value,
+                                    model: selected,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
@@ -1370,7 +1452,25 @@ export function Composer(props: {
                                     mode: mode.value,
                                 });
                                 clearAll();
-                                const gen = await gen_p;
+                                // A rejected mutation (no API key, network
+                                // down, …) never produces a generation row, so
+                                // surface it here — otherwise it's an unhandled
+                                // rejection and the user sees nothing at all.
+                                let gen;
+                                try {
+                                    gen = await gen_p;
+                                } catch (err) {
+                                    console.error(
+                                        "[Composer] generate request failed:",
+                                        err,
+                                    );
+                                    genError.value = err instanceof Error
+                                        ? err.message
+                                        : String(err);
+                                    await delay(5000);
+                                    genError.value = null;
+                                    return;
+                                }
                                 console.log("generating", gen);
                                 if (gen.status == "failed") {
                                     genError.value = gen.failed_reason!;

@@ -78,7 +78,10 @@ export default function Application() {
                     // "" = project root (paths are relative to the root).
                     const res = await readDir(pd.rootPath, "");
                     if (res instanceof Error) {
-                        console.error(res);
+                        console.error(
+                            "[Application] failed to refresh root after fs change:",
+                            res,
+                        );
                         return;
                     }
                     projectData.value = {
@@ -89,12 +92,16 @@ export default function Application() {
                     for (const p of pd.expanded) {
                         const err = await loadChildren(p);
                         if (err instanceof Error) {
-                            console.error(err);
+                            console.error(
+                                "[Application] failed to reload expanded directory:",
+                                err,
+                            );
                         }
                     }
                 }
             },
-            onError: (err) => console.error("ticker error", err),
+            onError: (err) =>
+                console.error("[Application] backend event stream error:", err),
         });
         return () => {
             console.log("unsubscribing");
@@ -106,15 +113,19 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, minimax] = await Promise.all([
+                const [seedance, minimax, fal] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
                     trpc.getApiKeyStatus.query("minimax"),
+                    trpc.getApiKeyStatus.query("fal"),
                 ]);
-                if (!seedance.hasKey && !minimax.hasKey) {
+                if (!seedance.hasKey && !minimax.hasKey && !fal.hasKey) {
                     settingsOpen.value = true;
                 }
             } catch (err) {
-                console.error(err);
+                console.error(
+                    "[Application] failed to load API key status:",
+                    err,
+                );
             }
         })();
     }, []);
@@ -134,7 +145,10 @@ export default function Application() {
                 return;
             }
             if (data.error) {
-                console.error(data);
+                console.error(
+                    "[Application] failed to load project data on mount:",
+                    data,
+                );
                 return;
             }
             projectData.value = data;
@@ -163,7 +177,10 @@ export default function Application() {
                 return;
             }
             if (data.error) {
-                console.error(data);
+                console.error(
+                    "[Application] failed to reload project data:",
+                    data,
+                );
                 return;
             }
             projectData.value = data;
@@ -188,7 +205,10 @@ export default function Application() {
                 project_root: root,
             });
             if (vids.error) {
-                console.error(vids);
+                console.error(
+                    "[Application] failed to list generated videos:",
+                    vids,
+                );
                 return;
             }
             generated_videos.value = new Map(vids.result.map((v) => [v.id, v]));
