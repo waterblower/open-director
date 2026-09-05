@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { safeFetch } from "@/apigen/fetch.ts";
+import { parseJSON, safeFetch } from "@/apigen/fetch.ts";
 import { delay } from "@std/async/delay";
 
 /** The one fal endpoint we currently expose, used as a model identifier. */
@@ -55,7 +55,17 @@ export async function reference_to_video(input: FalInput, apikey: string) {
     if (res instanceof Error) {
         return res;
     }
-    const json = await res.json();
+    const text = await res.text();
+    if (res.status != 200) {
+        return new Error(
+            `https://queue.fal.run/minimax/h3/reference-to-video: ${res.status}, ${text}`,
+        );
+    }
+
+    const json = parseJSON(text);
+    if (json instanceof Error) {
+        return json;
+    }
     const output = OutputSchema.safeParse(json);
     if (output.error) {
         return output.error;
