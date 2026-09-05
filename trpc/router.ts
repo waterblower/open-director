@@ -46,6 +46,7 @@ import {
     isFalModel,
     isMiniMaxModel,
     localTaskStatus,
+    Providers,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
 import type { FalInput } from "../apigen/fal.ts";
@@ -627,9 +628,9 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "minimax", "fal"]).optional())
+        .input(z.enum(Providers))
         .query(async ({ input }) => {
-            const provider = input ?? "seedance";
+            const provider = input;
             const key = await getStoredApiKey(provider);
             return {
                 hasKey: !!key,
@@ -641,11 +642,11 @@ export const appRouter = router({
     // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "minimax", "fal"]).optional(),
+            provider: z.enum(Providers),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
-            const provider = opts.input.provider ?? "seedance";
+            const provider = opts.input.provider;
             const key = opts.input.apiKey;
             await setStoredApiKey(provider, key);
             return { hasKey: true, masked: maskKey(key) };

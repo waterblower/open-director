@@ -22,6 +22,8 @@ import {
 import { safeFetch } from "@/apigen/fetch.ts";
 import * as autoDL from "@/apigen/autodl.ts";
 
+export const Providers = ["seedance", "minimax", "fal", "autodl"] as const;
+
 /**
  * fal requests don't follow the OpenAI-ish `content` shape the other providers
  * use — they're a flat endpoint payload — so they're modelled as
