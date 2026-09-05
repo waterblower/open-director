@@ -40,6 +40,7 @@ import {
 import * as seedance from "../apigen/seedance/seedance.ts";
 import { FalInput } from "@/apigen/fal.ts";
 import * as minimax from "../apigen/minimax.ts";
+import * as autodl from "../apigen/autodl.ts";
 
 export const tRPC_generate = publicProcedure
     .input(z.object({
@@ -49,6 +50,7 @@ export const tRPC_generate = publicProcedure
                 "doubao-seedance-2-0-fast-260128",
                 "doubao-seedance-2-0-mini-260615",
                 "fal/minimax/h3/reference-to-video",
+                ...autodl.AUTODL_Models,
             ]),
             minimax.VideoModelSchema,
         ]),

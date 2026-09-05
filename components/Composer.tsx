@@ -1552,46 +1552,43 @@ export function Composer(props: {
                                     })),
                                 );
 
-                                if (isAutoDLModel(selected)) {
-                                    if (
-                                        selectedResolution.provider !== "autodl"
-                                    ) return;
-                                    const orientation = selectedRatio === "9:16"
-                                        ? "竖"
-                                        : selectedRatio === "1:1"
-                                        ? "(1:1)"
-                                        : "横";
-                                    const request: AutoDLGenerateInput = {
-                                        model: selected,
-                                        input: {
-                                            prompt: prompt.value.trim(),
-                                            duration: duration.value,
-                                            resolution:
-                                                `${selectedResolution.value}${orientation}`,
-                                            ref_image_0:
-                                                atts[0].dataUrlOrFilePath,
-                                            ...Object.fromEntries(
-                                                atts.slice(1).map((
-                                                    attachment,
-                                                    index,
-                                                ) => [
-                                                    `ref_image_${index + 1}`,
-                                                    attachment
-                                                        .dataUrlOrFilePath,
-                                                ]),
-                                            ),
-                                        },
-                                    };
-                                    console.log(
-                                        "[Composer] AutoDL submission:",
-                                        request,
-                                    );
-                                    return;
-                                }
+                                // if (isAutoDLModel(selected)) {
+                                //     if (
+                                //         selectedResolution.provider !== "autodl"
+                                //     ) return;
+                                //     const orientation = selectedRatio === "9:16"
+                                //         ? "竖"
+                                //         : selectedRatio === "1:1"
+                                //         ? "(1:1)"
+                                //         : "横";
+                                //     const request: AutoDLGenerateInput = {
+                                //         model: selected,
+                                //         input: {
+                                //             prompt: prompt.value.trim(),
+                                //             duration: duration.value,
+                                //             resolution:
+                                //                 `${selectedResolution.value}${orientation}`,
+                                //             ref_image_0:
+                                //                 atts[0].dataUrlOrFilePath,
+                                //             ...Object.fromEntries(
+                                //                 atts.slice(1).map((
+                                //                     attachment,
+                                //                     index,
+                                //                 ) => [
+                                //                     `ref_image_${index + 1}`,
+                                //                     attachment
+                                //                         .dataUrlOrFilePath,
+                                //                 ]),
+                                //             ),
+                                //         },
+                                //     };
+                                //     console.log(
+                                //         "[Composer] AutoDL submission:",
+                                //         request,
+                                //     );
+                                //     return;
+                                // }
 
-                                if (
-                                    selectedResolution.provider === "autodl"
-                                ) return;
                                 const gen_p = trpc.open.generate.mutate({
                                     model: selected,
                                     prompt: prompt.value.trim(),
