@@ -56,6 +56,10 @@ export default function Application() {
                 if (event.type == "generation_finished") {
                     const { gen } = event;
                     const next = new Map(generated_videos.value);
+                    // Older list responses keyed pending cards by provider task
+                    // id. Remove that stale entry before inserting the finished
+                    // generation under its canonical database id.
+                    if (gen.task_id) next.delete(gen.task_id);
                     next.set(gen.id, {
                         id: gen.id,
                         status: gen.status,

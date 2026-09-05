@@ -240,7 +240,7 @@ async function buildVideoList(
         const reaction = reactions.get(row.id);
         videos.push({
             status: "succeeded",
-            id: taskId,
+            id: row.id,
             url: localUrl,
             created_at: row.created_at,
             has_request: row.request_json != null,
@@ -258,9 +258,9 @@ async function buildVideoList(
         const reaction = reactions.get(row.id);
         videos.push({
             status: row.status,
-            // Not-yet-submitted generations have no task_id; key on the
-            // local ULID id instead.
-            id: row.task_id ?? row.id,
+            // The database id is the canonical UI identity. The provider task
+            // id is only used to poll the provider and locate the video file.
+            id: row.id,
             created_at: row.created_at,
             has_request: row.request_json != null,
             failed_reason: row.failed_reason ?? undefined,
