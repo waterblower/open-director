@@ -186,6 +186,7 @@ const TEXTS = {
         English: "Configure API keys for the video providers you use.",
         Chinese: "配置你所使用的视频生成服务 API Key。",
     },
+    config_here: { English: "Configure here", Chinese: "点击配置" },
     currently_saved: { English: "Currently saved:", Chinese: "当前已保存：" },
     enter_a_new_key_to_replace_it: {
         English: "Enter a new key to replace it",

@@ -8,6 +8,13 @@ import {
     trpc,
 } from "../trpc/client.ts";
 
+// Replace these placeholders with each provider's API-key configuration URL.
+const API_KEY_CONFIG_URLS = {
+    seedance: "https://console.volcengine.com/ark/region:cn-beijing/apiKey",
+    minimax: "https://platform.minimaxi.com/console/access",
+    fal: "https://fal.ai/dashboard/keys",
+} as const;
+
 export function SettingsModal(props: {
     /** Called after the modal is dismissed or a key is saved. */
     onClose: () => void;
@@ -136,9 +143,18 @@ export function SettingsModal(props: {
                     </div>
 
                     <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-gray-700">
-                            Seedance API Key
-                        </label>
+                        <div class="flex items-center justify-between gap-3">
+                            <label class="block text-sm font-medium text-gray-700">
+                                Seedance API Key
+                            </label>
+                            <a
+                                href={API_KEY_CONFIG_URLS.seedance}
+                                target="_blank"
+                                class="shrink-0 text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+                            >
+                                {get_text("config_here", language.value)}
+                            </a>
+                        </div>
                         {seedanceMasked.value && (
                             <p class="text-[11px] text-gray-500">
                                 {get_text("currently_saved", language.value)}
@@ -176,9 +192,18 @@ export function SettingsModal(props: {
                     </div>
 
                     <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-gray-700">
-                            MiniMax API Key
-                        </label>
+                        <div class="flex items-center justify-between gap-3">
+                            <label class="block text-sm font-medium text-gray-700">
+                                MiniMax API Key
+                            </label>
+                            <a
+                                href={API_KEY_CONFIG_URLS.minimax}
+                                target="_blank"
+                                class="shrink-0 text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+                            >
+                                {get_text("config_here", language.value)}
+                            </a>
+                        </div>
                         {minimaxMasked.value && (
                             <p class="text-[11px] text-gray-500">
                                 {get_text("currently_saved", language.value)}
@@ -210,9 +235,18 @@ export function SettingsModal(props: {
                     </div>
 
                     <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-gray-700">
-                            Fal API Key
-                        </label>
+                        <div class="flex items-center justify-between gap-3">
+                            <label class="block text-sm font-medium text-gray-700">
+                                Fal API Key
+                            </label>
+                            <a
+                                href={API_KEY_CONFIG_URLS.fal}
+                                target="_blank"
+                                class="shrink-0 text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+                            >
+                                {get_text("config_here", language.value)}
+                            </a>
+                        </div>
                         {falMasked.value && (
                             <p class="text-[11px] text-gray-500">
                                 {get_text("currently_saved", language.value)}
