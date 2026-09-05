@@ -12,7 +12,8 @@ import type {
     ContentItem,
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
-import type { GenerateInput } from "../apigen/mod.ts";
+import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
+import { type GenerateInput, isAutoDLModel } from "../apigen/mod.ts";
 
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
@@ -30,7 +31,16 @@ type Attachment = {
 };
 
 type Mode = "reference" | "frames";
-type Resolution = "480p" | "720p" | "1080p" | "768P" | "2K";
+type Resolution = {
+    provider: "seedance";
+    value: "480p" | "720p" | "1080p";
+} | {
+    provider: "fal" | "minimax";
+    value: "480p" | "768p";
+} | {
+    provider: "autodl";
+    value: "480p" | "768p" | "1080p";
+};
 type DurationMode = "seconds" | "smart";
 type Popover = "model" | "mode" | "settings" | null;
 
@@ -88,12 +98,24 @@ const FAL_MODEL_OPTIONS = [
 
 type FalModel = "fal/minimax/h3/reference-to-video";
 
+type AutoDLModel = AutoDLGenerateInput["model"];
+const AUTODL_MODEL_OPTIONS = [{
+    value: "autodl/minimax_h3_lightx2v_v5",
+    label: "AutoDL · MiniMax H3 LightX2V",
+    shortLabel: "AutoDL H3",
+}] as const;
+
 const GENERATION_MODELS = [
     ...SEEDANCE_MODELS,
     ...MINIMAX_MODEL_OPTIONS,
     ...FAL_MODEL_OPTIONS,
+    ...AUTODL_MODEL_OPTIONS,
 ];
-type GenerationModel = SeedanceModel | MiniMaxVideoModel | FalModel;
+type GenerationModel =
+    | SeedanceModel
+    | MiniMaxVideoModel
+    | FalModel
+    | AutoDLModel;
 
 const RATIOS = [
     { value: "21:9", w: 18, h: 8 },
@@ -108,26 +130,44 @@ const RATIOS = [
 // Resolutions each model supports. Seedance 2.0 Fast can't output 1080p (see
 // the `resolution` docs in seedance.ts); the others support all three.
 const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
-    "doubao-seedance-2-0-260128": ["480p", "720p", "1080p"],
-    "doubao-seedance-2-0-fast-260128": ["480p", "720p"],
-    "doubao-seedance-2-0-mini-260615": ["480p", "720p"],
+    "doubao-seedance-2-0-260128": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+        { provider: "seedance", value: "1080p" },
+    ],
+    "doubao-seedance-2-0-fast-260128": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+    ],
+    "doubao-seedance-2-0-mini-260615": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+    ],
 };
 
 const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
-    "MiniMax-H3": ["768P", "2K"],
-    "MiniMax-H3-Max": ["480p", "768P"],
+    "MiniMax-H3": [{ provider: "minimax", value: "768p" }, {
+        provider: "minimax",
+        value: "480p",
+    }],
+    "MiniMax-H3-Max": [{ provider: "minimax", value: "480p" }, {
+        provider: "minimax",
+        value: "768p",
+    }],
 };
 
 const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
-    "fal/minimax/h3/reference-to-video": ["480p", "768P"],
+    "fal/minimax/h3/reference-to-video": [
+        { provider: "fal", value: "480p" },
+        { provider: "fal", value: "768p" },
+    ],
 };
 
-/** Fall back to a supported resolution (prefer 720p) when one isn't allowed. */
-function clampResolution(model: SeedanceModel, res: Resolution): Resolution {
-    const allowed = MODEL_RESOLUTIONS[model];
-    if (allowed.includes(res)) return res;
-    return allowed.includes("720p") ? "720p" : allowed[allowed.length - 1];
-}
+const AUTODL_RESOLUTIONS: Resolution[] = [
+    { provider: "autodl", value: "480p" },
+    { provider: "autodl", value: "768p" },
+    { provider: "autodl", value: "1080p" },
+];
 
 /** Display label for an attachment kind, in the given language. */
 function kindLabel(kind: AttachmentKind, lang: Language): string {
@@ -376,7 +416,10 @@ export function Composer(props: {
     const model = useSignal<GenerationModel>("doubao-seedance-2-0-260128");
     const mode = useSignal<Mode>("reference");
     const ratio = useSignal<AspectRatio>("21:9");
-    const resolution = useSignal<Resolution>("480p");
+    const resolution = useSignal<Resolution>({
+        provider: "seedance",
+        value: "480p",
+    });
     const durationMode = useSignal<DurationMode>("seconds");
     const duration = useSignal(4);
     const audio = useSignal(true);
@@ -422,7 +465,15 @@ export function Composer(props: {
             }
             if (saved.mode) mode.value = saved.mode;
             if (saved.ratio) ratio.value = saved.ratio;
-            if (saved.resolution) resolution.value = saved.resolution;
+            if (saved.resolution && typeof saved.resolution === "object") {
+                resolution.value = saved.resolution;
+            } else if (typeof saved.resolution === "string") {
+                // Older composer state stored only the resolution string.
+                const savedResolution = saved.resolution;
+                const option = MODEL_RESOLUTIONS["doubao-seedance-2-0-260128"]
+                    .find((option) => option.value === savedResolution);
+                if (option) resolution.value = option;
+            }
             if (saved.durationMode) durationMode.value = saved.durationMode;
             if (typeof saved.duration === "number") {
                 duration.value = saved.duration;
@@ -455,9 +506,10 @@ export function Composer(props: {
             prompt.value = input.prompt;
             model.value = req.model;
             ratio.value = input.aspect_ratio;
-            resolution.value = input.resolution === "480P"
-                ? "480p"
-                : input.resolution;
+            resolution.value = {
+                provider: "fal",
+                value: input.resolution === "480P" ? "480p" : "768p",
+            };
             durationMode.value = "seconds";
             duration.value = input.duration;
             mode.value = "reference";
@@ -490,9 +542,10 @@ export function Composer(props: {
             prompt.value = text;
             model.value = req.model;
             ratio.value = req.ratio ?? "adaptive";
-            resolution.value = req.resolution === "480P"
-                ? "480p"
-                : req.resolution;
+            resolution.value = {
+                provider: "minimax",
+                value: req.resolution === "480P" ? "480p" : "768p",
+            };
             durationMode.value = "seconds";
             duration.value = req.duration;
             mode.value = req.content.some((item) =>
@@ -564,7 +617,12 @@ export function Composer(props: {
             // is only present in "seconds" mode, omitted in "smart" mode.
             model.value = req.model;
             if (req.ratio) ratio.value = req.ratio;
-            if (req.resolution) resolution.value = req.resolution;
+            if (req.resolution) {
+                resolution.value = {
+                    provider: "seedance",
+                    value: req.resolution,
+                };
+            }
             if (typeof req.duration === "number") {
                 durationMode.value = "seconds";
                 duration.value = req.duration;
@@ -645,14 +703,38 @@ export function Composer(props: {
             return MINIMAX_MODEL_RESOLUTIONS[model.value];
         } else if (isFalModel(model.value)) {
             return FAL_MODEL_RESOLUTIONS[model.value];
+        } else if (isAutoDLModel(model.value)) {
+            return AUTODL_RESOLUTIONS;
         } else {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
     useSignalEffect(() => {
+        const allowed = resolutions.value;
+        const current = resolution.value;
+        if (
+            !allowed.some((option) =>
+                option.provider === current.provider &&
+                option.value === current.value
+            )
+        ) {
+            resolution.value = allowed.find((option) =>
+                option.value === current.value
+            ) ??
+                allowed.find((option) =>
+                    option.value === "720p" || option.value === "768p"
+                ) ?? allowed[0];
+        }
+        if (isAutoDLModel(model.value)) {
+            if (!["16:9", "9:16", "1:1"].includes(ratio.value)) {
+                ratio.value = "16:9";
+            }
+            mode.value = "reference";
+            durationMode.value = "seconds";
+            duration.value = Math.max(1, Math.min(10, duration.value));
+            return;
+        }
         if (isFalModel(model.value)) {
-            const allowed = FAL_MODEL_RESOLUTIONS[model.value];
-            if (!allowed.includes(resolution.value)) resolution.value = "768P";
             // fal's reference-to-video takes reference images only, and a
             // concrete duration (max 15s).
             mode.value = "reference";
@@ -660,10 +742,6 @@ export function Composer(props: {
             duration.value = Math.max(1, Math.min(15, duration.value));
             return;
         } else if (isMiniMaxModel(model.value)) {
-            const allowed = MINIMAX_MODEL_RESOLUTIONS[model.value];
-            if (!allowed.includes(resolution.value)) {
-                resolution.value = "768P";
-            }
             const minimum = model.value === "MiniMax-H3-Max" ? 5 : 4;
             duration.value = Math.max(
                 minimum,
@@ -677,15 +755,18 @@ export function Composer(props: {
                 ratio.value = "16:9";
             }
             return;
-        } else if (isSeedanceModel(model.value)) {
-            const clamped = clampResolution(model.value, resolution.value);
-            if (clamped !== resolution.value) resolution.value = clamped;
-        } else {
+        } else if (!isSeedanceModel(model.value)) {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
 
     const canSubmit = useComputed(() => {
+        if (isAutoDLModel(model.value)) {
+            return prompt.value.trim().length > 0 &&
+                attachments.value.length >= 1 &&
+                attachments.value.length <= 9 &&
+                attachments.value.every((item) => item.kind === "image");
+        }
         if (isFalModel(model.value)) {
             return prompt.value.trim().length > 0 &&
                 attachments.value.every((item) => item.kind === "image");
@@ -725,7 +806,10 @@ export function Composer(props: {
         if (!files) return;
         const miniMaxFrames = isMiniMaxModel(model.value) &&
             (mode.value === "frames" || model.value === "MiniMax-H3-Max");
-        const accepted = miniMaxFrames
+        const accepted = isAutoDLModel(model.value)
+            ? Array.from(files).filter((file) => file.type.startsWith("image/"))
+                .slice(0, Math.max(0, 9 - attachments.value.length))
+            : miniMaxFrames
             ? Array.from(files).filter((file) => file.type.startsWith("image/"))
                 .slice(0, Math.max(0, 2 - attachments.value.length))
             : Array.from(files);
@@ -932,9 +1016,11 @@ export function Composer(props: {
                             <span class="text-lg leading-none">+</span>
                             <span class="text-[10px]">
                                 {get_text(
-                                    isMiniMaxModel(model.value) &&
-                                        (mode.value === "frames" ||
-                                            model.value === "MiniMax-H3-Max")
+                                    isAutoDLModel(model.value) ||
+                                        isMiniMaxModel(model.value) &&
+                                            (mode.value === "frames" ||
+                                                model.value ===
+                                                    "MiniMax-H3-Max")
                                         ? "reference_images"
                                         : "image_video_audio",
                                     language.value,
@@ -945,9 +1031,10 @@ export function Composer(props: {
                             ref={fileInput}
                             type="file"
                             multiple
-                            accept={isMiniMaxModel(model.value) &&
-                                    (mode.value === "frames" ||
-                                        model.value === "MiniMax-H3-Max")
+                            accept={isAutoDLModel(model.value) ||
+                                    isMiniMaxModel(model.value) &&
+                                        (mode.value === "frames" ||
+                                            model.value === "MiniMax-H3-Max")
                                 ? "image/*"
                                 : "image/*,video/*,audio/*"}
                             class="hidden"
@@ -1158,7 +1245,8 @@ export function Composer(props: {
 
                         {/* Mode selector */}
                         {model.value !== "MiniMax-H3-Max" &&
-                            !isFalModel(model.value) && (
+                            !isFalModel(model.value) &&
+                            !isAutoDLModel(model.value) && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -1244,7 +1332,7 @@ export function Composer(props: {
                                     {ratio.value}
                                 </span>
                                 <span class="px-2.5">
-                                    {resolution.value}
+                                    {resolution.value.value}
                                 </span>
                                 <span class="px-2.5">
                                     {durationLabel.value}
@@ -1260,21 +1348,31 @@ export function Composer(props: {
                                         )}
                                     </div>
                                     <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
-                                        {RATIOS.map((r) => (
+                                        {RATIOS.filter((r) =>
+                                            !isAutoDLModel(
+                                                model.value,
+                                            ) ||
+                                            ["16:9", "9:16", "1:1"]
+                                                .includes(
+                                                    r.value,
+                                                )
+                                        ).map((r) => (
                                             <button
                                                 key={r.value}
                                                 type="button"
                                                 onClick={() =>
                                                     ratio.value = r.value}
                                                 class={`flex flex-col items-center justify-end gap-2 h-16 rounded-lg border text-xs pb-2 ${
-                                                    ratio.value === r.value
+                                                    ratio.value ===
+                                                            r.value
                                                         ? "border-gray-800 text-gray-900 bg-white"
                                                         : "border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100"
                                                 }`}
                                             >
                                                 <span
                                                     class={`block rounded-[3px] border-[1.5px] border-current ${
-                                                        r.value === "adaptive"
+                                                        r.value ===
+                                                                "adaptive"
                                                             ? "border-dashed"
                                                             : ""
                                                     }`}
@@ -1287,7 +1385,6 @@ export function Composer(props: {
                                             </button>
                                         ))}
                                     </div>
-
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text(
                                             "resolution",
@@ -1297,26 +1394,34 @@ export function Composer(props: {
                                     <div
                                         class="grid bg-gray-100 rounded-lg p-1 mb-5"
                                         style={{
-                                            gridTemplateColumns:
-                                                `repeat(${resolutions.value.length}, minmax(0, 1fr))`,
+                                            gridTemplateColumns: `repeat(${
+                                                Math.min(
+                                                    3,
+                                                    resolutions.value.length,
+                                                )
+                                            }, minmax(0, 1fr))`,
                                         }}
                                     >
                                         {resolutions.value.map((
                                             res,
                                         ) => (
                                             <button
-                                                key={res}
+                                                key={`${res.provider}:${res.value}`}
                                                 type="button"
                                                 onClick={() =>
                                                     resolution.value = res}
                                                 class={`h-9 rounded-md text-sm ${
-                                                    resolution.value ===
-                                                            res
+                                                    resolution.value
+                                                                .provider ===
+                                                            res.provider &&
+                                                        resolution.value
+                                                                .value ===
+                                                            res.value
                                                         ? "bg-white shadow text-gray-900 font-medium"
                                                         : "text-gray-500 hover:text-gray-700"
                                                 }`}
                                             >
-                                                {res}
+                                                {res.value}
                                             </button>
                                         ))}
                                     </div>
@@ -1324,7 +1429,8 @@ export function Composer(props: {
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
                                     </div>
-                                    {!isMiniMaxModel(model.value) && (
+                                    {!isMiniMaxModel(model.value) &&
+                                        !isAutoDLModel(model.value) && (
                                         <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
                                             {(
                                                 [
@@ -1364,11 +1470,15 @@ export function Composer(props: {
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
-                                                min={model.value ===
-                                                        "MiniMax-H3-Max"
+                                                min={isAutoDLModel(model.value)
+                                                    ? 1
+                                                    : model.value ===
+                                                            "MiniMax-H3-Max"
                                                     ? 5
                                                     : 4}
-                                                max={15}
+                                                max={isAutoDLModel(model.value)
+                                                    ? 10
+                                                    : 15}
                                                 step={1}
                                                 value={duration.value}
                                                 onInput={(e) =>
@@ -1427,6 +1537,8 @@ export function Composer(props: {
                             onClick={async () => {
                                 genError.value = null;
                                 const selected = model.value;
+                                const selectedResolution = resolution.value;
+                                const selectedRatio = ratio.value;
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
@@ -1440,12 +1552,52 @@ export function Composer(props: {
                                     })),
                                 );
 
+                                // if (isAutoDLModel(selected)) {
+                                //     if (
+                                //         selectedResolution.provider !== "autodl"
+                                //     ) return;
+                                //     const orientation = selectedRatio === "9:16"
+                                //         ? "竖"
+                                //         : selectedRatio === "1:1"
+                                //         ? "(1:1)"
+                                //         : "横";
+                                //     const request: AutoDLGenerateInput = {
+                                //         model: selected,
+                                //         input: {
+                                //             prompt: prompt.value.trim(),
+                                //             duration: duration.value,
+                                //             resolution:
+                                //                 `${selectedResolution.value}${orientation}`,
+                                //             ref_image_0:
+                                //                 atts[0].dataUrlOrFilePath,
+                                //             ...Object.fromEntries(
+                                //                 atts.slice(1).map((
+                                //                     attachment,
+                                //                     index,
+                                //                 ) => [
+                                //                     `ref_image_${index + 1}`,
+                                //                     attachment
+                                //                         .dataUrlOrFilePath,
+                                //                 ]),
+                                //             ),
+                                //         },
+                                //     };
+                                //     console.log(
+                                //         "[Composer] AutoDL submission:",
+                                //         request,
+                                //     );
+                                //     return;
+                                // }
+
                                 const gen_p = trpc.open.generate.mutate({
                                     model: selected,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
-                                    resolution: resolution.value,
+                                    resolution:
+                                        selectedResolution.value === "768p"
+                                            ? "768P"
+                                            : selectedResolution.value,
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,

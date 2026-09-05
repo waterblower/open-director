@@ -8,11 +8,12 @@ import {
     trpc,
 } from "../trpc/client.ts";
 
-// Replace these placeholders with each provider's API-key configuration URL.
+// Each provider's API-key configuration URL.
 const API_KEY_CONFIG_URLS = {
     seedance: "https://console.volcengine.com/ark/region:cn-beijing/apiKey",
     minimax: "https://platform.minimaxi.com/console/access",
     fal: "https://fal.ai/dashboard/keys",
+    autodl: "https://autodl.art/large-model/tokens",
 } as const;
 
 export function SettingsModal(props: {
@@ -26,9 +27,11 @@ export function SettingsModal(props: {
     const seedanceApiKey = useSignal("");
     const minimaxApiKey = useSignal("");
     const falApiKey = useSignal("");
+    const autodlApiKey = useSignal("");
     const seedanceMasked = useSignal<string | null>(null);
     const minimaxMasked = useSignal<string | null>(null);
     const falMasked = useSignal<string | null>(null);
+    const autodlMasked = useSignal<string | null>(null);
     const saving = useSignal(false);
     const error = useSignal<string | null>(null);
     const gitHash = import.meta.env.VITE_GIT_HASH ?? "unknown";
@@ -46,14 +49,16 @@ export function SettingsModal(props: {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, minimax, fal] = await Promise.all([
+                const [seedance, minimax, fal, autodl] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
                     trpc.getApiKeyStatus.query("minimax"),
                     trpc.getApiKeyStatus.query("fal"),
+                    trpc.getApiKeyStatus.query("autodl"),
                 ]);
                 seedanceMasked.value = seedance.masked;
                 minimaxMasked.value = minimax.masked;
                 falMasked.value = fal.masked;
+                autodlMasked.value = autodl.masked;
             } catch (err) {
                 console.error(
                     "[SettingsModal] failed to load API key status:",
@@ -67,7 +72,8 @@ export function SettingsModal(props: {
         const seedanceKey = seedanceApiKey.value.trim();
         const minimaxKey = minimaxApiKey.value.trim();
         const falKey = falApiKey.value.trim();
-        if (!seedanceKey && !minimaxKey && !falKey) {
+        const autodlKey = autodlApiKey.value.trim();
+        if (!seedanceKey && !minimaxKey && !falKey && !autodlKey) {
             error.value = get_text("please_enter_an_api_key", language.value);
             return;
         }
@@ -93,13 +99,20 @@ export function SettingsModal(props: {
                         apiKey: falKey,
                     })
                     : null,
+                autodlKey
+                    ? trpc.setApiKey.mutate({
+                        provider: "autodl",
+                        apiKey: autodlKey,
+                    })
+                    : null,
             ]);
             if (results[0]) seedanceMasked.value = results[0].masked;
             if (results[1]) minimaxMasked.value = results[1].masked;
             if (results[2]) falMasked.value = results[2].masked;
+            if (results[3]) autodlMasked.value = results[3].masked;
             onStatusChange?.(Boolean(
                 seedanceMasked.value || minimaxMasked.value ||
-                    falMasked.value,
+                    falMasked.value || autodlMasked.value,
             ));
             onClose();
         } catch (err) {
@@ -119,7 +132,7 @@ export function SettingsModal(props: {
                 if (e.target === e.currentTarget) onClose();
             }}
         >
-            <div class="relative w-full max-w-md rounded-2xl bg-white text-gray-800 shadow-2xl">
+            <div class="relative max-h-[90vh] overflow-y-auto w-full max-w-md rounded-2xl bg-white text-gray-800 shadow-2xl">
                 <button
                     type="button"
                     aria-label={get_text("close", language.value)}
@@ -269,6 +282,49 @@ export function SettingsModal(props: {
                                 : "<key-id>:<key-secret>"}
                             onInput={(e) =>
                                 falApiKey.value =
+                                    (e.target as HTMLInputElement).value}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") save();
+                            }}
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between gap-3">
+                            <label class="block text-sm font-medium text-gray-700">
+                                AutoDL API Key
+                            </label>
+                            <a
+                                href={API_KEY_CONFIG_URLS.autodl}
+                                target="_blank"
+                                class="shrink-0 text-sm text-indigo-600 hover:text-indigo-700 hover:underline"
+                            >
+                                {get_text("config_here", language.value)}
+                            </a>
+                        </div>
+                        {autodlMasked.value && (
+                            <p class="text-[11px] text-gray-500">
+                                {get_text("currently_saved", language.value)}
+                                {" "}
+                                <span class="font-mono">
+                                    {autodlMasked.value}
+                                </span>
+                            </p>
+                        )}
+                        <input
+                            type="password"
+                            autoComplete="off"
+                            spellcheck={false}
+                            value={autodlApiKey.value}
+                            placeholder={autodlMasked.value
+                                ? get_text(
+                                    "enter_a_new_key_to_replace_it",
+                                    language.value,
+                                )
+                                : "YOUR_API_KEY"}
+                            onInput={(e) =>
+                                autodlApiKey.value =
                                     (e.target as HTMLInputElement).value}
                             onKeyDown={(e) => {
                                 if (e.key === "Enter") save();

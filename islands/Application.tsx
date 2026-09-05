@@ -117,12 +117,16 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, minimax, fal] = await Promise.all([
+                const [seedance, minimax, fal, autodl] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
                     trpc.getApiKeyStatus.query("minimax"),
                     trpc.getApiKeyStatus.query("fal"),
+                    trpc.getApiKeyStatus.query("autodl"),
                 ]);
-                if (!seedance.hasKey && !minimax.hasKey && !fal.hasKey) {
+                if (
+                    !seedance.hasKey && !minimax.hasKey && !fal.hasKey &&
+                    !autodl.hasKey
+                ) {
                     settingsOpen.value = true;
                 }
             } catch (err) {

@@ -20,6 +20,10 @@ import {
     reference_to_video,
 } from "@/apigen/fal.ts";
 import { safeFetch } from "@/apigen/fetch.ts";
+import * as autoDL from "@/apigen/autodl.ts";
+import { AUTODL_Models } from "@/apigen/autodl.ts";
+
+export const Providers = ["seedance", "minimax", "fal", "autodl"] as const;
 
 /**
  * fal requests don't follow the OpenAI-ish `content` shape the other providers
@@ -47,10 +51,20 @@ export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export async function generate(
-    input: GenerateInput,
+    input: GenerateInput | autoDL.generate_Input,
     apiKey: string,
 ) {
-    if (isFalInput(input)) {
+    if (input.model == "autodl/minimax_h3_lightx2v_v5") {
+        const result = await autoDL.generate(input, apiKey);
+        if (result instanceof Error) {
+            return result;
+        }
+        return {
+            provider: "autodl",
+            model: input.model,
+            res: result,
+        };
+    } else if (isFalInput(input)) {
         const result = await reference_to_video(input.input, apiKey);
         console.log("[apigen] fal task created:", result);
         if (result instanceof Error) {
@@ -179,6 +193,12 @@ export function isFalModel(
     model: unknown,
 ): model is typeof FAL_REFERENCE_TO_VIDEO {
     return model === FAL_REFERENCE_TO_VIDEO;
+}
+
+export function isAutoDLModel(
+    value: string,
+): value is typeof AUTODL_Models[number] {
+    return AUTODL_Models.some((model) => model == value);
 }
 
 export function isFalInput(
