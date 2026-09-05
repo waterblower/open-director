@@ -12,10 +12,7 @@ import type {
     ContentItem,
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
-import {
-    AutoDL_Resolution_Options,
-    type generate_Input as AutoDLGenerateInput,
-} from "../apigen/autodl.ts";
+import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
 import type { GenerateInput } from "../apigen/mod.ts";
 
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
@@ -35,11 +32,14 @@ type Attachment = {
 
 type Mode = "reference" | "frames";
 type Resolution = {
-    provider: "seedance" | "fal" | "minimax";
-    value: "480p" | "720p" | "1080p" | "768P" | "2K";
+    provider: "seedance";
+    value: "480p" | "720p" | "1080p";
+} | {
+    provider: "fal" | "minimax";
+    value: "480p" | "768p";
 } | {
     provider: "autodl";
-    value: typeof AutoDL_Resolution_Options[number];
+    value: "480p" | "768p" | "1080p";
 };
 type DurationMode = "seconds" | "smart";
 type Popover = "model" | "mode" | "settings" | null;
@@ -150,29 +150,28 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
 };
 
 const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
-    "MiniMax-H3": [{ provider: "minimax", value: "768P" }, {
+    "MiniMax-H3": [{ provider: "minimax", value: "768p" }, {
         provider: "minimax",
-        value: "2K",
+        value: "480p",
     }],
     "MiniMax-H3-Max": [{ provider: "minimax", value: "480p" }, {
         provider: "minimax",
-        value: "768P",
+        value: "768p",
     }],
 };
 
 const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
     "fal/minimax/h3/reference-to-video": [
         { provider: "fal", value: "480p" },
-        { provider: "fal", value: "768P" },
+        { provider: "fal", value: "768p" },
     ],
 };
 
-const AUTODL_RESOLUTIONS: Resolution[] = AutoDL_Resolution_Options.map((
-    value,
-) => ({
-    provider: "autodl",
-    value,
-}));
+const AUTODL_RESOLUTIONS: Resolution[] = [
+    { provider: "autodl", value: "480p" },
+    { provider: "autodl", value: "768p" },
+    { provider: "autodl", value: "1080p" },
+];
 
 /** Display label for an attachment kind, in the given language. */
 function kindLabel(kind: AttachmentKind, lang: Language): string {
@@ -513,7 +512,7 @@ export function Composer(props: {
             ratio.value = input.aspect_ratio;
             resolution.value = {
                 provider: "fal",
-                value: input.resolution === "480P" ? "480p" : input.resolution,
+                value: input.resolution === "480P" ? "480p" : "768p",
             };
             durationMode.value = "seconds";
             duration.value = input.duration;
@@ -549,7 +548,7 @@ export function Composer(props: {
             ratio.value = req.ratio ?? "adaptive";
             resolution.value = {
                 provider: "minimax",
-                value: req.resolution === "480P" ? "480p" : req.resolution,
+                value: req.resolution === "480P" ? "480p" : "768p",
             };
             durationMode.value = "seconds";
             duration.value = req.duration;
@@ -727,11 +726,13 @@ export function Composer(props: {
                 option.value === current.value
             ) ??
                 allowed.find((option) =>
-                    option.value === "720p" || option.value === "768P" ||
-                    option.value === "768p横"
+                    option.value === "720p" || option.value === "768p"
                 ) ?? allowed[0];
         }
         if (isAutoDLModel(model.value)) {
+            if (!["16:9", "9:16", "1:1"].includes(ratio.value)) {
+                ratio.value = "16:9";
+            }
             mode.value = "reference";
             durationMode.value = "seconds";
             duration.value = Math.max(1, Math.min(10, duration.value));
@@ -1331,11 +1332,9 @@ export function Composer(props: {
                                 onClick={() => togglePopover("settings")}
                                 class="flex items-center h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 divide-x divide-gray-200"
                             >
-                                {!isAutoDLModel(model.value) && (
-                                    <span class="px-2.5 flex items-center gap-1.5">
-                                        {ratio.value}
-                                    </span>
-                                )}
+                                <span class="px-2.5 flex items-center gap-1.5">
+                                    {ratio.value}
+                                </span>
                                 <span class="px-2.5">
                                     {resolution.value.value}
                                 </span>
@@ -1346,57 +1345,50 @@ export function Composer(props: {
 
                             {popover.value === "settings" && (
                                 <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-20 w-[min(560px,calc(100vw-2rem))] max-h-[80vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-100 p-5">
-                                    {!isAutoDLModel(model.value) && (
-                                        <>
-                                            <div class="text-sm text-gray-500 mb-2">
-                                                {get_text(
-                                                    "aspect_ratio",
-                                                    language.value,
-                                                )}
-                                            </div>
-                                            <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
-                                                {RATIOS.filter((r) =>
-                                                    !isAutoDLModel(
-                                                        model.value,
-                                                    ) ||
-                                                    ["16:9", "9:16", "1:1"]
-                                                        .includes(
-                                                            r.value,
-                                                        )
-                                                ).map((r) => (
-                                                    <button
-                                                        key={r.value}
-                                                        type="button"
-                                                        onClick={() =>
-                                                            ratio.value =
-                                                                r.value}
-                                                        class={`flex flex-col items-center justify-end gap-2 h-16 rounded-lg border text-xs pb-2 ${
-                                                            ratio.value ===
-                                                                    r.value
-                                                                ? "border-gray-800 text-gray-900 bg-white"
-                                                                : "border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100"
-                                                        }`}
-                                                    >
-                                                        <span
-                                                            class={`block rounded-[3px] border-[1.5px] border-current ${
-                                                                r.value ===
-                                                                        "adaptive"
-                                                                    ? "border-dashed"
-                                                                    : ""
-                                                            }`}
-                                                            style={{
-                                                                width:
-                                                                    `${r.w}px`,
-                                                                height:
-                                                                    `${r.h}px`,
-                                                            }}
-                                                        />
-                                                        {r.value}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
+                                    <div class="text-sm text-gray-500 mb-2">
+                                        {get_text(
+                                            "aspect_ratio",
+                                            language.value,
+                                        )}
+                                    </div>
+                                    <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-5">
+                                        {RATIOS.filter((r) =>
+                                            !isAutoDLModel(
+                                                model.value,
+                                            ) ||
+                                            ["16:9", "9:16", "1:1"]
+                                                .includes(
+                                                    r.value,
+                                                )
+                                        ).map((r) => (
+                                            <button
+                                                key={r.value}
+                                                type="button"
+                                                onClick={() =>
+                                                    ratio.value = r.value}
+                                                class={`flex flex-col items-center justify-end gap-2 h-16 rounded-lg border text-xs pb-2 ${
+                                                    ratio.value ===
+                                                            r.value
+                                                        ? "border-gray-800 text-gray-900 bg-white"
+                                                        : "border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100"
+                                                }`}
+                                            >
+                                                <span
+                                                    class={`block rounded-[3px] border-[1.5px] border-current ${
+                                                        r.value ===
+                                                                "adaptive"
+                                                            ? "border-dashed"
+                                                            : ""
+                                                    }`}
+                                                    style={{
+                                                        width: `${r.w}px`,
+                                                        height: `${r.h}px`,
+                                                    }}
+                                                />
+                                                {r.value}
+                                            </button>
+                                        ))}
+                                    </div>
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text(
                                             "resolution",
@@ -1550,6 +1542,7 @@ export function Composer(props: {
                                 genError.value = null;
                                 const selected = model.value;
                                 const selectedResolution = resolution.value;
+                                const selectedRatio = ratio.value;
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
@@ -1567,13 +1560,18 @@ export function Composer(props: {
                                     if (
                                         selectedResolution.provider !== "autodl"
                                     ) return;
+                                    const orientation = selectedRatio === "9:16"
+                                        ? "竖"
+                                        : selectedRatio === "1:1"
+                                        ? "(1:1)"
+                                        : "横";
                                     const request: AutoDLGenerateInput = {
                                         model: selected,
                                         input: {
                                             prompt: prompt.value.trim(),
                                             duration: duration.value,
                                             resolution:
-                                                selectedResolution.value,
+                                                `${selectedResolution.value}${orientation}`,
                                             ref_image_0:
                                                 atts[0].dataUrlOrFilePath,
                                             ...Object.fromEntries(
@@ -1603,7 +1601,10 @@ export function Composer(props: {
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
-                                    resolution: selectedResolution.value,
+                                    resolution:
+                                        selectedResolution.value === "768p"
+                                            ? "768P"
+                                            : selectedResolution.value,
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,
