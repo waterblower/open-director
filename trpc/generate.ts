@@ -30,6 +30,7 @@ import {
     generate,
     GenerateInput,
     getTask,
+    isAutoDLModel,
     isFalModel,
     isMiniMaxModel,
     isSeedanceModel,
@@ -311,6 +312,9 @@ export const tRPC_generate = publicProcedure
                     content,
                 ),
             };
+        } else if (isAutoDLModel(model)) {
+            console.log("[trpc] auto-dl model:", model);
+            throw "not implemented";
         } else {
             throw new Error(`Unsupported model: ${model}`);
         }

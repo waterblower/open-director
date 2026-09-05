@@ -13,7 +13,7 @@ import type {
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
 import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
-import type { GenerateInput } from "../apigen/mod.ts";
+import { type GenerateInput, isAutoDLModel } from "../apigen/mod.ts";
 
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
@@ -104,10 +104,6 @@ const AUTODL_MODEL_OPTIONS = [{
     label: "AutoDL · MiniMax H3 LightX2V",
     shortLabel: "AutoDL H3",
 }] as const;
-
-function isAutoDLModel(value: unknown): value is AutoDLModel {
-    return AUTODL_MODEL_OPTIONS.some((model) => model.value === value);
-}
 
 const GENERATION_MODELS = [
     ...SEEDANCE_MODELS,

@@ -21,6 +21,7 @@ import {
 } from "@/apigen/fal.ts";
 import { safeFetch } from "@/apigen/fetch.ts";
 import * as autoDL from "@/apigen/autodl.ts";
+import { AUTODL_Models } from "@/apigen/autodl.ts";
 
 export const Providers = ["seedance", "minimax", "fal", "autodl"] as const;
 
@@ -192,6 +193,12 @@ export function isFalModel(
     model: unknown,
 ): model is typeof FAL_REFERENCE_TO_VIDEO {
     return model === FAL_REFERENCE_TO_VIDEO;
+}
+
+export function isAutoDLModel(
+    value: string,
+): value is typeof AUTODL_Models[number] {
+    return AUTODL_Models.some((model) => model == value);
 }
 
 export function isFalInput(
