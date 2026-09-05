@@ -20,6 +20,7 @@ import {
     reference_to_video,
 } from "@/apigen/fal.ts";
 import { safeFetch } from "@/apigen/fetch.ts";
+import { AutoDL_GenerateInput, AUTODL_Models } from "@/apigen/autodl.ts";
 
 /**
  * fal requests don't follow the OpenAI-ish `content` shape the other providers
@@ -47,10 +48,13 @@ export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export async function generate(
-    input: GenerateInput,
+    input: GenerateInput | AutoDL_GenerateInput,
     apiKey: string,
 ) {
-    if (isFalInput(input)) {
+    if (input.model == "minimax_h3_lightx2v_v5") {
+        console.log(input)
+        throw new Error("minimax_h3_lightx2v_v5 is not supported");
+    } else if (isFalInput(input)) {
         const result = await reference_to_video(input.input, apiKey);
         console.log("[apigen] fal task created:", result);
         if (result instanceof Error) {
