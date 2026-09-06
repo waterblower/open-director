@@ -40,6 +40,7 @@ export const GenerateInputSchema = z.union([
     MiniMaxCreateVideoTaskRequestSchema,
     SeedanceCreateTaskRequestSchema,
     FalGenerateInputSchema,
+    autoDL.AutoDL_GenerateInput_Schema,
 ]);
 export const GenerationTaskSchema = z.union([
     MiniMaxVideoTaskSchema,
@@ -54,29 +55,30 @@ export async function generate(
     input: GenerateInput | autoDL.generate_Input,
     apiKey: string,
 ) {
-    if (input.model == "autodl/minimax_h3_lightx2v_v5") {
+    if (isAutoDLModel(input.model)) {
         const result = await autoDL.generate(input, apiKey);
         if (result instanceof Error) {
             return result;
         }
         return {
-            provider: "autodl",
+            provider: "autodl" as const,
             model: input.model,
-            res: result,
+            res: { task_id: result.data!.task_id },
         };
-    } else if (isFalInput(input)) {
+    }
+    else if (isFalInput(input)) {
         const result = await reference_to_video(input.input, apiKey);
         console.log("[apigen] fal task created:", result);
         if (result instanceof Error) {
             return result;
         }
-
         return {
             provider: "fal" as const,
             model: input.model,
             res: result,
         };
-    } else if (isMiniMaxInput(input)) {
+    }
+    else if (isMiniMaxInput(input)) {
         const client = new MiniMaxClient({
             apiKey,
         });
@@ -89,7 +91,8 @@ export async function generate(
             model: input.model,
             res: result,
         };
-    } else {
+    }
+    else if (isSeedanceModel(input.model)) {
         const res = await new SeedanceClient({ apiKey }).generate(input);
         if (res instanceof Error) {
             return res;
@@ -99,6 +102,9 @@ export async function generate(
             model: input.model,
             res,
         };
+    }
+    else {
+        throw new Error("Unsupported model: " + input.model);
     }
 }
 
@@ -116,34 +122,81 @@ type MiniMaxTask = z.infer<typeof MiniMaxVideoTaskSchema>;
  * in `task_json`.
  */
 export type GetTaskResult =
-    | { model: FalModel; task: SeedanceTask }
-    | { model: SeedanceModel; task: SeedanceTask }
-    | { model: MiniMaxModel; task: MiniMaxTask };
+    | {
+        provider: "autodl";
+        model: autoDL.generate_Input["model"];
+        task: SeedanceTask;
+    }
+    | {
+        provider: "fal";
+        model: FalModel;
+        task: SeedanceTask;
+    }
+    | {
+        provider: "seedance";
+        model: SeedanceModel;
+        task: SeedanceTask;
+    }
+    | {
+        provider: "minimax";
+        model: MiniMaxModel;
+        task: MiniMaxTask;
+    };
 
 export async function getTask(
     model: string,
     taskId: string,
     apiKey: string,
 ): Promise<GetTaskResult | Error> {
-    if (isFalModel(model)) {
+    if (isAutoDLModel(model)) {
+        const result = await autoDL.get(taskId, apiKey);
+        if (result instanceof Error) {
+            return result;
+        }
+        return {
+            provider: "autodl",
+            model,
+            task: autoDLResultToTask(model, result.data!, result.msg),
+        };
+    }
+    else if (isFalModel(model)) {
         const result = await get_result(taskId, apiKey);
         if (result instanceof Error) {
             return result;
         }
-        return { model, task: falResultToTask(model, taskId, result) };
-    } else if (isMiniMaxModel(model)) {
+        return {
+            provider: "fal",
+            model,
+            task: falResultToTask(model, taskId, result),
+        };
+    }
+    else if (isMiniMaxModel(model)) {
         const client = new MiniMaxClient({
             apiKey,
         });
         const response = await client.getVideoTask(taskId);
-        return response instanceof Error
-            ? response
-            : { model, task: response.task };
-    } else if (isSeedanceModel(model)) {
+        if (response instanceof Error) {
+            return response;
+        }
+        return {
+            provider: "minimax",
+            model,
+            task: response.task,
+        };
+    }
+    else if (isSeedanceModel(model)) {
         const task = await new SeedanceClient({ apiKey }).getTask(taskId);
-        return task instanceof Error ? task : { model, task };
-    } else {
-        return new Error(`Unsupported model: ${model}`);
+        if (task instanceof Error) {
+            return task;
+        }
+        return {
+            provider: "seedance",
+            model,
+            task,
+        };
+    }
+    else {
+        throw new Error(`Unsupported model: ${model}`);
     }
 }
 
@@ -155,26 +208,41 @@ export async function getVideoContent(
 ): Promise<Response | Error> {
     if (isMiniMaxModel(model)) {
         const parsed = MiniMaxVideoTaskSchema.safeParse(task);
-        if (!parsed.success) return parsed.error;
+        if (!parsed.success) {
+            return parsed.error;
+        }
         const url = parsed.data.content?.url;
-        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        if (!url) {
+            return new Error(`Task ${taskId} has no video URL`);
+        }
         return await safeFetch(url);
-    } else if (isFalModel(model)) {
+    }
+    else if (isFalModel(model) || isAutoDLModel(model)) {
         // fal queue results are adapted into the Seedance task shape by
         // `falResultToTask`, so the URL sits at the same place. fal serves the
         // file from its public CDN, so no `apiKey` is needed to download it.
         const parsed = SeedanceTaskSchema.safeParse(task);
-        if (!parsed.success) return parsed.error;
+        if (!parsed.success) {
+            return parsed.error;
+        }
         const url = parsed.data.content?.video_url;
-        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        if (!url) {
+            return new Error(`Task ${taskId} has no video URL`);
+        }
         return await safeFetch(url);
-    } else if (isSeedanceModel(model)) {
+    }
+    else if (isSeedanceModel(model)) {
         const parsed = SeedanceTaskSchema.safeParse(task);
-        if (!parsed.success) return parsed.error;
+        if (!parsed.success) {
+            return parsed.error;
+        }
         const url = parsed.data.content?.video_url;
-        if (!url) return new Error(`Task ${taskId} has no video URL`);
+        if (!url) {
+            return new Error(`Task ${taskId} has no video URL`);
+        }
         return await safeFetch(url);
-    } else {
+    }
+    else {
         return new Error(`Unknown model: ${model}`);
     }
 }
@@ -229,7 +297,8 @@ function falResultToTask(
             status: "succeeded",
             content: { video_url: result.video.url },
         };
-    } else if (result.status === 400) {
+    }
+    else if (result.status === 400) {
         if (result.detail === "Request is still in progress") {
             return { ...base, status: "running" };
         }
@@ -238,7 +307,8 @@ function falResultToTask(
             status: "failed",
             error: { code: "400", message: result.detail },
         };
-    } else {
+    }
+    else {
         return {
             ...base,
             status: "failed",
@@ -277,7 +347,9 @@ export function taskIdFromCreateResponse(
 
 export function taskFailureReason(task: GenerationTask): string | undefined {
     const error = task.error;
-    if (!error || typeof error !== "object") return undefined;
+    if (!error || typeof error !== "object") {
+        return undefined;
+    }
     const code = "code" in error && typeof error.code === "string"
         ? error.code
         : undefined;
@@ -285,4 +357,58 @@ export function taskFailureReason(task: GenerationTask): string | undefined {
         ? error.message
         : undefined;
     return code && message ? `${code}: ${message}` : message ?? code;
+}
+
+/** Normalize AutoDL responses for the shared polling and download pipeline. */
+export function autoDLResultToTask(
+    model: string,
+    data: NonNullable<z.infer<typeof autoDL.get_Output_Schema>["data"]>,
+    message: string,
+): SeedanceTask {
+    const timestamp = Date.parse(
+        data.created_at.includes("T")
+            ? data.created_at
+            : data.created_at.replace(" ", "T") + "+08:00",
+    );
+    const base = {
+        id: data.task_id,
+        model,
+        created_at: Number.isFinite(timestamp)
+            ? Math.floor(timestamp / 1000)
+            : Math.floor(Date.now() / 1000),
+    };
+    if (data.status === "QUEUED") {
+        return { ...base, status: "queued" };
+    }
+    if (data.status === "RUNNING") {
+        return { ...base, status: "running" };
+    }
+    if (data.status === "SUCCESS") {
+        const videos = data.results?.filter((item) => item.type === "video");
+        const video = videos?.find((item) => item.alias === "final_video") ??
+            videos?.[0];
+        if (video?.url) {
+            return {
+                ...base,
+                status: "succeeded",
+                content: { video_url: video.url },
+            };
+        }
+        return {
+            ...base,
+            status: "failed",
+            error: {
+                code: "MISSING_VIDEO",
+                message: "AutoDL completed without a video URL",
+            },
+        };
+    }
+    return {
+        ...base,
+        status: "failed",
+        error: {
+            code: data.status,
+            message: data.message || message || "AutoDL generation failed",
+        },
+    };
 }
