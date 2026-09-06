@@ -11,7 +11,11 @@
         "loc": "deno run -R scripts/loc.ts",
         "desktop": "deno desktop -A --exclude-unused-npm --preload ./desktop.ts ."
     },
-    "fmt": { "indentWidth": 4 },
+    "fmt": {
+        "indentWidth": 4,
+        "nextControlFlowPosition": "nextLine",
+        "singleBodyPosition": "nextLine"
+    },
     "compile": {
         "exclude": [
             ".claude/",
