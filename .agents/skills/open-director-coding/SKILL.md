@@ -66,3 +66,9 @@ if (result instanceof Error) {
     return result;
 }
 ```
+
+## Rule 4: Prefer explicit data branching over function injection
+
+When all data shapes are known, prefer explicit pattern matching on data and branching on discriminated unions, such as provider, model, or content type. Keep each variant's behavior visible in its branch instead of injecting callbacks or OO-style strategies to choose that behavior.
+
+Use ordinary helpers with concrete data arguments for shared operations. Do not add callback-based abstractions for a closed set of known variants. This preference does not prohibit callbacks required by framework APIs or ordinary collection operations.
