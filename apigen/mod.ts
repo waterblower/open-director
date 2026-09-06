@@ -55,15 +55,16 @@ export async function generate(
     input: GenerateInput,
     apiKey: string,
 ) {
-    if (input.model == "autodl/minimax_h3_lightx2v_v5") {
+    if (isAutoDLInput(input)) {
         const result = await autoDL.generate(input, apiKey);
         if (result instanceof Error) {
             return result;
         }
+        console.log(result);
         return {
             provider: "autodl" as const,
             model: input.model,
-            res: { task_id: result.data!.task_id },
+            res: { task_id: result.data.task_id },
         };
     }
     else if (isFalInput(input)) {
@@ -266,7 +267,13 @@ export function isFalModel(
 export function isAutoDLModel(
     value: string,
 ) {
-    return AUTODL_Models[0] == value;
+    return AUTODL_Models.some((model) => model === value);
+}
+
+export function isAutoDLInput(
+    input: GenerateInput,
+): input is autoDL.generate_Input {
+    return isAutoDLModel(input.model);
 }
 
 export function isFalInput(

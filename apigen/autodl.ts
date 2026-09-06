@@ -3,6 +3,7 @@ import { parseJSON, safeFetch } from "@/apigen/fetch.ts";
 
 export const AUTODL_Models = [
     "autodl/minimax_h3_lightx2v_v5",
+    "autodl/minimax_h3_image_audio_to_video_v2_15s",
 ] as const;
 
 export const AutoDL_Resolution_Options = [
@@ -19,31 +20,46 @@ export const AutoDL_Resolution_Options = [
 
 export const AutoDL_Task_Status = ["QUEUED", "RUNNING", "SUCCESS"] as const;
 
-export const AutoDL_GenerateInput_Schema = z.object({
-    model: z.enum(AUTODL_Models),
-    input: z.object({
-        "seed": z.number().min(1).optional(),
-        "prompt": z.string(),
-        "duration": z.number().min(1).max(10),
-        "resolution": z.enum(AutoDL_Resolution_Options),
-        "ref_image_0": z.string(),
-        "ref_image_1": z.string().optional(),
-        "ref_image_2": z.string().optional(),
-        "ref_image_3": z.string().optional(),
-        "ref_image_4": z.string().optional(),
-        "ref_image_5": z.string().optional(),
-        "ref_image_6": z.string().optional(),
-        "ref_image_7": z.string().optional(),
-        "ref_image_8": z.string().optional(),
-    }),
+export const AutoDL_WorkflowInput_Schema = z.object({
+    "seed": z.number().min(1).optional(),
+    "prompt": z.string().nonempty(),
+    "duration": z.number().min(1).max(10),
+    "resolution": z.enum(AutoDL_Resolution_Options),
+    "ref_image_0": z.string(),
+    "ref_image_1": z.string().optional(),
+    "ref_image_2": z.string().optional(),
+    "ref_image_3": z.string().optional(),
+    "ref_image_4": z.string().optional(),
+    "ref_image_5": z.string().optional(),
+    "ref_image_6": z.string().optional(),
+    "ref_image_7": z.string().optional(),
+    "ref_image_8": z.string().optional(),
 });
+
+export const AutoDL_GenerateInput_Schema = z.discriminatedUnion("model", [
+    z.object({
+        model: z.literal("autodl/minimax_h3_lightx2v_v5"),
+        input: AutoDL_WorkflowInput_Schema,
+    }),
+    z.object({
+        model: z.literal("autodl/minimax_h3_image_audio_to_video_v2_15s"),
+        input: AutoDL_WorkflowInput_Schema.extend({
+            duration: z.number().min(1).max(15),
+        }),
+    }),
+]);
 export type generate_Input = z.infer<typeof AutoDL_GenerateInput_Schema>;
 
-export const generate_Output_Schema = z.object({
-    code: z.string(),
-    data: z.union([
-        z.null(),
-        z.object({
+export const generate_Output_Schema = z.union([
+    z.object({
+        code: z.literal("RequestParameterIsWrong"),
+        data: z.null(),
+        msg: z.string(),
+        request_id: z.string(),
+    }),
+    z.object({
+        code: z.literal("Success"),
+        data: z.object({
             status: z.enum(AutoDL_Task_Status),
             task_id: z.string(),
             workflow: z.string(),
@@ -51,10 +67,10 @@ export const generate_Output_Schema = z.object({
             message: z.string(),
             created_at: z.iso.datetime({ offset: true }),
         }),
-    ]),
-    msg: z.string(),
-    request_id: z.string(),
-});
+        msg: z.string(),
+        request_id: z.string(),
+    }),
+]);
 export type generate_Output = z.infer<typeof generate_Output_Schema>;
 
 export async function generate(
@@ -64,8 +80,9 @@ export async function generate(
     if (!apikey) {
         return new Error("apikey is required");
     }
-    const url =
-        "https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h3_lightx2v_v5";
+    const url = `https://autodl.art/api/v1/comfyui/comfyui_workflow/${
+        input.model.slice("autodl/".length)
+    }`;
     const res = await safeFetch(
         url,
         {
@@ -90,12 +107,16 @@ export async function generate(
         return json;
     }
 
-    console.log("json", json);
     const output = generate_Output_Schema.safeParse(json, {
         reportInput: true,
     });
     if (output.error) {
         return output.error;
+    }
+    if (output.data.code == "RequestParameterIsWrong") {
+        return new Error(output.data.msg, {
+            cause: output.data,
+        });
     }
     return output.data;
 }
@@ -179,7 +200,6 @@ export async function get(task_id: string, apikey: string) {
         return json;
     }
 
-    console.log("json", json);
     const output = get_Output_Schema.safeParse(json, {
         reportInput: true,
     });

@@ -16,6 +16,7 @@ import {
     type GenerateInput,
     GenerateInputSchema,
     getTask,
+    isAutoDLInput,
     localTaskStatus,
     taskFailureReason,
     taskIdFromCreateResponse,
@@ -227,10 +228,7 @@ async function prepareRequestMedia(input: GenerateInput, projectRoot: string) {
             storedRequest.input.reference_image_urls[index] = media.stored;
         }
     }
-    else if (
-        request.model === "autodl/minimax_h3_lightx2v_v5" &&
-        storedRequest.model === "autodl/minimax_h3_lightx2v_v5"
-    ) {
+    else if (isAutoDLInput(request) && isAutoDLInput(storedRequest)) {
         const keys = [
             "ref_image_0",
             "ref_image_1",

@@ -17,6 +17,7 @@ import type {
 import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
 import {
     type GenerateInput,
+    isAutoDLInput,
     isAutoDLModel,
     isMiniMaxInput,
 } from "../apigen/mod.ts";
@@ -394,7 +395,7 @@ export function Composer(props: {
     const applyReuse = async (req: GenerateInput) => {
         let text: string;
         let media: { kind: AttachmentKind; url: string }[];
-        if (req.model === "autodl/minimax_h3_lightx2v_v5") {
+        if (isAutoDLInput(req)) {
             text = req.input.prompt;
 
             media = Object.entries(req.input).filter(([key, value]) =>
@@ -464,7 +465,7 @@ export function Composer(props: {
         }
         model.value = req.model;
         setAttachments([]);
-        if (req.model === "autodl/minimax_h3_lightx2v_v5") {
+        if (isAutoDLInput(req)) {
             const { prompt: _prompt, ...input } = req.input;
             provider_input_autodl.value = input;
         }
@@ -1264,7 +1265,8 @@ export function Composer(props: {
                                                             "MiniMax-H3-Max"
                                                     ? 5
                                                     : 4}
-                                                max={isAutoDLModel(model.value)
+                                                max={model.value ===
+                                                        "autodl/minimax_h3_lightx2v_v5"
                                                     ? 10
                                                     : 15}
                                                 step={1}
@@ -1666,8 +1668,12 @@ type FalModel = "fal/minimax/h3/reference-to-video";
 type AutoDLModel = AutoDLGenerateInput["model"];
 const AUTODL_MODEL_OPTIONS = [{
     value: "autodl/minimax_h3_lightx2v_v5",
-    label: "AutoDL · MiniMax H3 LightX2V",
-    shortLabel: "AutoDL H3",
+    label: "AutoDL · MiniMax H3 10s",
+    shortLabel: "AutoDL H3 10s",
+}, {
+    value: "autodl/minimax_h3_image_audio_to_video_v2_15s",
+    label: "AutoDL · MiniMax H3 15s",
+    shortLabel: "AutoDL H3 15s",
 }] as const;
 
 const GENERATION_MODELS = [

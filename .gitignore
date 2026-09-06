@@ -19,4 +19,6 @@ db.script.ts
 *.jpeg
 *.mp4
 /apigen/data
-/apigen/tests
+apigen/tests/fal.test.ts
+apigen/tests/minimax.test.ts
+/apigen/tests/data
