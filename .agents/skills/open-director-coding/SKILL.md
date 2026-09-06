@@ -72,3 +72,9 @@ if (result instanceof Error) {
 When all data shapes are known, prefer explicit pattern matching on data and branching on discriminated unions, such as provider, model, or content type. Keep each variant's behavior visible in its branch instead of injecting callbacks or OO-style strategies to choose that behavior.
 
 Use ordinary helpers with concrete data arguments for shared operations. Do not add callback-based abstractions for a closed set of known variants. This preference does not prohibit callbacks required by framework APIs or ordinary collection operations.
+
+## Rule 5: Public interface first, private helpers last
+
+Always put exported public code at the top of the file, immediately after imports. Put file-local, non-exported helper functions, types, and constants below the public code. A reader should encounter the module's public interface before its implementation helpers.
+
+Preserve runtime initialization dependencies when reordering declarations; do not introduce access to an uninitialized binding.

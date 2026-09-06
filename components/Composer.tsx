@@ -29,374 +29,6 @@ import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
 import { updateGenerations } from "@/islands/Application.tsx";
 
-type AttachmentKind = "image" | "video" | "audio";
-
-type Resolution = {
-    provider: "seedance";
-    value: "480p" | "720p" | "1080p";
-} | {
-    provider: "fal" | "minimax";
-    value: "480p" | "768p";
-} | {
-    provider: "autodl";
-    value: "480p" | "768p" | "1080p";
-};
-type Popover = "model" | "mode" | "settings" | null;
-
-const SEEDANCE_MODELS = [
-    {
-        value: "doubao-seedance-2-0-260128",
-        label: "Seedance 2.0",
-        shortLabel: "2.0",
-    },
-    {
-        value: "doubao-seedance-2-0-fast-260128",
-        label: "Seedance 2.0 Fast",
-        shortLabel: "2.0 Fast",
-    },
-    {
-        value: "doubao-seedance-2-0-mini-260615",
-        label: "Seedance 2.0 Mini",
-        shortLabel: "2.0 Mini",
-    },
-] as const satisfies readonly {
-    value: SeedanceModel;
-    label: string;
-    shortLabel: string;
-}[];
-
-const MINIMAX_MODEL_OPTIONS = [
-    {
-        value: "MiniMax-H3",
-        label: "MiniMax H3",
-        shortLabel: "H3",
-    },
-    {
-        value: "MiniMax-H3-Max",
-        label: "MiniMax H3 Max",
-        shortLabel: "H3 Max",
-    },
-] as const satisfies readonly {
-    value: MiniMaxVideoModel;
-    label: string;
-    shortLabel: string;
-}[];
-
-/** Models routed through fal.ai's queue API (see apigen/fal.ts). */
-const FAL_MODEL_OPTIONS = [
-    {
-        value: "fal/minimax/h3/reference-to-video",
-        label: "Fal · MiniMax H3 Reference",
-        shortLabel: "Fal H3",
-    },
-] as const satisfies readonly {
-    value: FalModel;
-    label: string;
-    shortLabel: string;
-}[];
-
-type FalModel = "fal/minimax/h3/reference-to-video";
-
-type AutoDLModel = AutoDLGenerateInput["model"];
-const AUTODL_MODEL_OPTIONS = [{
-    value: "autodl/minimax_h3_lightx2v_v5",
-    label: "AutoDL · MiniMax H3 LightX2V",
-    shortLabel: "AutoDL H3",
-}] as const;
-
-const GENERATION_MODELS = [
-    ...SEEDANCE_MODELS,
-    ...MINIMAX_MODEL_OPTIONS,
-    ...FAL_MODEL_OPTIONS,
-    ...AUTODL_MODEL_OPTIONS,
-];
-type GenerationModel =
-    | SeedanceModel
-    | MiniMaxVideoModel
-    | FalModel
-    | AutoDLModel;
-
-const RATIOS = [
-    { value: "21:9", w: 18, h: 8 },
-    { value: "16:9", w: 16, h: 9 },
-    { value: "4:3", w: 13, h: 10 },
-    { value: "1:1", w: 11, h: 11 },
-    { value: "3:4", w: 10, h: 13 },
-    { value: "9:16", w: 9, h: 16 },
-    { value: "adaptive", w: 13, h: 10 },
-] as const;
-
-// Resolutions each model supports. Seedance 2.0 Fast can't output 1080p (see
-// the `resolution` docs in seedance.ts); the others support all three.
-const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
-    "doubao-seedance-2-0-260128": [
-        { provider: "seedance", value: "480p" },
-        { provider: "seedance", value: "720p" },
-        { provider: "seedance", value: "1080p" },
-    ],
-    "doubao-seedance-2-0-fast-260128": [
-        { provider: "seedance", value: "480p" },
-        { provider: "seedance", value: "720p" },
-    ],
-    "doubao-seedance-2-0-mini-260615": [
-        { provider: "seedance", value: "480p" },
-        { provider: "seedance", value: "720p" },
-    ],
-};
-
-const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
-    "MiniMax-H3": [{ provider: "minimax", value: "768p" }],
-    "MiniMax-H3-Max": [{ provider: "minimax", value: "480p" }, {
-        provider: "minimax",
-        value: "768p",
-    }],
-};
-
-const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
-    "fal/minimax/h3/reference-to-video": [
-        { provider: "fal", value: "480p" },
-        { provider: "fal", value: "768p" },
-    ],
-};
-
-const AUTODL_RESOLUTIONS: Resolution[] = [
-    { provider: "autodl", value: "480p" },
-    { provider: "autodl", value: "768p" },
-    { provider: "autodl", value: "1080p" },
-];
-
-/** Display label for an attachment kind, in the given language. */
-function kindLabel(kind: AttachmentKind, lang: Language): string {
-    return get_text(
-        kind === "image" ? "image" : kind === "video" ? "video" : "audio",
-        lang,
-    );
-}
-
-type Mention = {
-    /** Index of the "@" character in the prompt */
-    index: number;
-    x: number;
-    y: number;
-};
-
-/** localStorage key for the composer's prompt + generation settings. */
-const COMPOSER_STATE_KEY = "composer.state.v1";
-
-/** Persisted composer fields (attachments are intentionally excluded). */
-interface ComposerState {
-    prompt: string;
-    settings: Omit<ComposerSettings, "attachments">;
-}
-
-/** Read persisted composer state (client only); null if absent/unreadable. */
-function loadComposerState():
-    | (Partial<ComposerState> & Record<string, unknown>)
-    | null {
-    try {
-        const raw = localStorage.getItem(COMPOSER_STATE_KEY);
-        return raw
-            ? JSON.parse(raw) as
-                & Partial<ComposerState>
-                & Record<string, unknown>
-            : null;
-    }
-    catch {
-        return null;
-    }
-}
-
-function saveComposerState(state: ComposerState): void {
-    try {
-        localStorage.setItem(COMPOSER_STATE_KEY, JSON.stringify(state));
-    }
-    catch { /* storage unavailable or full — non-fatal */ }
-}
-
-function kindOf(file: File): AttachmentKind {
-    if (file.type.startsWith("video/")) {
-        return "video";
-    }
-    if (file.type.startsWith("audio/")) {
-        return "audio";
-    }
-    return "image";
-}
-
-function isSeedanceModel(value: unknown): value is SeedanceModel {
-    return SEEDANCE_MODELS.some((model) => model.value === value);
-}
-
-function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
-    return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
-}
-
-function isFalModel(value: unknown): value is FalModel {
-    return FAL_MODEL_OPTIONS.some((model) => model.value === value);
-}
-
-function getModelOption(value: GenerationModel) {
-    return GENERATION_MODELS.find((model) => model.value === value) ??
-        GENERATION_MODELS[0];
-}
-
-// The API can't fetch blob: object URLs, so inline the bytes as a data URL
-async function toDataUrl(objectUrl: string): Promise<string> {
-    const blob = await (await fetch(objectUrl)).blob();
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-    });
-}
-
-// Mirror-div trick: a textarea exposes no caret geometry, so render the text
-// up to `pos` in an identically-styled hidden div and measure a marker span.
-function caretCoords(
-    ta: HTMLTextAreaElement,
-    pos: number,
-): { x: number; y: number } {
-    const style = getComputedStyle(ta);
-    const div = document.createElement("div");
-    for (
-        const prop of [
-            "font-family",
-            "font-size",
-            "font-weight",
-            "line-height",
-            "letter-spacing",
-            "padding",
-            "border",
-            "box-sizing",
-        ]
-    ) {
-        div.style.setProperty(prop, style.getPropertyValue(prop));
-    }
-    div.style.position = "absolute";
-    div.style.top = "0";
-    div.style.left = "0";
-    div.style.visibility = "hidden";
-    div.style.whiteSpace = "pre-wrap";
-    div.style.overflowWrap = "break-word";
-    div.style.width = `${ta.clientWidth}px`;
-    div.textContent = ta.value.slice(0, pos);
-    const marker = document.createElement("span");
-    marker.textContent = "|";
-    div.appendChild(marker);
-    (ta.parentElement ?? document.body).appendChild(div);
-    const x = marker.offsetLeft;
-    const y = marker.offsetTop - ta.scrollTop;
-    div.remove();
-    return { x, y };
-}
-
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-
-function IconBase(
-    props: { children: ComponentChildren; class?: string },
-) {
-    return (
-        <svg
-            class={props.class ?? "size-4"}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-        >
-            {props.children}
-        </svg>
-    );
-}
-
-function VideoIcon(props: { class?: string }) {
-    return (
-        <IconBase class={props.class}>
-            <rect x="2" y="4" width="20" height="16" rx="3" />
-            <path d="m10 9 5 3-5 3z" />
-        </IconBase>
-    );
-}
-
-function FramesIcon(props: { class?: string }) {
-    return (
-        <IconBase class={props.class}>
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path d="M7 4v16M17 4v16" />
-        </IconBase>
-    );
-}
-
-function SparklesIcon(props: { class?: string }) {
-    return (
-        <IconBase class={props.class}>
-            <path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" />
-            <path d="m5 14 .9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9z" />
-            <path d="m19 14 .7 1.6 1.6.7-1.6.7L19 19l-.7-1.6-1.6-.7 1.6-.7z" />
-        </IconBase>
-    );
-}
-
-function ChevronIcon(props: { up: boolean }) {
-    return (
-        <IconBase class="size-3.5">
-            {props.up ? <path d="m18 15-6-6-6 6" /> : <path d="m6 9 6 6 6-6" />}
-        </IconBase>
-    );
-}
-
-function SpeakerIcon() {
-    return (
-        <IconBase>
-            <path d="M11 5 6 9H2v6h4l5 4z" />
-            <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
-        </IconBase>
-    );
-}
-
-function ResetIcon() {
-    return (
-        <IconBase class="size-3.5">
-            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-            <path d="M3 3v5h5" />
-        </IconBase>
-    );
-}
-
-function ArrowUpIcon() {
-    return (
-        <IconBase class="size-5">
-            <path d="M12 19V5m-7 7 7-7 7 7" />
-        </IconBase>
-    );
-}
-
-function CheckIcon() {
-    return (
-        <IconBase class="size-4 text-indigo-500">
-            <path d="M20 6 9 17l-5-5" />
-        </IconBase>
-    );
-}
-
-function MusicIcon(props: { class?: string }) {
-    return (
-        <IconBase class={props.class}>
-            <circle cx="8" cy="18" r="3" />
-            <path d="M11 18V5l8-2v12" />
-            <circle cx="16" cy="15" r="3" />
-        </IconBase>
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Composer
-// ---------------------------------------------------------------------------
-
 export function Composer(props: {
     genError: Signal<string | null>;
     /** Composer reports its measured height here (used to pad the results grid). */
@@ -1596,5 +1228,369 @@ export function Composer(props: {
                 />
             )}
         </>
+    );
+}
+
+type AttachmentKind = "image" | "video" | "audio";
+
+type Resolution = {
+    provider: "seedance";
+    value: "480p" | "720p" | "1080p";
+} | {
+    provider: "fal" | "minimax";
+    value: "480p" | "768p";
+} | {
+    provider: "autodl";
+    value: "480p" | "768p" | "1080p";
+};
+type Popover = "model" | "mode" | "settings" | null;
+
+const SEEDANCE_MODELS = [
+    {
+        value: "doubao-seedance-2-0-260128",
+        label: "Seedance 2.0",
+        shortLabel: "2.0",
+    },
+    {
+        value: "doubao-seedance-2-0-fast-260128",
+        label: "Seedance 2.0 Fast",
+        shortLabel: "2.0 Fast",
+    },
+    {
+        value: "doubao-seedance-2-0-mini-260615",
+        label: "Seedance 2.0 Mini",
+        shortLabel: "2.0 Mini",
+    },
+] as const satisfies readonly {
+    value: SeedanceModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+const MINIMAX_MODEL_OPTIONS = [
+    {
+        value: "MiniMax-H3",
+        label: "MiniMax H3",
+        shortLabel: "H3",
+    },
+    {
+        value: "MiniMax-H3-Max",
+        label: "MiniMax H3 Max",
+        shortLabel: "H3 Max",
+    },
+] as const satisfies readonly {
+    value: MiniMaxVideoModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+/** Models routed through fal.ai's queue API (see apigen/fal.ts). */
+const FAL_MODEL_OPTIONS = [
+    {
+        value: "fal/minimax/h3/reference-to-video",
+        label: "Fal · MiniMax H3 Reference",
+        shortLabel: "Fal H3",
+    },
+] as const satisfies readonly {
+    value: FalModel;
+    label: string;
+    shortLabel: string;
+}[];
+
+type FalModel = "fal/minimax/h3/reference-to-video";
+
+type AutoDLModel = AutoDLGenerateInput["model"];
+const AUTODL_MODEL_OPTIONS = [{
+    value: "autodl/minimax_h3_lightx2v_v5",
+    label: "AutoDL · MiniMax H3 LightX2V",
+    shortLabel: "AutoDL H3",
+}] as const;
+
+const GENERATION_MODELS = [
+    ...SEEDANCE_MODELS,
+    ...MINIMAX_MODEL_OPTIONS,
+    ...FAL_MODEL_OPTIONS,
+    ...AUTODL_MODEL_OPTIONS,
+];
+type GenerationModel =
+    | SeedanceModel
+    | MiniMaxVideoModel
+    | FalModel
+    | AutoDLModel;
+
+const RATIOS = [
+    { value: "21:9", w: 18, h: 8 },
+    { value: "16:9", w: 16, h: 9 },
+    { value: "4:3", w: 13, h: 10 },
+    { value: "1:1", w: 11, h: 11 },
+    { value: "3:4", w: 10, h: 13 },
+    { value: "9:16", w: 9, h: 16 },
+    { value: "adaptive", w: 13, h: 10 },
+] as const;
+
+// Resolutions each model supports. Seedance 2.0 Fast can't output 1080p (see
+// the `resolution` docs in seedance.ts); the others support all three.
+const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
+    "doubao-seedance-2-0-260128": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+        { provider: "seedance", value: "1080p" },
+    ],
+    "doubao-seedance-2-0-fast-260128": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+    ],
+    "doubao-seedance-2-0-mini-260615": [
+        { provider: "seedance", value: "480p" },
+        { provider: "seedance", value: "720p" },
+    ],
+};
+
+const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
+    "MiniMax-H3": [{ provider: "minimax", value: "768p" }],
+    "MiniMax-H3-Max": [{ provider: "minimax", value: "480p" }, {
+        provider: "minimax",
+        value: "768p",
+    }],
+};
+
+const FAL_MODEL_RESOLUTIONS: Record<FalModel, Resolution[]> = {
+    "fal/minimax/h3/reference-to-video": [
+        { provider: "fal", value: "480p" },
+        { provider: "fal", value: "768p" },
+    ],
+};
+
+const AUTODL_RESOLUTIONS: Resolution[] = [
+    { provider: "autodl", value: "480p" },
+    { provider: "autodl", value: "768p" },
+    { provider: "autodl", value: "1080p" },
+];
+
+/** Display label for an attachment kind, in the given language. */
+function kindLabel(kind: AttachmentKind, lang: Language): string {
+    return get_text(
+        kind === "image" ? "image" : kind === "video" ? "video" : "audio",
+        lang,
+    );
+}
+
+type Mention = {
+    /** Index of the "@" character in the prompt */
+    index: number;
+    x: number;
+    y: number;
+};
+
+/** localStorage key for the composer's prompt + generation settings. */
+const COMPOSER_STATE_KEY = "composer.state.v1";
+
+/** Persisted composer fields (attachments are intentionally excluded). */
+interface ComposerState {
+    prompt: string;
+    settings: Omit<ComposerSettings, "attachments">;
+}
+
+/** Read persisted composer state (client only); null if absent/unreadable. */
+function loadComposerState():
+    | (Partial<ComposerState> & Record<string, unknown>)
+    | null {
+    try {
+        const raw = localStorage.getItem(COMPOSER_STATE_KEY);
+        return raw
+            ? JSON.parse(raw) as
+                & Partial<ComposerState>
+                & Record<string, unknown>
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+
+function saveComposerState(state: ComposerState): void {
+    try {
+        localStorage.setItem(COMPOSER_STATE_KEY, JSON.stringify(state));
+    }
+    catch { /* storage unavailable or full — non-fatal */ }
+}
+
+function kindOf(file: File): AttachmentKind {
+    if (file.type.startsWith("video/")) {
+        return "video";
+    }
+    if (file.type.startsWith("audio/")) {
+        return "audio";
+    }
+    return "image";
+}
+
+function isSeedanceModel(value: unknown): value is SeedanceModel {
+    return SEEDANCE_MODELS.some((model) => model.value === value);
+}
+
+function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
+    return value === "MiniMax-H3" || value === "MiniMax-H3-Max";
+}
+
+function isFalModel(value: unknown): value is FalModel {
+    return FAL_MODEL_OPTIONS.some((model) => model.value === value);
+}
+
+function getModelOption(value: GenerationModel) {
+    return GENERATION_MODELS.find((model) => model.value === value) ??
+        GENERATION_MODELS[0];
+}
+
+// The API can't fetch blob: object URLs, so inline the bytes as a data URL
+async function toDataUrl(objectUrl: string): Promise<string> {
+    const blob = await (await fetch(objectUrl)).blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+    });
+}
+
+// Mirror-div trick: a textarea exposes no caret geometry, so render the text
+// up to `pos` in an identically-styled hidden div and measure a marker span.
+function caretCoords(
+    ta: HTMLTextAreaElement,
+    pos: number,
+): { x: number; y: number } {
+    const style = getComputedStyle(ta);
+    const div = document.createElement("div");
+    for (
+        const prop of [
+            "font-family",
+            "font-size",
+            "font-weight",
+            "line-height",
+            "letter-spacing",
+            "padding",
+            "border",
+            "box-sizing",
+        ]
+    ) {
+        div.style.setProperty(prop, style.getPropertyValue(prop));
+    }
+    div.style.position = "absolute";
+    div.style.top = "0";
+    div.style.left = "0";
+    div.style.visibility = "hidden";
+    div.style.whiteSpace = "pre-wrap";
+    div.style.overflowWrap = "break-word";
+    div.style.width = `${ta.clientWidth}px`;
+    div.textContent = ta.value.slice(0, pos);
+    const marker = document.createElement("span");
+    marker.textContent = "|";
+    div.appendChild(marker);
+    (ta.parentElement ?? document.body).appendChild(div);
+    const x = marker.offsetLeft;
+    const y = marker.offsetTop - ta.scrollTop;
+    div.remove();
+    return { x, y };
+}
+
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
+function IconBase(
+    props: { children: ComponentChildren; class?: string },
+) {
+    return (
+        <svg
+            class={props.class ?? "size-4"}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            {props.children}
+        </svg>
+    );
+}
+
+function VideoIcon(props: { class?: string }) {
+    return (
+        <IconBase class={props.class}>
+            <rect x="2" y="4" width="20" height="16" rx="3" />
+            <path d="m10 9 5 3-5 3z" />
+        </IconBase>
+    );
+}
+
+function FramesIcon(props: { class?: string }) {
+    return (
+        <IconBase class={props.class}>
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <path d="M7 4v16M17 4v16" />
+        </IconBase>
+    );
+}
+
+function SparklesIcon(props: { class?: string }) {
+    return (
+        <IconBase class={props.class}>
+            <path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z" />
+            <path d="m5 14 .9 2.1L8 17l-2.1.9L5 20l-.9-2.1L2 17l2.1-.9z" />
+            <path d="m19 14 .7 1.6 1.6.7-1.6.7L19 19l-.7-1.6-1.6-.7 1.6-.7z" />
+        </IconBase>
+    );
+}
+
+function ChevronIcon(props: { up: boolean }) {
+    return (
+        <IconBase class="size-3.5">
+            {props.up ? <path d="m18 15-6-6-6 6" /> : <path d="m6 9 6 6 6-6" />}
+        </IconBase>
+    );
+}
+
+function SpeakerIcon() {
+    return (
+        <IconBase>
+            <path d="M11 5 6 9H2v6h4l5 4z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+        </IconBase>
+    );
+}
+
+function ResetIcon() {
+    return (
+        <IconBase class="size-3.5">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+            <path d="M3 3v5h5" />
+        </IconBase>
+    );
+}
+
+function ArrowUpIcon() {
+    return (
+        <IconBase class="size-5">
+            <path d="M12 19V5m-7 7 7-7 7 7" />
+        </IconBase>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <IconBase class="size-4 text-indigo-500">
+            <path d="M20 6 9 17l-5-5" />
+        </IconBase>
+    );
+}
+
+function MusicIcon(props: { class?: string }) {
+    return (
+        <IconBase class={props.class}>
+            <circle cx="8" cy="18" r="3" />
+            <path d="M11 18V5l8-2v12" />
+            <circle cx="16" cy="15" r="3" />
+        </IconBase>
     );
 }
