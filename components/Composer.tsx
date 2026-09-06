@@ -1,4 +1,12 @@
 import {
+    type Attachment,
+    type ComposerSettings,
+    restoreSettings,
+    type SettingsAction,
+    settingsControls,
+    transitionSettings,
+} from "./composer_settings.ts";
+import {
     type Signal,
     useComputed,
     useSignal,
@@ -10,7 +18,6 @@ import { buildGenerationRequest } from "./generation_request.ts";
 import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
-    ContentItem,
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
 import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
@@ -24,14 +31,6 @@ import { updateGenerations } from "@/islands/Application.tsx";
 
 type AttachmentKind = "image" | "video" | "audio";
 
-type Attachment = {
-    id: number;
-    kind: AttachmentKind;
-    name: string;
-    url: string;
-};
-
-type Mode = "reference" | "frames";
 type Resolution = {
     provider: "seedance";
     value: "480p" | "720p" | "1080p";
@@ -42,7 +41,6 @@ type Resolution = {
     provider: "autodl";
     value: "480p" | "768p" | "1080p";
 };
-type DurationMode = "seconds" | "smart";
 type Popover = "model" | "mode" | "settings" | null;
 
 const SEEDANCE_MODELS = [
@@ -147,10 +145,7 @@ const MODEL_RESOLUTIONS: Record<SeedanceModel, Resolution[]> = {
 };
 
 const MINIMAX_MODEL_RESOLUTIONS: Record<MiniMaxVideoModel, Resolution[]> = {
-    "MiniMax-H3": [{ provider: "minimax", value: "768p" }, {
-        provider: "minimax",
-        value: "480p",
-    }],
+    "MiniMax-H3": [{ provider: "minimax", value: "768p" }],
     "MiniMax-H3-Max": [{ provider: "minimax", value: "480p" }, {
         provider: "minimax",
         value: "768p",
@@ -191,20 +186,20 @@ const COMPOSER_STATE_KEY = "composer.state.v1";
 /** Persisted composer fields (attachments are intentionally excluded). */
 interface ComposerState {
     prompt: string;
-    model: GenerationModel;
-    mode: Mode;
-    ratio: AspectRatio;
-    resolution: Resolution;
-    durationMode: DurationMode;
-    duration: number;
-    audio: boolean;
+    settings: Omit<ComposerSettings, "attachments">;
 }
 
 /** Read persisted composer state (client only); null if absent/unreadable. */
-function loadComposerState(): Partial<ComposerState> | null {
+function loadComposerState():
+    | (Partial<ComposerState> & Record<string, unknown>)
+    | null {
     try {
         const raw = localStorage.getItem(COMPOSER_STATE_KEY);
-        return raw ? JSON.parse(raw) as Partial<ComposerState> : null;
+        return raw
+            ? JSON.parse(raw) as
+                & Partial<ComposerState>
+                & Record<string, unknown>
+            : null;
     }
     catch {
         return null;
@@ -238,12 +233,6 @@ function isMiniMaxModel(value: unknown): value is MiniMaxVideoModel {
 
 function isFalModel(value: unknown): value is FalModel {
     return FAL_MODEL_OPTIONS.some((model) => model.value === value);
-}
-
-function isMiniMaxRequest(
-    request: GenerateInput,
-): request is Extract<GenerateInput, { model: MiniMaxVideoModel }> {
-    return isMiniMaxModel(request.model);
 }
 
 function getModelOption(value: GenerationModel) {
@@ -419,17 +408,37 @@ export function Composer(props: {
     const { genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
-    const attachments = useSignal<Attachment[]>([]);
-    const model = useSignal<GenerationModel>("doubao-seedance-2-0-260128");
-    const mode = useSignal<Mode>("reference");
-    const ratio = useSignal<AspectRatio>("21:9");
-    const resolution = useSignal<Resolution>({
-        provider: "seedance",
-        value: "480p",
-    });
-    const durationMode = useSignal<DurationMode>("seconds");
-    const duration = useSignal(4);
-    const audio = useSignal(true);
+    const settings = useSignal<ComposerSettings>(restoreSettings(null));
+    const controls = useComputed(() => settingsControls(settings.value));
+    const attachments = useComputed(() => settings.value.attachments);
+    const model = useComputed(() => settings.value.model);
+    const mode = useComputed(() => controls.value.mode);
+    const ratio = useComputed(() => settings.value.ratio);
+    const resolution = useComputed(() => ({
+        provider: isSeedanceModel(model.value)
+            ? "seedance"
+            : isMiniMaxModel(model.value)
+            ? "minimax"
+            : isFalModel(model.value)
+            ? "fal"
+            : "autodl",
+        value: settings.value.resolution,
+    }));
+    const durationMode = useComputed(() => controls.value.durationMode);
+    const duration = useComputed(() => controls.value.duration);
+    const audio = useComputed(() => controls.value.audio);
+    const updateSettings = (action: SettingsAction) => {
+        const next = transitionSettings(settings.value, action);
+        const candidates = action.type === "attachments"
+            ? [...settings.value.attachments, ...action.value]
+            : settings.value.attachments;
+        for (const item of candidates) {
+            if (!next.attachments.some((kept) => kept.url === item.url)) {
+                URL.revokeObjectURL(item.url);
+            }
+        }
+        settings.value = next;
+    };
     const popover = useSignal<Popover>(null);
     const mention = useSignal<Mention | null>(null);
     const mentionActive = useSignal(0);
@@ -472,47 +481,16 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            if (saved.mode) {
-                mode.value = saved.mode;
-            }
-            if (saved.ratio) {
-                ratio.value = saved.ratio;
-            }
-            if (saved.resolution && typeof saved.resolution === "object") {
-                resolution.value = saved.resolution;
-            }
-            else if (typeof saved.resolution === "string") {
-                // Older composer state stored only the resolution string.
-                const savedResolution = saved.resolution;
-                const option = MODEL_RESOLUTIONS["doubao-seedance-2-0-260128"]
-                    .find((option) => option.value === savedResolution);
-                if (option) {
-                    resolution.value = option;
-                }
-            }
-            if (saved.durationMode) {
-                durationMode.value = saved.durationMode;
-            }
-            if (typeof saved.duration === "number") {
-                duration.value = saved.duration;
-            }
-            if (typeof saved.audio === "boolean") {
-                audio.value = saved.audio;
-            }
+            settings.value = restoreSettings(saved.settings ?? saved);
         }
         hydrated.current = true;
     }, []);
 
     useSignalEffect(() => {
+        const { attachments: _attachments, ...savedSettings } = settings.value;
         const state: ComposerState = {
             prompt: prompt.value,
-            model: model.value,
-            mode: mode.value,
-            ratio: ratio.value,
-            resolution: resolution.value,
-            durationMode: durationMode.value,
-            duration: duration.value,
-            audio: audio.value,
+            settings: savedSettings,
         };
         if (hydrated.current) {
             saveComposerState(state);
@@ -523,211 +501,122 @@ export function Composer(props: {
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
+        let text: string;
+        let saved: Record<string, unknown>;
+        let media: { kind: AttachmentKind; url: string }[];
         if (req.model === "autodl/minimax_h3_lightx2v_v5") {
-            const input = req.input;
-            model.value = req.model;
-            prompt.value = input.prompt;
-            ratio.value = input.resolution.endsWith("竖")
-                ? "9:16"
-                : input.resolution.endsWith("(1:1)")
-                ? "1:1"
-                : "16:9";
-            resolution.value = {
-                provider: "autodl",
-                value: input.resolution.startsWith("480")
-                    ? "480p"
-                    : input.resolution.startsWith("1080")
-                    ? "1080p"
-                    : "768p",
+            text = req.input.prompt;
+            saved = {
+                model: req.model,
+                ratio: req.input.resolution.endsWith("竖")
+                    ? "9:16"
+                    : req.input.resolution.endsWith("(1:1)")
+                    ? "1:1"
+                    : "16:9",
+                resolution: req.input.resolution.replace(/横|竖|\(1:1\)/g, ""),
+                duration: req.input.duration,
             };
-            duration.value = input.duration;
-            durationMode.value = "seconds";
-            mode.value = "reference";
-            const urls = Object.entries(input).filter(([key, value]) =>
+            media = Object.entries(req.input).filter(([key, value]) =>
                 key.startsWith("ref_image_") && typeof value === "string"
-            ).sort(([a], [b]) => a.localeCompare(b));
-            attachments.value.forEach((item) => URL.revokeObjectURL(item.url));
-            attachments.value = await Promise.all(
-                urls.map(async ([, url]) => ({
-                    id: nextId.current++,
-                    kind: "image" as const,
-                    name: kindLabel("image", language.value),
-                    url: URL.createObjectURL(
-                        await (await fetch(url as string)).blob(),
-                    ),
-                })),
-            );
-            if (promptRef.current) {
-                promptRef.current.value = input.prompt;
-                autoGrow(promptRef.current);
-            }
-            return;
+            ).sort(([a], [b]) => a.localeCompare(b)).map(([, url]) => ({
+                kind: "image",
+                url: url as string,
+            }));
         }
-        if (req.model === "fal/minimax/h3/reference-to-video") {
-            const input = req.input;
-            prompt.value = input.prompt;
-            model.value = req.model;
-            ratio.value = input.aspect_ratio;
-            resolution.value = {
-                provider: "fal",
-                value: input.resolution === "480P" ? "480p" : "768p",
+        else if (req.model === "fal/minimax/h3/reference-to-video") {
+            text = req.input.prompt;
+            saved = {
+                model: req.model,
+                ratio: req.input.aspect_ratio,
+                resolution: req.input.resolution,
+                duration: req.input.duration,
             };
-            durationMode.value = "seconds";
-            duration.value = input.duration;
-            mode.value = "reference";
-
-            attachments.value.forEach((attachment) =>
-                URL.revokeObjectURL(attachment.url)
-            );
-            attachments.value = await Promise.all(
-                input.reference_image_urls.map(async (url) => ({
-                    id: nextId.current++,
-                    kind: "image" as const,
-                    name: kindLabel("image", language.value),
-                    url: URL.createObjectURL(
-                        await (await fetch(url)).blob(),
-                    ),
-                })),
-            );
-            const ta = promptRef.current;
-            if (ta) {
-                ta.value = input.prompt;
-                autoGrow(ta);
-            }
-            return;
+            media = req.input.reference_image_urls.map((url) => ({
+                kind: "image",
+                url,
+            }));
         }
-        if (isMiniMaxRequest(req)) {
-            const text = req.content
-                .filter((item) => item.type === "text")
-                .map((item) => item.text)
-                .join("\n");
-            prompt.value = text;
-            model.value = req.model;
-            ratio.value = req.ratio ?? "adaptive";
-            resolution.value = {
-                provider: "minimax",
-                value: req.resolution === "480P" ? "480p" : "768p",
+        else {
+            text = req.content.filter((item) => item.type === "text").map((
+                item,
+            ) => item.text).join("\n");
+            saved = {
+                model: req.model,
+                ratio: req.ratio,
+                resolution: req.resolution,
+                duration: req.duration,
+                durationMode: req.duration === undefined ? "smart" : "seconds",
+                audio: "generate_audio" in req ? req.generate_audio : false,
+                mode: req.content.some((item) =>
+                        item.type === "image_url" &&
+                        (item.role === "first_frame" ||
+                            item.role === "last_frame")
+                    )
+                    ? "frames"
+                    : "reference",
             };
-            durationMode.value = "seconds";
-            duration.value = req.duration;
-            mode.value = req.content.some((item) =>
-                    item.type === "image_url" &&
-                    (item.role === "first_frame" ||
-                        item.role === "last_frame" || item.role === undefined)
-                )
-                ? "frames"
-                : "reference";
-            audio.value = false;
-
-            const media: { kind: AttachmentKind; url: string }[] = req.content
-                .flatMap((item): { kind: AttachmentKind; url: string }[] => {
+            media = req.content.flatMap(
+                (item): { kind: AttachmentKind; url: string }[] => {
                     if (item.type === "image_url") {
-                        return [{
-                            kind: "image" as const,
-                            url: item.image_url.url,
-                        }];
+                        return [{ kind: "image", url: item.image_url.url }];
                     }
                     if (item.type === "video_url") {
-                        return [{
-                            kind: "video" as const,
-                            url: item.video_url.url,
-                        }];
+                        return [{ kind: "video", url: item.video_url.url }];
                     }
                     if (item.type === "audio_url") {
-                        return [{
-                            kind: "audio" as const,
-                            url: item.audio_url.url,
-                        }];
+                        return [{ kind: "audio", url: item.audio_url.url }];
                     }
                     return [];
-                });
-            attachments.value.forEach((attachment) =>
-                URL.revokeObjectURL(attachment.url)
+                },
             );
-            attachments.value = await Promise.all(media.map(async (item) => ({
+        }
+        const loaded: Attachment[] = [];
+        for (const item of media) {
+            let blob: Blob;
+            try {
+                const response = await fetch(item.url);
+                if (!response.ok) {
+                    for (const attachment of loaded) {
+                        URL.revokeObjectURL(attachment.url);
+                    }
+                    return new Error(
+                        `Cannot load reference: ${response.status}`,
+                    );
+                }
+                blob = await response.blob();
+            }
+            catch (error) {
+                for (const attachment of loaded) {
+                    URL.revokeObjectURL(attachment.url);
+                }
+                return error instanceof Error
+                    ? error
+                    : new Error(String(error));
+            }
+            loaded.push({
                 id: nextId.current++,
                 kind: item.kind,
                 name: kindLabel(item.kind, language.value),
-                url: URL.createObjectURL(await (await fetch(item.url)).blob()),
-            })));
-            const ta = promptRef.current;
-            if (ta) {
-                ta.value = text;
-                autoGrow(ta);
-            }
-            return;
+                url: URL.createObjectURL(blob),
+            });
         }
-        else if (
-            req.model == "doubao-seedance-2-0-260128" ||
-            req.model == "doubao-seedance-2-0-fast-260128" ||
-            req.model == "doubao-seedance-2-0-mini-260615"
-        ) {
-            const content = req.content;
-            const text = content
-                .filter((c): c is Extract<ContentItem, { type: "text" }> =>
-                    c.type === "text"
+        for (const item of attachments.value) {
+            URL.revokeObjectURL(item.url);
+        }
+        settings.value = restoreSettings(saved, loaded);
+        for (const item of loaded) {
+            if (
+                !settings.value.attachments.some((kept) =>
+                    kept.url === item.url
                 )
-                .map((c) => c.text)
-                .join("\n");
-            prompt.value = text;
-            const ta = promptRef.current;
-            if (ta) {
-                ta.value = text;
-                autoGrow(ta);
+            ) {
+                URL.revokeObjectURL(item.url);
             }
-
-            // Settings — mirror how the request was assembled on submit: `duration`
-            // is only present in "seconds" mode, omitted in "smart" mode.
-            model.value = req.model;
-            if (req.ratio) {
-                ratio.value = req.ratio;
-            }
-            if (req.resolution) {
-                resolution.value = {
-                    provider: "seedance",
-                    value: req.resolution,
-                };
-            }
-            if (typeof req.duration === "number") {
-                durationMode.value = "seconds";
-                duration.value = req.duration;
-            }
-            else {
-                durationMode.value = "smart";
-            }
-            if (typeof req.generate_audio === "boolean") {
-                audio.value = req.generate_audio;
-            }
-
-            // Reference media is stored as data URLs; rebuild each into a revocable
-            // object URL so it behaves like a normally-attached file.
-            const media = content
-                .map((c) => {
-                    if (c.type === "image_url") {
-                        return { kind: "image" as const, url: c.image_url.url };
-                    }
-                    if (c.type === "video_url") {
-                        return { kind: "video" as const, url: c.video_url.url };
-                    }
-                    if (c.type === "audio_url") {
-                        return { kind: "audio" as const, url: c.audio_url.url };
-                    }
-                    return null;
-                })
-                .filter((m): m is { kind: AttachmentKind; url: string } =>
-                    m !== null
-                );
-
-            attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
-            attachments.value = await Promise.all(media.map(async (m) => ({
-                id: nextId.current++,
-                kind: m.kind,
-                name: kindLabel(m.kind, language.value),
-                url: URL.createObjectURL(await (await fetch(m.url)).blob()),
-            })));
         }
-        else {
-            throw new Error("Unsupported model: " + req.model);
+        prompt.value = text;
+        if (promptRef.current) {
+            promptRef.current.value = text;
+            autoGrow(promptRef.current);
         }
     };
 
@@ -736,10 +625,14 @@ export function Composer(props: {
         if (!req) {
             return;
         }
-        reusePrompt.value = null; // consume once
-        applyReuse(req).catch((err) =>
-            console.error("[Composer] failed to apply reused request:", err)
-        );
+        reusePrompt.value = null;
+        void (async () => {
+            const result = await applyReuse(req);
+            if (result instanceof Error) {
+                console.error("[Composer] failed to reuse request:", result);
+                genError.value = result.message;
+            }
+        })();
     });
 
     // Attachments with their display labels: Image1, Image2, Video1, …
@@ -763,8 +656,7 @@ export function Composer(props: {
 
     const selectedModel = useComputed(() => getModelOption(model.value));
 
-    // Resolutions allowed for the current model. Keep the selection valid when
-    // the model changes (e.g. switching to 2.0 Fast drops 1080p → 720p).
+    // Display the resolutions allowed by the current settings branch.
     const resolutions = useComputed(() => {
         if (isSeedanceModel(model.value)) {
             return MODEL_RESOLUTIONS[model.value];
@@ -782,61 +674,6 @@ export function Composer(props: {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
-    useSignalEffect(() => {
-        const allowed = resolutions.value;
-        const current = resolution.value;
-        if (
-            !allowed.some((option) =>
-                option.provider === current.provider &&
-                option.value === current.value
-            )
-        ) {
-            resolution.value = allowed.find((option) =>
-                option.value === current.value
-            ) ??
-                allowed.find((option) =>
-                    option.value === "720p" || option.value === "768p"
-                ) ?? allowed[0];
-        }
-        if (isAutoDLModel(model.value)) {
-            if (!["16:9", "9:16", "1:1"].includes(ratio.value)) {
-                ratio.value = "16:9";
-            }
-            mode.value = "reference";
-            durationMode.value = "seconds";
-            duration.value = Math.max(1, Math.min(10, duration.value));
-            return;
-        }
-        if (isFalModel(model.value)) {
-            // fal's reference-to-video takes reference images only, and a
-            // concrete duration (max 15s).
-            mode.value = "reference";
-            durationMode.value = "seconds";
-            duration.value = Math.max(1, Math.min(15, duration.value));
-            return;
-        }
-        else if (isMiniMaxModel(model.value)) {
-            const minimum = model.value === "MiniMax-H3-Max" ? 5 : 4;
-            duration.value = Math.max(
-                minimum,
-                Math.min(15, duration.value),
-            );
-            durationMode.value = "seconds";
-            if (model.value === "MiniMax-H3-Max") {
-                mode.value = "frames";
-            }
-            if (
-                attachments.value.length === 0 && ratio.value === "adaptive"
-            ) {
-                ratio.value = "16:9";
-            }
-            return;
-        }
-        else if (!isSeedanceModel(model.value)) {
-            throw new Error(`unsupported model: ${model.value}`);
-        }
-    });
-
     const canSubmit = useComputed(() => {
         if (isAutoDLModel(model.value)) {
             return prompt.value.trim().length > 0 &&
@@ -904,7 +741,10 @@ export function Composer(props: {
             name: file.name,
             url: URL.createObjectURL(file),
         }));
-        attachments.value = [...attachments.value, ...added];
+        updateSettings({
+            type: "attachments",
+            value: [...attachments.value, ...added],
+        });
     };
 
     // Attach an image dragged from the file explorer. The path is project-
@@ -921,14 +761,27 @@ export function Composer(props: {
         }
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
-        const blob = await (await fetch(url)).blob();
+        let blob: Blob;
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                return new Error(`Cannot load reference: ${response.status}`);
+            }
+            blob = await response.blob();
+        }
+        catch (error) {
+            return error instanceof Error ? error : new Error(String(error));
+        }
 
-        attachments.value = [...attachments.value, {
-            id: nextId.current++,
-            kind: "image",
-            name: path.split("/").pop() ?? path,
-            url: URL.createObjectURL(blob),
-        }];
+        updateSettings({
+            type: "attachments",
+            value: [...attachments.value, {
+                id: nextId.current++,
+                kind: "image",
+                name: path.split("/").pop() ?? path,
+                url: URL.createObjectURL(blob),
+            }],
+        });
     };
 
     // Accept pasted media (e.g. an image copied from the file explorer).
@@ -976,12 +829,13 @@ export function Composer(props: {
         const projectPath = e.dataTransfer?.getData(PROJECT_FILE_MIME);
         if (projectPath) {
             e.preventDefault();
-            addProjectImage(projectPath).catch((err) =>
-                console.error(
-                    "[Composer] failed to attach dropped project image:",
-                    err,
-                )
-            );
+            void (async () => {
+                const result = await addProjectImage(projectPath);
+                if (result instanceof Error) {
+                    console.error("[Composer] failed to attach image:", result);
+                    genError.value = result.message;
+                }
+            })();
             return;
         }
 
@@ -1000,16 +854,14 @@ export function Composer(props: {
     };
 
     const removeAttachment = (id: number) => {
-        const target = attachments.value.find((a) => a.id === id);
-        if (target) {
-            URL.revokeObjectURL(target.url);
-        }
-        attachments.value = attachments.value.filter((a) => a.id !== id);
+        updateSettings({
+            type: "attachments",
+            value: attachments.value.filter((a) => a.id !== id),
+        });
     };
 
     const clearAll = () => {
-        attachments.value.forEach((a) => URL.revokeObjectURL(a.url));
-        attachments.value = [];
+        updateSettings({ type: "attachments", value: [] });
         prompt.value = "";
         const ta = promptRef.current;
         if (ta) {
@@ -1323,7 +1175,10 @@ export function Composer(props: {
                                             key={item.value}
                                             type="button"
                                             onClick={() => {
-                                                model.value = item.value;
+                                                updateSettings({
+                                                    type: "model",
+                                                    value: item.value,
+                                                });
                                                 popover.value = null;
                                             }}
                                             class={`w-full flex items-start gap-2 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 ${
@@ -1404,7 +1259,10 @@ export function Composer(props: {
                                                 key={item.value}
                                                 type="button"
                                                 onClick={() => {
-                                                    mode.value = item.value;
+                                                    updateSettings({
+                                                        type: "mode",
+                                                        value: item.value,
+                                                    });
                                                     popover.value = null;
                                                 }}
                                                 class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
@@ -1470,7 +1328,10 @@ export function Composer(props: {
                                                 key={r.value}
                                                 type="button"
                                                 onClick={() =>
-                                                    ratio.value = r.value}
+                                                    updateSettings({
+                                                        type: "ratio",
+                                                        value: r.value,
+                                                    })}
                                                 class={`flex flex-col items-center justify-end gap-2 h-16 rounded-lg border text-xs pb-2 ${
                                                     ratio.value ===
                                                             r.value
@@ -1518,7 +1379,10 @@ export function Composer(props: {
                                                 key={`${res.provider}:${res.value}`}
                                                 type="button"
                                                 onClick={() =>
-                                                    resolution.value = res}
+                                                    updateSettings({
+                                                        type: "resolution",
+                                                        value: res.value,
+                                                    })}
                                                 class={`h-9 rounded-md text-sm ${
                                                     resolution.value
                                                                 .provider ===
@@ -1538,8 +1402,7 @@ export function Composer(props: {
                                     <div class="text-sm text-gray-500 mb-2">
                                         {get_text("duration", language.value)}
                                     </div>
-                                    {!isMiniMaxModel(model.value) &&
-                                        !isAutoDLModel(model.value) && (
+                                    {isSeedanceModel(model.value) && (
                                         <div class="grid grid-cols-2 bg-gray-100 rounded-lg p-1 mb-3">
                                             {(
                                                 [
@@ -1558,8 +1421,11 @@ export function Composer(props: {
                                                     key={dm.value}
                                                     type="button"
                                                     onClick={() =>
-                                                        durationMode.value =
-                                                            dm.value}
+                                                        updateSettings({
+                                                            type:
+                                                                "durationMode",
+                                                            value: dm.value,
+                                                        })}
                                                     class={`h-9 rounded-md text-sm ${
                                                         durationMode.value ===
                                                                 dm.value
@@ -1579,7 +1445,9 @@ export function Composer(props: {
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
-                                                min={isAutoDLModel(model.value)
+                                                min={isAutoDLModel(
+                                                        model.value,
+                                                    ) || isFalModel(model.value)
                                                     ? 1
                                                     : model.value ===
                                                             "MiniMax-H3-Max"
@@ -1591,9 +1459,13 @@ export function Composer(props: {
                                                 step={1}
                                                 value={duration.value}
                                                 onInput={(e) =>
-                                                    duration.value = Number(
-                                                        e.currentTarget.value,
-                                                    )}
+                                                    updateSettings({
+                                                        type: "duration",
+                                                        value: Number(
+                                                            e.currentTarget
+                                                                .value,
+                                                        ),
+                                                    })}
                                                 class="flex-1 accent-indigo-500"
                                             />
                                             <span class="w-16 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-sm text-gray-700 gap-1">
@@ -1615,7 +1487,11 @@ export function Composer(props: {
                         {isSeedanceModel(model.value) && (
                             <button
                                 type="button"
-                                onClick={() => audio.value = !audio.value}
+                                onClick={() =>
+                                    updateSettings({
+                                        type: "audio",
+                                        value: !audio.value,
+                                    })}
                                 class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
                                     audio.value
                                         ? "border-indigo-300 bg-indigo-50 text-indigo-600"
@@ -1645,14 +1521,17 @@ export function Composer(props: {
                             aria-label={get_text("generate", language.value)}
                             onClick={async () => {
                                 genError.value = null;
-                                const selected = model.value;
-                                const selectedResolution = resolution.value;
+                                const submittedSettings = settings.value;
+                                const submittedPrompt = prompt.value;
+                                const submitted = settingsControls(
+                                    submittedSettings,
+                                );
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
                                 // URL before sending.
                                 const atts = await Promise.all(
-                                    attachments.value.map(async (a) => ({
+                                    submitted.attachments.map(async (a) => ({
                                         kind: a.kind,
                                         dataUrlOrFilePath: await toDataUrl(
                                             a.url,
@@ -1661,15 +1540,9 @@ export function Composer(props: {
                                 );
 
                                 const request = buildGenerationRequest({
-                                    model: selected,
-                                    prompt: prompt.value.trim(),
+                                    ...submitted,
+                                    prompt: submittedPrompt,
                                     attachments: atts,
-                                    ratio: ratio.value,
-                                    resolution: selectedResolution.value,
-                                    durationMode: durationMode.value,
-                                    duration: duration.value,
-                                    audio: audio.value,
-                                    mode: mode.value,
                                 });
                                 if (request instanceof Error) {
                                     genError.value = request.message;
@@ -1682,7 +1555,12 @@ export function Composer(props: {
                                     genError.value = gen.message;
                                     return;
                                 }
-                                clearAll();
+                                if (
+                                    settings.value === submittedSettings &&
+                                    prompt.value === submittedPrompt
+                                ) {
+                                    clearAll();
+                                }
                                 console.log("generating", gen);
                                 if (gen.status == "failed") {
                                     genError.value = gen.failed_reason!;
