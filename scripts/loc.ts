@@ -15,10 +15,14 @@ async function visit(directory: string): Promise<void> {
             }
             continue;
         }
-        if (!entry.isFile) continue;
+        if (!entry.isFile) {
+            continue;
+        }
 
         const extension = entry.name.match(/\.([^.]+)$/)?.[1];
-        if (!extension || !extensions.has(extension)) continue;
+        if (!extension || !extensions.has(extension)) {
+            continue;
+        }
 
         const text = await Deno.readTextFile(`${directory}/${entry.name}`);
         const lines = text.length === 0

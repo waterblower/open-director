@@ -190,7 +190,9 @@ if ($path) {
 /** Whether `target` is `root` itself or one of its descendants. */
 function isInside(root: string, target: string): boolean {
     const rel = relative(root, target);
-    if (rel === "") return true;
+    if (rel === "") {
+        return true;
+    }
     return !isAbsolute(rel) && rel.split(/[\\/]/, 1)[0] !== "..";
 }
 
@@ -207,10 +209,15 @@ async function resolveFromExistingAncestor(target: string): Promise<string> {
         try {
             const existing = await Deno.realPath(probe);
             return resolve(existing, ...missingSegments);
-        } catch (err) {
-            if (!(err instanceof Deno.errors.NotFound)) throw err;
+        }
+        catch (err) {
+            if (!(err instanceof Deno.errors.NotFound)) {
+                throw err;
+            }
             const parent = dirname(probe);
-            if (parent === probe) throw err;
+            if (parent === probe) {
+                throw err;
+            }
             missingSegments.unshift(basename(probe));
             probe = parent;
         }
@@ -228,7 +235,9 @@ export async function resolveInProject(
     projectRoot: string,
     path: string,
 ): Promise<string | Error> {
-    if (!projectRoot) return new Error("Project root is not configured");
+    if (!projectRoot) {
+        return new Error("Project root is not configured");
+    }
     if (isAbsolute(path)) {
         return new Error("Path must be relative to the project root");
     }
@@ -248,7 +257,8 @@ export async function resolveInProject(
             return new Error("Path resolves outside the project root");
         }
         return canonicalTarget;
-    } catch (err) {
+    }
+    catch (err) {
         return err instanceof Error ? err : new Error(String(err));
     }
 }
@@ -289,9 +299,13 @@ export async function pickProjectFolder(): Promise<string | null> {
     })();
 
     const { success, stdout } = await command.output();
-    if (!success) return null; // cancelled, or the picker tool is missing
+    if (!success) {
+        return null; // cancelled, or the picker tool is missing
+    }
     const out = new TextDecoder().decode(stdout).trim();
-    if (!out) return null;
+    if (!out) {
+        return null;
+    }
     const path = Deno.build.os === "windows"
         ? new TextDecoder().decode(
             Uint8Array.from(atob(out), (char) => char.charCodeAt(0)),
@@ -316,9 +330,12 @@ export async function loadFileExplorerState(
             projectRootPath,
             ".open-director/file-explorer.json",
         );
-        if (statePath instanceof Error) return statePath;
+        if (statePath instanceof Error) {
+            return statePath;
+        }
         text = await Deno.readTextFile(statePath);
-    } catch (err) {
+    }
+    catch (err) {
         if (err instanceof Deno.errors.NotFound) {
             return { expanded: [], selected: null };
         }
@@ -328,12 +345,15 @@ export async function loadFileExplorerState(
     let json: unknown;
     try {
         json = JSON.parse(text);
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 
     const parsed = FileExplorerStateSchema.safeParse(json);
-    if (!parsed.success) return parsed.error;
+    if (!parsed.success) {
+        return parsed.error;
+    }
     return {
         expanded: [...new Set(parsed.data.expanded.map(migrateExplorerPath))],
         selected: parsed.data.selected == null

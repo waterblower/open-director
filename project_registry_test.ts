@@ -7,7 +7,9 @@ import {
 } from "./project_registry.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) throw new Error(message);
+    if (!condition) {
+        throw new Error(message);
+    }
 }
 
 async function withRegistry(
@@ -17,7 +19,8 @@ async function withRegistry(
     const kv = await Deno.openKv(join(temp, "registry.sqlite3"));
     try {
         await run(kv);
-    } finally {
+    }
+    finally {
         kv.close();
         await Deno.remove(temp, { recursive: true });
     }
@@ -55,7 +58,8 @@ Deno.test("project registry stores and lists every opened project", async () => 
                 projects[1].path === first.path,
                 "First project was lost",
             );
-        } finally {
+        }
+        finally {
             await Deno.remove(temp, { recursive: true });
         }
     });
@@ -112,7 +116,8 @@ Deno.test("project registry deduplicates canonical paths", async () => {
                 reopened.lastOpenedAt === "2026-01-03T00:00:00.000Z",
                 "Last-opened time was not updated",
             );
-        } finally {
+        }
+        finally {
             await Deno.remove(root, { recursive: true });
         }
     });
@@ -138,7 +143,8 @@ Deno.test("concurrent opens create one project record", async () => {
                 first.path === second.path,
                 "Concurrent opens got different paths",
             );
-        } finally {
+        }
+        finally {
             await Deno.remove(root, { recursive: true });
         }
     });
@@ -161,10 +167,12 @@ Deno.test("project records persist after reopening KV", async () => {
                 projects[0].path === registered.path,
                 "Project path changed",
             );
-        } finally {
+        }
+        finally {
             secondKv.close();
         }
-    } finally {
+    }
+    finally {
         await Deno.remove(temp, { recursive: true });
         await Deno.remove(root, { recursive: true });
     }
@@ -234,7 +242,8 @@ Deno.test("registration replaces invalid data at the project key", async () => {
                 ).success,
                 "Invalid data was not replaced",
             );
-        } finally {
+        }
+        finally {
             await Deno.remove(root, { recursive: true });
         }
     });

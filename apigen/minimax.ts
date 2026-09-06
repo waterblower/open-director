@@ -190,7 +190,8 @@ export const CreateVideoTaskRequestSchema = z.object({
                 message: "MiniMax-H3 supports only 768P or 2K",
             });
         }
-    } else {
+    }
+    else {
         if (request.resolution === "2K") {
             context.addIssue({
                 code: "custom",
@@ -360,14 +361,18 @@ export class MiniMaxClient {
         request: CreateVideoTaskRequest,
     ): Promise<CreateVideoTaskResponse | Error> {
         const parsedRequest = CreateVideoTaskRequestSchema.safeParse(request);
-        if (!parsedRequest.success) return parsedRequest.error;
+        if (!parsedRequest.success) {
+            return parsedRequest.error;
+        }
 
         const response = await this.requestJson("/v2/video_generation", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(parsedRequest.data),
         });
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
 
         const parsedResponse = CreateVideoTaskResponseSchema.safeParse(
             response,
@@ -380,7 +385,9 @@ export class MiniMaxClient {
     /** GET /v2/query/video_generation/{task_id} */
     async getVideoTask(taskId: string): Promise<GetVideoTaskResponse | Error> {
         const parsedTaskId = NonEmptyStringSchema.safeParse(taskId);
-        if (!parsedTaskId.success) return parsedTaskId.error;
+        if (!parsedTaskId.success) {
+            return parsedTaskId.error;
+        }
 
         const response = await this.requestJson(
             `/v2/query/video_generation/${
@@ -388,7 +395,9 @@ export class MiniMaxClient {
             }`,
             { method: "GET" },
         );
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
 
         const parsedResponse = GetVideoTaskResponseSchema.safeParse(response);
         return parsedResponse.success
@@ -401,7 +410,9 @@ export class MiniMaxClient {
         input: ListVideoTasksRequest = {},
     ): Promise<ListVideoTasksResponse | Error> {
         const parsedInput = ListVideoTasksRequestSchema.safeParse(input);
-        if (!parsedInput.success) return parsedInput.error;
+        if (!parsedInput.success) {
+            return parsedInput.error;
+        }
 
         const query = new URLSearchParams();
         const params = parsedInput.data;
@@ -411,11 +422,15 @@ export class MiniMaxClient {
         if (params.page_size !== undefined) {
             query.set("page_size", String(params.page_size));
         }
-        if (params.status) query.set("filter.status", params.status);
+        if (params.status) {
+            query.set("filter.status", params.status);
+        }
         for (const taskId of params.task_ids ?? []) {
             query.append("filter.task_ids", taskId);
         }
-        if (params.model) query.set("filter.model", params.model);
+        if (params.model) {
+            query.set("filter.model", params.model);
+        }
         if (params.task_type) {
             query.set("filter.task_type", params.task_type);
         }
@@ -425,7 +440,9 @@ export class MiniMaxClient {
             `/v2/query/video_generation${suffix}`,
             { method: "GET" },
         );
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
 
         const parsedResponse = ListVideoTasksResponseSchema.safeParse(response);
         return parsedResponse.success
@@ -441,10 +458,14 @@ export class MiniMaxClient {
         const response = await this.requestJson(`/v1/files/list?${query}`, {
             method: "GET",
         });
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
 
         const parsedResponse = ListFilesResponseSchema.safeParse(response);
-        if (!parsedResponse.success) return parsedResponse.error;
+        if (!parsedResponse.success) {
+            return parsedResponse.error;
+        }
         if (parsedResponse.data.base_resp.status_code !== 0) {
             return new Error(
                 `[${parsedResponse.data.base_resp.status_code}] ${parsedResponse.data.base_resp.status_msg}`,
@@ -468,7 +489,9 @@ export class MiniMaxClient {
         }
 
         const filename = input instanceof File ? input.name : input.filename;
-        if (!filename) return new TypeError("filename is required for a Blob");
+        if (!filename) {
+            return new TypeError("filename is required for a Blob");
+        }
         if (!IMAGE_EXTENSION.test(filename)) {
             return new TypeError(
                 "Image filename must end in jpg, jpeg, png, webp, heic, or heif",
@@ -489,17 +512,23 @@ export class MiniMaxClient {
             // Do not set Content-Type; fetch adds the multipart boundary.
             body: form,
         });
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
 
         const parsed = UploadImageResponseSchema.safeParse(response);
-        if (!parsed.success) return parsed.error;
+        if (!parsed.success) {
+            return parsed.error;
+        }
         return parsed.data;
     }
 
     /** GET /v1/files/retrieve_content?file_id={file_id} */
     async downloadFile(fileId: FileId): Promise<Response | Error> {
         const parsedFileId = FileIdSchema.safeParse(fileId);
-        if (!parsedFileId.success) return parsedFileId.error;
+        if (!parsedFileId.success) {
+            return parsedFileId.error;
+        }
 
         const query = new URLSearchParams({
             file_id: String(parsedFileId.data),
@@ -508,7 +537,9 @@ export class MiniMaxClient {
             `/v1/files/retrieve_content?${query}`,
             { method: "GET" },
         );
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
         return response;
     }
 
@@ -517,7 +548,9 @@ export class MiniMaxClient {
         init: RequestInit,
     ): Promise<unknown | Error> {
         const response = await this.fetch(path, init);
-        if (response instanceof Error) return response;
+        if (response instanceof Error) {
+            return response;
+        }
         if (!response.ok) {
             return new Error(`[${response.status}] ${response.statusText}`);
         }
@@ -526,7 +559,8 @@ export class MiniMaxClient {
 
         try {
             return JSON.parse(text);
-        } catch (e) {
+        }
+        catch (e) {
             return e as Error;
         }
     }
@@ -543,7 +577,8 @@ export class MiniMaxClient {
                     ...init.headers,
                 },
             });
-        } catch (error) {
+        }
+        catch (error) {
             return error as Error;
         }
     }

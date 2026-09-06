@@ -14,9 +14,13 @@ export default function ImageGridEditor() {
 
     function drawGrid(img: HTMLImageElement) {
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (!canvas) {
+            return;
+        }
         const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        if (!ctx) {
+            return;
+        }
 
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
@@ -48,14 +52,18 @@ export default function ImageGridEditor() {
     }
 
     function redraw() {
-        if (!imageSrc.value) return;
+        if (!imageSrc.value) {
+            return;
+        }
         const img = new Image();
         img.onload = () => drawGrid(img);
         img.src = imageSrc.value;
     }
 
     function loadFile(file: File) {
-        if (!file.type.startsWith("image/")) return;
+        if (!file.type.startsWith("image/")) {
+            return;
+        }
         fileName.value = file.name.replace(/\.[^.]+$/, "");
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -69,7 +77,9 @@ export default function ImageGridEditor() {
 
     function onFileChange(e: Event) {
         const file = (e.currentTarget as HTMLInputElement).files?.[0];
-        if (file) loadFile(file);
+        if (file) {
+            loadFile(file);
+        }
     }
 
     useEffect(() => {
@@ -77,7 +87,9 @@ export default function ImageGridEditor() {
             const file = Array.from(e.clipboardData?.items ?? [])
                 .find((item) => item.type.startsWith("image/"))
                 ?.getAsFile();
-            if (file) loadFile(file);
+            if (file) {
+                loadFile(file);
+            }
         }
         globalThis.addEventListener("paste", onPaste);
         return () => globalThis.removeEventListener("paste", onPaste);
@@ -89,10 +101,14 @@ export default function ImageGridEditor() {
                 return;
             }
             const canvas = canvasRef.current;
-            if (!canvas) return;
+            if (!canvas) {
+                return;
+            }
             e.preventDefault();
             canvas.toBlob((blob) => {
-                if (!blob) return;
+                if (!blob) {
+                    return;
+                }
                 navigator.clipboard.write([
                     new ClipboardItem({ [blob.type]: blob }),
                 ]);
@@ -104,7 +120,9 @@ export default function ImageGridEditor() {
 
     function download() {
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (!canvas) {
+            return;
+        }
         const a = document.createElement("a");
         a.href = canvas.toDataURL("image/png");
         a.download = `${fileName.value}_grid.png`;
@@ -130,7 +148,9 @@ export default function ImageGridEditor() {
                 e.preventDefault();
                 isDragging.value = false;
                 const file = e.dataTransfer?.files[0];
-                if (file) loadFile(file);
+                if (file) {
+                    loadFile(file);
+                }
             }}
         >
             <h1 class="text-2xl font-semibold text-gray-800 mb-6">

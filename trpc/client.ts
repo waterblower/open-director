@@ -42,7 +42,8 @@ export const ShowOpenDirectorDir: Signal<boolean> = signal<boolean>(false);
 export async function loadConfig(): Promise<void> {
     try {
         ShowOpenDirectorDir.value = await trpc.getShowOpenDirectorDir.query();
-    } catch (err) {
+    }
+    catch (err) {
         console.error("[client] failed to load config:", err);
     }
 }
@@ -52,7 +53,8 @@ export async function setShowOpenDirectorDir(next: boolean): Promise<void> {
     ShowOpenDirectorDir.value = next;
     try {
         await trpc.setShowOpenDirectorDir.mutate(next);
-    } catch (err) {
+    }
+    catch (err) {
         console.error(
             "[client] failed to persist show-open-director setting:",
             err,
@@ -61,7 +63,9 @@ export async function setShowOpenDirectorDir(next: boolean): Promise<void> {
 }
 
 function notHidden(entry: { name: string }): boolean {
-    if (HIDDEN_NAMES.has(entry.name)) return false;
+    if (HIDDEN_NAMES.has(entry.name)) {
+        return false;
+    }
     if (entry.name === OPEN_DIRECTORY_NAME && !ShowOpenDirectorDir.value) {
         return false;
     }

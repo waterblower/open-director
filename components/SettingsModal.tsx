@@ -39,7 +39,9 @@ export function SettingsModal(props: {
     // Close on Escape, like a native dialog.
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+                onClose();
+            }
         };
         globalThis.addEventListener("keydown", onKeyDown);
         return () => globalThis.removeEventListener("keydown", onKeyDown);
@@ -59,7 +61,8 @@ export function SettingsModal(props: {
                 minimaxMasked.value = minimax.masked;
                 falMasked.value = fal.masked;
                 autodlMasked.value = autodl.masked;
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     "[SettingsModal] failed to load API key status:",
                     err,
@@ -106,21 +109,31 @@ export function SettingsModal(props: {
                     })
                     : null,
             ]);
-            if (results[0]) seedanceMasked.value = results[0].masked;
-            if (results[1]) minimaxMasked.value = results[1].masked;
-            if (results[2]) falMasked.value = results[2].masked;
-            if (results[3]) autodlMasked.value = results[3].masked;
+            if (results[0]) {
+                seedanceMasked.value = results[0].masked;
+            }
+            if (results[1]) {
+                minimaxMasked.value = results[1].masked;
+            }
+            if (results[2]) {
+                falMasked.value = results[2].masked;
+            }
+            if (results[3]) {
+                autodlMasked.value = results[3].masked;
+            }
             onStatusChange?.(Boolean(
                 seedanceMasked.value || minimaxMasked.value ||
                     falMasked.value || autodlMasked.value,
             ));
             onClose();
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[SettingsModal] failed to save API keys:", err);
             error.value = err instanceof Error
                 ? err.message
                 : get_text("save_failed", language.value);
-        } finally {
+        }
+        finally {
             saving.value = false;
         }
     };
@@ -129,7 +142,9 @@ export function SettingsModal(props: {
         <div
             class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={(e) => {
-                if (e.target === e.currentTarget) onClose();
+                if (e.target === e.currentTarget) {
+                    onClose();
+                }
             }}
         >
             <div class="relative max-h-[90vh] overflow-y-auto w-full max-w-md rounded-2xl bg-white text-gray-800 shadow-2xl">
@@ -193,7 +208,9 @@ export function SettingsModal(props: {
                                     (e.target as HTMLInputElement)
                                         .value}
                             onKeyDown={(e) => {
-                                if (e.key === "Enter") save();
+                                if (e.key === "Enter") {
+                                    save();
+                                }
                             }}
                             class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                         />
@@ -241,7 +258,9 @@ export function SettingsModal(props: {
                                 minimaxApiKey.value =
                                     (e.target as HTMLInputElement).value}
                             onKeyDown={(e) => {
-                                if (e.key === "Enter") save();
+                                if (e.key === "Enter") {
+                                    save();
+                                }
                             }}
                             class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                         />
@@ -284,7 +303,9 @@ export function SettingsModal(props: {
                                 falApiKey.value =
                                     (e.target as HTMLInputElement).value}
                             onKeyDown={(e) => {
-                                if (e.key === "Enter") save();
+                                if (e.key === "Enter") {
+                                    save();
+                                }
                             }}
                             class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                         />
@@ -327,7 +348,9 @@ export function SettingsModal(props: {
                                 autodlApiKey.value =
                                     (e.target as HTMLInputElement).value}
                             onKeyDown={(e) => {
-                                if (e.key === "Enter") save();
+                                if (e.key === "Enter") {
+                                    save();
+                                }
                             }}
                             class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
                         />

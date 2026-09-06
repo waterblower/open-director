@@ -2,7 +2,9 @@ import { resolve } from "@std/path";
 import { loadFileExplorerState, resolveInProject } from "./project.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) throw new Error(message);
+    if (!condition) {
+        throw new Error(message);
+    }
 }
 
 async function createDirectoryLink(
@@ -12,8 +14,11 @@ async function createDirectoryLink(
     try {
         await Deno.symlink(target, link, { type: "dir" });
         return;
-    } catch (symlinkError) {
-        if (Deno.build.os !== "windows") throw symlinkError;
+    }
+    catch (symlinkError) {
+        if (Deno.build.os !== "windows") {
+            throw symlinkError;
+        }
 
         // Windows directory symlinks require Developer Mode or elevation;
         // junctions do not and exercise the same real-path containment rule.
@@ -56,7 +61,8 @@ Deno.test("resolveInProject accepts contained existing and missing paths", async
                 resolve(await Deno.realPath(root), "new", "output.mp4"),
             "Missing project path did not resolve beneath its existing ancestor",
         );
-    } finally {
+    }
+    finally {
         await Deno.remove(temp, { recursive: true });
     }
 });
@@ -79,7 +85,8 @@ Deno.test("resolveInProject rejects lexical traversal and absolute paths", async
             await resolveInProject(root, outside) instanceof Error,
             "Absolute path escaped the project",
         );
-    } finally {
+    }
+    finally {
         await Deno.remove(temp, { recursive: true });
     }
 });
@@ -105,7 +112,8 @@ Deno.test("resolveInProject rejects symlink and junction escapes", async () => {
                 Error,
             "Symlinked parent escaped the project for a missing target",
         );
-    } finally {
+    }
+    finally {
         await Deno.remove(temp, { recursive: true });
     }
 });
@@ -134,7 +142,8 @@ Deno.test("loadFileExplorerState migrates legacy root-relative paths", async () 
             state.selected === "shots/clip.mp4",
             "Legacy selected path was not migrated",
         );
-    } finally {
+    }
+    finally {
         await Deno.remove(root, { recursive: true });
     }
 });

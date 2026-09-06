@@ -14,7 +14,8 @@
     "fmt": {
         "indentWidth": 4,
         "nextControlFlowPosition": "nextLine",
-        "singleBodyPosition": "nextLine"
+        "singleBodyPosition": "nextLine",
+        "exclude": [".agents/"]
     },
     "compile": {
         "exclude": [

@@ -37,7 +37,8 @@ export async function reopenDb() {
     }
     try {
         db.close();
-    } catch (e) {
+    }
+    catch (e) {
         throw e as Error;
     }
     db = await getDatabase();
@@ -109,7 +110,8 @@ export function createGeneration(
             request_json: request,
             created_at: new Date().toISOString(),
         };
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -142,8 +144,12 @@ export function updateGeneration(
         binds[col] = value;
     };
 
-    if (gen.status !== undefined) set("status", gen.status);
-    if (gen.task_id !== undefined) set("task_id", gen.task_id);
+    if (gen.status !== undefined) {
+        set("status", gen.status);
+    }
+    if (gen.task_id !== undefined) {
+        set("task_id", gen.task_id);
+    }
     if (gen.request_json !== undefined) {
         set(
             "request_json",
@@ -163,7 +169,9 @@ export function updateGeneration(
         set("failed_reason", gen.failed_reason);
     }
 
-    if (sets.length === 0) return; // nothing to change
+    if (sets.length === 0) {
+        return; // nothing to change
+    }
 
     try {
         const result = db.prepare(
@@ -172,7 +180,8 @@ export function updateGeneration(
         if (result.changes === 0) {
             return new Error(`No generation with id ${gen.id}`);
         }
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -207,7 +216,8 @@ export function recordGeneration(db: DatabaseSync, row: {
             task_json: JSON.stringify(row.task),
             created_at: row.createdAt,
         });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -328,7 +338,9 @@ export function recordTaskStatus(db: DatabaseSync, row: {
 }
 
 function parseRow(row: unknown): Generation | Error {
-    if (row === undefined) return new Error("row not found");
+    if (row === undefined) {
+        return new Error("row not found");
+    }
     const result = GenerationRowSchema.safeParse(row);
     if (!result.success) {
         return result.error;
@@ -371,7 +383,9 @@ export function getGenerationRequest(
     ).get(idOrTaskId, idOrTaskId) as
         | { request_json: string | null }
         | undefined;
-    if (!row?.request_json) return null;
+    if (!row?.request_json) {
+        return null;
+    }
     const parsed = GenerateInputSchema.safeParse(
         JSON.parse(row.request_json),
     );
@@ -393,7 +407,9 @@ export function getGenerationDetail(
     const row = db.prepare(
         "SELECT * FROM Generations WHERE id = ? OR task_id = ? LIMIT 1",
     ).get(idOrTaskId, idOrTaskId);
-    if (row === undefined) return null;
+    if (row === undefined) {
+        return null;
+    }
     return parseRow(row);
 }
 
@@ -403,7 +419,9 @@ export function listGenerations(db: DatabaseSync): Generation[] | Error {
         "SELECT * FROM Generations ORDER BY created_at DESC",
     ).all();
     const result = z.array(GenerationRowSchema).safeParse(rows);
-    if (!result.success) return result.error;
+    if (!result.success) {
+        return result.error;
+    }
     return result.data;
 }
 
@@ -427,7 +445,8 @@ export function archiveGeneration(
             `INSERT OR IGNORE INTO ArchivedGenerations (generation_id)
              VALUES (:generation_id)`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -441,7 +460,8 @@ export function unarchiveGeneration(
         db.prepare(
             `DELETE FROM ArchivedGenerations WHERE generation_id = :generation_id`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -502,7 +522,8 @@ export function setGenerationReaction(
             reason: reason ?? null,
             created_at: new Date().toISOString(),
         });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -516,7 +537,8 @@ export function clearGenerationReaction(
         db.prepare(
             `DELETE FROM GenerationReactions WHERE generation_id = :generation_id`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -529,7 +551,9 @@ export function getGenerationReaction(
     const row = db.prepare(
         "SELECT reaction, reason FROM GenerationReactions WHERE generation_id = ?",
     ).get(generationId);
-    if (row === undefined) return null;
+    if (row === undefined) {
+        return null;
+    }
     const parsed = GenerationReactionRowSchema.pick({
         reaction: true,
         reason: true,
@@ -584,7 +608,8 @@ export function recordContentHash(
              ON CONFLICT(generation_id) DO UPDATE SET
                  content_hash = excluded.content_hash`,
         ).run({ generation_id: generationId, content_hash: contentHash });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -627,7 +652,8 @@ function jsonColumn<T>(schema: z.ZodType<T>) {
         let value: unknown;
         try {
             value = JSON.parse(s);
-        } catch (err) {
+        }
+        catch (err) {
             ctx.addIssue({
                 code: "custom",
                 message: `Malformed JSON: ${

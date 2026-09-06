@@ -2,7 +2,9 @@ import { appRouter } from "../trpc/router.ts";
 import { handleMcpPayload, listMcpTools } from "./server.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) throw new Error(message);
+    if (!condition) {
+        throw new Error(message);
+    }
 }
 
 Deno.test("MCP catalog contains only open tRPC procedures", () => {

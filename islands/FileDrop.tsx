@@ -10,8 +10,12 @@ interface Upload {
 }
 
 function formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -34,10 +38,14 @@ export default function FileDrop() {
 
     function upload() {
         const selected = files.value;
-        if (selected.length === 0) return;
+        if (selected.length === 0) {
+            return;
+        }
 
         const data = new FormData();
-        for (const file of selected) data.append("files", file, file.name);
+        for (const file of selected) {
+            data.append("files", file, file.name);
+        }
         const total = selected.reduce((sum, f) => sum + f.size, 0);
         const id = Date.now();
         const count = `${selected.length} file${
@@ -67,17 +75,21 @@ export default function FileDrop() {
             let res: { ok?: boolean; error?: string } | null = null;
             try {
                 res = JSON.parse(xhr.responseText);
-            } catch { /* non-JSON response */ }
+            }
+            catch { /* non-JSON response */ }
             if (res?.ok) {
                 patch(id, { state: "ok", progress: 100 });
-            } else {
+            }
+            else {
                 patch(id, {
                     state: "error",
                     message: res?.error ?? `Failed (${xhr.status})`,
                 });
             }
             files.value = [];
-            if (inputRef.current) inputRef.current.value = "";
+            if (inputRef.current) {
+                inputRef.current.value = "";
+            }
         });
         xhr.addEventListener("error", () => {
             patch(id, { state: "error", message: "Network error" });

@@ -19,7 +19,9 @@ Deno.test({
             file: image,
             purpose: "user_data",
         });
-        if (result instanceof Error) throw result;
+        if (result instanceof Error) {
+            throw result;
+        }
 
         if (result.object !== "file") {
             throw new Error(

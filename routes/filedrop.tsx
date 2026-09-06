@@ -23,9 +23,15 @@ function lanAddress(): string | null {
 
     let fallback: string | null = null;
     for (const iface of Deno.networkInterfaces()) {
-        if (iface.family !== "IPv4") continue;
-        if (iface.address.startsWith("127.")) continue;
-        if (isPrivate(iface.address)) return iface.address;
+        if (iface.family !== "IPv4") {
+            continue;
+        }
+        if (iface.address.startsWith("127.")) {
+            continue;
+        }
+        if (isPrivate(iface.address)) {
+            return iface.address;
+        }
         fallback ??= iface.address;
     }
     return fallback;
@@ -34,7 +40,9 @@ function lanAddress(): string | null {
 /** The URL a phone should open, built from the LAN IP and the request's port. */
 function phoneUrl(req: Request): string | null {
     const ip = lanAddress();
-    if (!ip) return null;
+    if (!ip) {
+        return null;
+    }
     const url = new URL(req.url);
     const port = url.port ? `:${url.port}` : "";
     return `http://${ip}${port}/filedrop`;
@@ -57,8 +65,11 @@ async function uniquePath(dir: string, name: string): Promise<string> {
         const candidate = join(dir, i === 0 ? name : `${stem} (${i})${ext}`);
         try {
             await Deno.lstat(candidate);
-        } catch (err) {
-            if (err instanceof Deno.errors.NotFound) return candidate;
+        }
+        catch (err) {
+            if (err instanceof Deno.errors.NotFound) {
+                return candidate;
+            }
             throw err;
         }
     }
@@ -74,7 +85,9 @@ export const handler = define.handlers({
         const form = await ctx.req.formData();
         const saved: string[] = [];
         for (const value of form.getAll("files")) {
-            if (!(value instanceof File)) continue;
+            if (!(value instanceof File)) {
+                continue;
+            }
             const dest = await uniquePath(dir, safeName(value.name));
             const file = await Deno.open(dest, {
                 write: true,

@@ -7,7 +7,8 @@ export async function safeFetch(
     try {
         const response = await fetch(url, options);
         return response;
-    } catch (error) {
+    }
+    catch (error) {
         return error as Error;
     }
 }
@@ -15,7 +16,8 @@ export async function safeFetch(
 export function parseJSON(json: string): unknown | Error {
     try {
         return JSON.parse(json) as unknown;
-    } catch (error) {
+    }
+    catch (error) {
         return error as Error;
     }
 }

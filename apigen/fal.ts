@@ -139,14 +139,17 @@ export async function wait_for_result(requestID: string, apikey: string) {
         }
         if (result.status === 200) {
             return result;
-        } else if (result.status == 400) {
+        }
+        else if (result.status == 400) {
             if (result.detail == "Request is still in progress") {
                 await delay(10000);
                 continue;
-            } else {
+            }
+            else {
                 return new Error(JSON.stringify(result));
             }
-        } else {
+        }
+        else {
             return new Error(JSON.stringify(result));
         }
     }

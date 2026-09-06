@@ -108,7 +108,9 @@ export function FileExplorer(props: {
     // Set that iterates in a different order doesn't look like a change.
     const persistKey = useComputed(() => {
         const pd = projectData.value;
-        if (!pd) return null;
+        if (!pd) {
+            return null;
+        }
         const state: ExplorerState = {
             expanded: [...pd.expanded].sort(),
             selected: pd.selected,
@@ -124,7 +126,9 @@ export function FileExplorer(props: {
     const hydrated = useRef(false);
     useEffect(() => {
         const key = persistKey.value;
-        if (key === null) return;
+        if (key === null) {
+            return;
+        }
         if (!hydrated.current) {
             hydrated.current = true;
             return;
@@ -159,7 +163,9 @@ export function FileExplorer(props: {
     /** Look up a loaded entry by its full path. */
     const findEntry = (path: string): FileEntry | undefined => {
         const pd = projectData.value;
-        if (!pd) return undefined;
+        if (!pd) {
+            return undefined;
+        }
         const slash = path.lastIndexOf("/");
         const parent = slash === -1 ? "" : path.slice(0, slash);
         const name = slash === -1 ? path : path.slice(slash + 1);
@@ -176,7 +182,9 @@ export function FileExplorer(props: {
                 return;
             }
             const path = projectData.value?.selected;
-            if (!path) return;
+            if (!path) {
+                return;
+            }
 
             // Don't hijack copying from inputs or a real text selection.
             const ae = document.activeElement as HTMLElement | null;
@@ -184,12 +192,18 @@ export function FileExplorer(props: {
                 ae &&
                 (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" ||
                     ae.isContentEditable)
-            ) return;
+            ) {
+                return;
+            }
             const sel = globalThis.getSelection?.();
-            if (sel && !sel.isCollapsed && sel.toString()) return;
+            if (sel && !sel.isCollapsed && sel.toString()) {
+                return;
+            }
 
             const entry = findEntry(path);
-            if (!entry || !isImageFile(entry)) return;
+            if (!entry || !isImageFile(entry)) {
+                return;
+            }
             e.preventDefault();
             copyImage(path);
         };
@@ -203,7 +217,9 @@ export function FileExplorer(props: {
     const revealCopy = async (dest: string, destDir: string) => {
         const name = dest.split("/").pop() ?? "";
         const pd = projectData.value;
-        if (!pd) return;
+        if (!pd) {
+            return;
+        }
         if (destDir === "") {
             // Root listing lives in `rootEntries` ("" = project root).
             const fresh = await readDir(pd.rootPath, "");
@@ -254,7 +270,8 @@ export function FileExplorer(props: {
                     dataUrl,
                 });
                 await revealCopy(dest, destDir);
-            } catch (err) {
+            }
+            catch (err) {
                 console.error("[FileExplorer] failed to import file:", err);
             }
         }
@@ -265,7 +282,9 @@ export function FileExplorer(props: {
     // files are uploaded as bytes.
     const handleDrop = (e: DragEvent, destDir: string) => {
         const dt = e.dataTransfer;
-        if (!dt) return;
+        if (!dt) {
+            return;
+        }
         const gridVideo = dt.getData(GENERATION_VIDEO_MIME);
         if (gridVideo) {
             e.preventDefault();
@@ -288,7 +307,9 @@ export function FileExplorer(props: {
     // refreshing its parent listing. A no-op if the name is unchanged or empty.
     const renameEntry = async (path: string, name: string) => {
         const oldName = path.split("/").pop() ?? "";
-        if (!name || name === oldName) return;
+        if (!name || name === oldName) {
+            return;
+        }
         const { path: dest } = await trpc.renameFile.mutate({ path, name });
         const slash = path.lastIndexOf("/");
         const parent = slash === -1 ? "" : path.slice(0, slash);
@@ -301,10 +322,13 @@ export function FileExplorer(props: {
     const confirmDelete = async () => {
         const target = deleteModal.value;
         deleteModal.value = null;
-        if (!target) return;
+        if (!target) {
+            return;
+        }
         try {
             await trpc.deleteFile.mutate({ path: target.path });
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[FileExplorer] failed to delete:", err);
             return;
         }
@@ -322,7 +346,9 @@ export function FileExplorer(props: {
     const refreshDir = async (dir: string) => {
         if (dir === "") {
             const root = projectData.value?.rootPath;
-            if (!root) return;
+            if (!root) {
+                return;
+            }
             const files = await readDir(root, ""); // "" = project root
             if (files instanceof Error) {
                 return console.error(
@@ -330,9 +356,12 @@ export function FileExplorer(props: {
                     files,
                 );
             }
-            if (!projectData.value) return;
+            if (!projectData.value) {
+                return;
+            }
             projectData.value = { ...projectData.value, rootEntries: files };
-        } else {
+        }
+        else {
             await loadChildren(dir);
         }
     };
@@ -354,7 +383,9 @@ export function FileExplorer(props: {
         const promptGenerationId = signal<string | null>(null);
         menu.value = { entry, path, x, y, promptGenerationId };
         const root = projectData.value?.rootPath;
-        if (!entry.isFile || !root) return;
+        if (!entry.isFile || !root) {
+            return;
+        }
         try {
             const id = await trpc.getGenerationIdForFile.query({
                 project_root: root,
@@ -364,7 +395,8 @@ export function FileExplorer(props: {
             if (menu.value?.promptGenerationId === promptGenerationId) {
                 promptGenerationId.value = id;
             }
-        } catch (err) {
+        }
+        catch (err) {
             console.error(
                 "[FileExplorer] failed to look up generation for file:",
                 err,
@@ -430,7 +462,9 @@ export function FileExplorer(props: {
                             )}
                             onClick={async () => {
                                 const res = await trpc.pickProject.mutate();
-                                if (!res) return;
+                                if (!res) {
+                                    return;
+                                }
                                 error.value = null;
                                 // Load the full state for the new folder.
                                 hydrated.current = false;
@@ -734,7 +768,9 @@ function FileNameModal(
 
     useEffect(() => {
         const el = inputRef.current;
-        if (!el) return;
+        if (!el) {
+            return;
+        }
         el.focus();
         // Select the stem (before the last dot) so the extension is preserved.
         const dot = props.initialName.lastIndexOf(".");
@@ -743,14 +779,18 @@ function FileNameModal(
 
     const save = () => {
         const name = value.value.trim();
-        if (name) props.onSave(name);
+        if (name) {
+            props.onSave(name);
+        }
     };
 
     return (
         <div
             class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
             onClick={(e) => {
-                if (e.target === e.currentTarget) props.onCancel();
+                if (e.target === e.currentTarget) {
+                    props.onCancel();
+                }
             }}
         >
             <div class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3">
@@ -766,7 +806,8 @@ function FileNameModal(
                         if (e.key === "Enter") {
                             e.preventDefault();
                             save();
-                        } else if (e.key === "Escape") {
+                        }
+                        else if (e.key === "Escape") {
                             e.preventDefault();
                             props.onCancel();
                         }
@@ -959,7 +1000,9 @@ function VideoModal(props: { path: string; onClose: () => void }) {
         <div
             class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
             onClick={(e) => {
-                if (e.target === e.currentTarget) props.onClose();
+                if (e.target === e.currentTarget) {
+                    props.onClose();
+                }
             }}
         >
             <div class="relative w-full max-w-3xl">
@@ -999,7 +1042,9 @@ function DeleteConfirmModal(
         <div
             class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
             onClick={(e) => {
-                if (e.target === e.currentTarget) props.onCancel();
+                if (e.target === e.currentTarget) {
+                    props.onCancel();
+                }
             }}
         >
             <div class="w-full max-w-sm rounded-xl bg-white p-4 space-y-3">
@@ -1049,7 +1094,9 @@ function toPngBlob(blob: Blob): Promise<Blob> {
             canvas.width = img.naturalWidth;
             canvas.height = img.naturalHeight;
             const ctx = canvas.getContext("2d");
-            if (!ctx) return reject(new Error("no 2d context"));
+            if (!ctx) {
+                return reject(new Error("no 2d context"));
+            }
             ctx.drawImage(img, 0, 0);
             canvas.toBlob(
                 (b) => b ? resolve(b) : reject(new Error("toBlob failed")),
@@ -1170,7 +1217,9 @@ function Node(
 
     const onClick = () => {
         const cur = tree.projectData.value;
-        if (!cur) return;
+        if (!cur) {
+            return;
+        }
         callbacks.onSelect?.(entry, path);
         if (!entry.isDirectory) {
             tree.projectData.value = { ...cur, selected: path };
@@ -1183,10 +1232,13 @@ function Node(
         const next = new Set(cur.expanded);
         if (next.has(path)) {
             next.delete(path);
-        } else {
+        }
+        else {
             next.add(path);
             // Root's children are `rootEntries`, already loaded — no fetch.
-            if (path !== "") callbacks.loadChildren(path);
+            if (path !== "") {
+                callbacks.loadChildren(path);
+            }
         }
         tree.projectData.value = { ...cur, selected: path, expanded: next };
     };
@@ -1307,7 +1359,9 @@ export const SIDEBAR_MAX_WIDTH = 480;
 export function makeLoadChildren(projectData: Signal<ProjectData | null>) {
     return async (path: string) => {
         const root = projectData.value?.rootPath;
-        if (!root) return new Error("no project open");
+        if (!root) {
+            return new Error("no project open");
+        }
         // Re-fetch even when cached so reopening shows the latest state — the
         // stale cache stays rendered until fresh data arrives.
         const res = await readDir(root, path);

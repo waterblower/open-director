@@ -26,7 +26,9 @@ async function client(): Promise<MiniMaxClient | Error> {
 /** Fetch all H3 tasks in MiniMax's seven-day query window. */
 async function fetchAllTasks(): Promise<VideoTask[] | Error> {
     const api = await client();
-    if (api instanceof Error) return api;
+    if (api instanceof Error) {
+        return api;
+    }
 
     const tasks: VideoTask[] = [];
     for (let page = 1; page <= 50; page++) {
@@ -34,7 +36,9 @@ async function fetchAllTasks(): Promise<VideoTask[] | Error> {
             page_num: page,
             page_size: 100,
         });
-        if (result instanceof Error) return result;
+        if (result instanceof Error) {
+            return result;
+        }
         tasks.push(...result.items);
         if (result.items.length === 0 || tasks.length >= result.total) {
             return tasks;
@@ -45,13 +49,17 @@ async function fetchAllTasks(): Promise<VideoTask[] | Error> {
 
 async function fetchFiles(): Promise<MiniMaxFile[] | Error> {
     const api = await client();
-    if (api instanceof Error) return api;
+    if (api instanceof Error) {
+        return api;
+    }
     const result = await api.listVideoGenerationFiles();
     return result instanceof Error ? result : result.files;
 }
 
 function fmtTime(unixSeconds: number): string {
-    if (!unixSeconds) return "—";
+    if (!unixSeconds) {
+        return "—";
+    }
     return new Date(unixSeconds * 1000).toISOString().replace("T", " ").slice(
         0,
         19,
@@ -59,8 +67,12 @@ function fmtTime(unixSeconds: number): string {
 }
 
 function fmtBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 ** 2) {
+        return `${(bytes / 1024).toFixed(1)} KiB`;
+    }
     if (bytes < 1024 ** 3) {
         return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
     }
@@ -191,7 +203,9 @@ function TaskGroups({ tasks }: { tasks: VideoTask[] }) {
 
 function formatUsage(task: VideoTask): string {
     const usage = task.usage;
-    if (!usage) return "—";
+    if (!usage) {
+        return "—";
+    }
     const values = [
         usage.total_seconds === undefined
             ? null

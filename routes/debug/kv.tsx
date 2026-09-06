@@ -11,7 +11,9 @@ type EncodedKeyPart =
 
 function encodeBytes(bytes: Uint8Array): string {
     let binary = "";
-    for (const byte of bytes) binary += String.fromCharCode(byte);
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
     return btoa(binary);
 }
 
@@ -39,7 +41,9 @@ function encodeKeyPart(part: Deno.KvKeyPart): EncodedKeyPart {
 }
 
 function decodeKeyPart(part: unknown): Deno.KvKeyPart | null {
-    if (part === null || typeof part !== "object") return null;
+    if (part === null || typeof part !== "object") {
+        return null;
+    }
     const encoded = part as Partial<EncodedKeyPart>;
     switch (encoded.type) {
         case "string":
@@ -66,18 +70,25 @@ function encodeKey(key: Deno.KvKey): string {
 }
 
 function decodeKey(value: FormDataEntryValue | null): Deno.KvKey | null {
-    if (typeof value !== "string") return null;
+    if (typeof value !== "string") {
+        return null;
+    }
     try {
         const parts = JSON.parse(value) as unknown[];
-        if (!Array.isArray(parts)) return null;
+        if (!Array.isArray(parts)) {
+            return null;
+        }
         const key: Deno.KvKeyPart[] = [];
         for (const part of parts) {
             const decoded = decodeKeyPart(part);
-            if (decoded === null) return null;
+            if (decoded === null) {
+                return null;
+            }
             key.push(decoded);
         }
         return key;
-    } catch {
+    }
+    catch {
         return null;
     }
 }
@@ -91,10 +102,13 @@ function fmtKey(key: Deno.KvKey): string {
 
 /** Pretty-print any KV value for display. */
 function fmtValue(value: unknown): string {
-    if (typeof value === "string") return value;
+    if (typeof value === "string") {
+        return value;
+    }
     try {
         return JSON.stringify(value, null, 2);
-    } catch {
+    }
+    catch {
         return String(value);
     }
 }

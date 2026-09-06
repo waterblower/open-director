@@ -41,13 +41,17 @@ export async function getStoredApiKeyFromModel(
     // ("fal/minimax/h3/..."), but the request is billed against a fal key.
     if (model.startsWith("fal/")) {
         provider = "fal";
-    } else if (model.startsWith("autodl/")) {
+    }
+    else if (model.startsWith("autodl/")) {
         provider = "autodl";
-    } else if (model.includes("minimax")) {
+    }
+    else if (model.includes("minimax")) {
         provider = "minimax";
-    } else if (model.includes("seedance")) {
+    }
+    else if (model.includes("seedance")) {
         provider = "seedance";
-    } else {
+    }
+    else {
         throw new Error(`Unsupported model: ${model}`);
     }
     return await getStoredApiKey(provider);

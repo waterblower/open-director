@@ -80,7 +80,8 @@ export async function check_and_download(): Promise<void | Error> {
                             e,
                         );
                     }
-                } else {
+                }
+                else {
                     console.error(
                         `[task-checker] get task ${gen.task_id} failed:`,
                         polled,
@@ -106,7 +107,9 @@ export async function check_and_download(): Promise<void | Error> {
             }
 
             // Not ready yet (queued/running/…) — try again next pass.
-            if (status !== "succeeded") continue;
+            if (status !== "succeeded") {
+                continue;
+            }
 
             await downloadAndRecord(
                 db,
@@ -175,7 +178,8 @@ export async function check_and_download(): Promise<void | Error> {
                 if (getContentHashByGenerationId(db, gen.id) == null) {
                     await hashAndRecord(db, gen.id, dest);
                 }
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     `[task-checker] healing generation ${gen.task_id} failed:`,
                     err,
@@ -191,7 +195,9 @@ export async function check_and_download(): Promise<void | Error> {
         for (const gen of stuck) {
             try {
                 const ageMs = Date.now() - Date.parse(gen.created_at);
-                if (ageMs <= QUEUED_GRACE_MS) continue; // still being submitted
+                if (ageMs <= QUEUED_GRACE_MS) {
+                    continue; // still being submitted
+                }
 
                 console.log(
                     `[task-checker] failing stuck queued generation ${gen.id} (never submitted)`,
@@ -208,7 +214,8 @@ export async function check_and_download(): Promise<void | Error> {
                         err,
                     );
                 }
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     `[task-checker] healing queued generation ${gen.id} failed:`,
                     err,
@@ -291,7 +298,8 @@ async function hashAndRecord(
                 err,
             );
         }
-    } catch (err) {
+    }
+    catch (err) {
         console.error(`[task-checker] hash ${dest} failed:`, err);
     }
 }
@@ -301,8 +309,11 @@ async function fileExists(path: string): Promise<boolean> {
     try {
         await Deno.stat(path);
         return true;
-    } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return false;
+    }
+    catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+            return false;
+        }
         throw err;
     }
 }
@@ -319,7 +330,8 @@ async function writeVideoResponse(response: Response, dest: string) {
     });
     try {
         await response.body.pipeTo(file.writable);
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
