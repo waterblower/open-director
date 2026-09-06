@@ -6,6 +6,7 @@ import {
 } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
+import { buildGenerationRequest } from "./generation_request.ts";
 import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
@@ -1659,41 +1660,29 @@ export function Composer(props: {
                                     })),
                                 );
 
-                                const gen_p = trpc.open.generate.mutate({
+                                const request = buildGenerationRequest({
                                     model: selected,
                                     prompt: prompt.value.trim(),
                                     attachments: atts,
                                     ratio: ratio.value,
-                                    resolution:
-                                        selectedResolution.value === "768p"
-                                            ? "768P"
-                                            : selectedResolution.value,
+                                    resolution: selectedResolution.value,
                                     durationMode: durationMode.value,
                                     duration: duration.value,
                                     audio: audio.value,
                                     mode: mode.value,
                                 });
-                                clearAll();
-                                // A rejected mutation (no API key, network
-                                // down, …) never produces a generation row, so
-                                // surface it here — otherwise it's an unhandled
-                                // rejection and the user sees nothing at all.
-                                let gen;
-                                try {
-                                    gen = await gen_p;
-                                }
-                                catch (err) {
-                                    console.error(
-                                        "[Composer] generate request failed:",
-                                        err,
-                                    );
-                                    genError.value = err instanceof Error
-                                        ? err.message
-                                        : String(err);
-                                    await delay(5000);
-                                    genError.value = null;
+                                if (request instanceof Error) {
+                                    genError.value = request.message;
                                     return;
                                 }
+                                const gen = await trpc.open.generate.mutate(
+                                    request,
+                                );
+                                if ("error" in gen) {
+                                    genError.value = gen.message;
+                                    return;
+                                }
+                                clearAll();
                                 console.log("generating", gen);
                                 if (gen.status == "failed") {
                                     genError.value = gen.failed_reason!;

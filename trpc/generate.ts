@@ -1,537 +1,142 @@
 import { publicProcedure } from "@/trpc/init.ts";
-import * as z from "zod";
 import {
-    archiveGeneration,
-    clearGenerationReaction,
     createGeneration,
     db,
-    Generation,
+    type Generation,
     getGenerationById,
-    getGenerationByTaskId,
-    getGenerationDetail,
-    getGenerationIdByContentHash,
-    getGenerationReaction,
-    getGenerationRequest,
-    listArchivedGenerationIds,
-    listGenerationReactions,
-    listGenerations,
     recordGeneration,
-    reopenDb,
-    setGenerationReaction,
-    unarchiveGeneration,
     updateGeneration,
 } from "../db.ts";
 import { getLastOpenedProject } from "@/project_registry.ts";
 import { getStoredApiKeyFromModel, kv } from "@/kv.ts";
-import { global_event_bus, resolveToDataUrl } from "@/trpc/router.ts";
-import { externalizeAttachments, storeDataUrl } from "@/uploads.ts";
-
+import { global_event_bus } from "@/trpc/router.ts";
+import { storeDataUrl } from "@/uploads.ts";
 import {
     generate,
-    GenerateInput,
+    type GenerateInput,
+    GenerateInputSchema,
     getTask,
-    isAutoDLModel,
-    isFalModel,
-    isMiniMaxModel,
-    isSeedanceModel,
     localTaskStatus,
     taskIdFromCreateResponse,
 } from "@/apigen/mod.ts";
-import * as seedance from "../apigen/seedance/seedance.ts";
-import { FalInput } from "@/apigen/fal.ts";
-import * as minimax from "../apigen/minimax.ts";
-import * as autodl from "../apigen/autodl.ts";
+import { extname } from "@std/path";
 
 export const tRPC_generate = publicProcedure
-    .input(z.object({
-        model: z.union([
-            z.enum([
-                "doubao-seedance-2-0-260128",
-                "doubao-seedance-2-0-fast-260128",
-                "doubao-seedance-2-0-mini-260615",
-                "fal/minimax/h3/reference-to-video",
-                ...autodl.AUTODL_Models,
-            ]),
-            minimax.VideoModelSchema,
-        ]),
-        prompt: z.string(),
-        attachments: z.array(z.object({
-            kind: z.enum(["image", "video", "audio"]),
-            dataUrlOrFilePath: z.string(),
-        })),
-        ratio: z.enum([
-            "16:9",
-            "9:16",
-            "1:1",
-            "4:3",
-            "3:4",
-            "21:9",
-            "adaptive",
-            "horizontal",
-            "vertical",
-        ]),
-        resolution: z.enum([
-            "1080p",
-            "720p",
-            "480p",
-            "768P",
-            "2K",
-        ]),
-        durationMode: z.enum(["seconds", "smart"]),
-        duration: z.number(),
-        audio: z.boolean(),
-        mode: z.enum(["reference", "frames"]).default("reference"),
-    }))
-    .mutation(async (opts) => {
-        if (!db) {
-            throw new Error("Database not initialized");
-        }
-        const {
-            prompt,
-            attachments,
-            ratio,
-            durationMode,
-            duration,
-            audio,
-            resolution,
-            model,
-            mode,
-        } = opts.input;
-
-        const projectRoot = (await getLastOpenedProject(kv))?.path;
-        if (!projectRoot) {
-            throw new Error("Project not initialized");
-        }
-
-        let request: GenerateInput;
-        let storedRequest: GenerateInput;
-        if (isFalModel(model)) {
-            if (!prompt.trim()) {
-                throw new Error(
-                    "fal reference-to-video requires a prompt",
-                );
-            }
-            if (attachments.some((att) => att.kind !== "image")) {
-                throw new Error(
-                    "fal reference-to-video accepts image references only",
-                );
-            }
-            const falResolution = resolution === "480p"
-                ? "480P"
-                : resolution === "768P"
-                ? "768P"
-                : null;
-            if (!falResolution) {
-                throw new Error(
-                    `Unsupported fal resolution: ${resolution}`,
-                );
-            }
-            if (duration > 15) {
-                throw new Error("fal duration must be at most 15s");
-            }
-            const falRatio = ratio === "horizontal"
-                ? "16:9"
-                : ratio === "vertical"
-                ? "9:16"
-                : ratio;
-            // fal fetches references by URL, and our uploads dir isn't
-            // reachable from the internet — so send the bytes inline
-            // and only externalize the copy we persist.
-            const inlineUrls = await Promise.all(
-                attachments.map((att) =>
-                    resolveToDataUrl(att.dataUrlOrFilePath)
-                ),
-            );
-            const falInput: FalInput = {
-                prompt: prompt.trim(),
-                duration,
-                resolution: falResolution,
-                enable_safety_checker: false,
-                prompt_expansion_mode: "fast",
-                aspect_ratio: falRatio,
-                reference_image_urls: inlineUrls,
-            };
-            request = { model, input: falInput };
-            const storedUrls = await Promise.all(
-                inlineUrls.map(async (url) => {
-                    if (!url.startsWith("data:")) {
-                        return url;
-                    }
-                    const stored = await storeDataUrl(
-                        projectRoot,
-                        url,
-                    );
-                    if (stored instanceof Error) {
-                        console.error(
-                            "[trpc] failed to store generated asset:",
-                            stored,
-                        );
-                        return url;
-                    }
-                    return stored;
-                }),
-            );
-            storedRequest = {
-                model,
-                input: {
-                    ...falInput,
-                    reference_image_urls: storedUrls,
-                },
+    .input(GenerateInputSchema)
+    .mutation(async ({ input }) => {
+        const result = await submitGeneration(input);
+        if (result instanceof Error) {
+            return {
+                error: true as const,
+                ...result,
             };
         }
-        else if (isMiniMaxModel(model)) {
-            if (!prompt.trim()) {
-                throw new Error("MiniMax H3 requires a prompt");
-            }
-
-            const useFrames = mode === "frames" ||
-                model === "MiniMax-H3-Max";
-            if (
-                useFrames &&
-                (attachments.length > 2 ||
-                    attachments.some((att) => att.kind !== "image"))
-            ) {
-                throw new Error(
-                    "MiniMax frame generation accepts at most two images",
-                );
-            }
-            const content: minimax.VideoGenerationContent[] = [{
-                type: "text",
-                text: prompt.trim(),
-            }];
-            for (const [index, att] of attachments.entries()) {
-                const rawUrl = await resolveToDataUrl(
-                    att.dataUrlOrFilePath,
-                );
-                const url = normalizeMiniMaxDataUrl(rawUrl);
-                if (useFrames) {
-                    content.push({
-                        type: "image_url",
-                        image_url: { url },
-                        role: index === 0 ? "first_frame" : "last_frame",
-                    });
-                }
-                else if (att.kind === "image") {
-                    content.push({
-                        type: "image_url",
-                        image_url: { url },
-                        role: "reference_image",
-                    });
-                }
-                else if (att.kind === "video") {
-                    content.push({
-                        type: "video_url",
-                        video_url: { url },
-                        role: "reference_video",
-                    });
-                }
-                else {
-                    content.push({
-                        type: "audio_url",
-                        audio_url: { url },
-                        role: "reference_audio",
-                    });
-                }
-            }
-
-            const outputResolution = resolution === "2K"
-                ? "2K"
-                : resolution === "768P"
-                ? "768P"
-                : resolution === "480p"
-                ? "480P"
-                : null;
-            if (!outputResolution) {
-                throw new Error(
-                    `Unsupported MiniMax resolution: ${resolution}`,
-                );
-            }
-            const outputRatio = ratio === "horizontal"
-                ? "16:9"
-                : ratio === "vertical"
-                ? "9:16"
-                : ratio;
-            request = {
-                model,
-                content,
-                resolution: outputResolution,
-                duration,
-                ratio: useFrames && attachments.length > 0
-                    ? "adaptive"
-                    : outputRatio,
-            };
-            storedRequest = {
-                ...request,
-                content: await externalizeMiniMaxAttachments(
-                    projectRoot,
-                    content,
-                ),
-            };
-        }
-        else if (isSeedanceModel(model)) {
-            // Assemble Seedance multimodal content: optional text, then
-            // each attachment as a typed reference.
-            if (resolution === "768P" || resolution === "2K") {
-                throw new Error(
-                    `Unsupported Seedance resolution: ${resolution}`,
-                );
-            }
-            const content: seedance.ContentItem[] = [];
-            if (prompt) {
-                content.push({ type: "text", text: prompt });
-            }
-            for (const att of attachments) {
-                const url = await resolveToDataUrl(
-                    att.dataUrlOrFilePath,
-                );
-                if (att.kind === "image") {
-                    content.push({
-                        type: "image_url",
-                        image_url: { url },
-                        role: "reference_image",
-                    });
-                }
-                else if (att.kind === "video") {
-                    content.push({
-                        type: "video_url",
-                        video_url: { url },
-                        role: "reference_video",
-                    });
-                }
-                else {
-                    content.push({
-                        type: "audio_url",
-                        audio_url: { url },
-                        role: "reference_audio",
-                    });
-                }
-            }
-            const seedanceRequest = {
-                model,
-                content,
-                generate_audio: audio,
-                resolution,
-                ratio: ratio as Exclude<
-                    typeof ratio,
-                    "horizontal" | "vertical"
-                >,
-                ...(durationMode === "seconds" ? { duration } : {}),
-            } satisfies seedance.CreateTaskRequest;
-            request = seedanceRequest;
-            storedRequest = {
-                ...seedanceRequest,
-                content: await externalizeAttachments(
-                    projectRoot,
-                    content,
-                ),
-            };
-        }
-        else if (isAutoDLModel(model)) {
-            if (!prompt.trim()) {
-                throw new Error("AutoDL requires a prompt");
-            }
-            if (mode !== "reference" || durationMode !== "seconds") {
-                throw new Error(
-                    "AutoDL requires reference mode and a fixed duration",
-                );
-            }
-            if (
-                attachments.length < 1 || attachments.length > 9 ||
-                attachments.some((att) => att.kind !== "image")
-            ) {
-                throw new Error("AutoDL requires 1–9 reference images");
-            }
-            if (
-                !["16:9", "9:16", "1:1", "horizontal", "vertical"].includes(
-                    ratio,
-                )
-            ) {
-                throw new Error("Unsupported AutoDL aspect ratio");
-            }
-            const size = resolution === "768P" ? "768p" : resolution;
-            const orientation = ratio === "9:16" || ratio === "vertical"
-                ? "竖"
-                : ratio === "1:1"
-                ? "(1:1)"
-                : "横";
-            const nativeResolution = autodl.AutoDL_GenerateInput_Schema.shape
-                .input.shape.resolution.parse(`${size}${orientation}`);
-            autodl.AutoDL_GenerateInput_Schema.shape.input.shape.duration.parse(
-                duration,
-            );
-            const inlineUrls = await Promise.all(
-                attachments.map((att) =>
-                    resolveToDataUrl(att.dataUrlOrFilePath)
-                ),
-            );
-            const input = autodl.AutoDL_GenerateInput_Schema.shape.input.parse({
-                prompt: prompt.trim(),
-                duration,
-                resolution: nativeResolution,
-                ...Object.fromEntries(
-                    inlineUrls.map((url, index) => [`ref_image_${index}`, url]),
-                ),
-            });
-            request = { model, input };
-            const storedUrls = await Promise.all(inlineUrls.map(async (url) => {
-                if (!url.startsWith("data:")) {
-                    return url;
-                }
-                const stored = await storeDataUrl(projectRoot, url);
-                if (stored instanceof Error) {
-                    throw stored;
-                }
-                return stored;
-            }));
-            storedRequest = {
-                model,
-                input: {
-                    ...input,
-                    ...Object.fromEntries(
-                        storedUrls.map((
-                            url,
-                            index,
-                        ) => [`ref_image_${index}`, url]),
-                    ),
-                },
-            };
-        }
-        else {
-            throw new Error(`Unsupported model: ${model}`);
-        }
-
-        // Resolve the key *before* logging the generation: a row with
-        // no task id looks "queued" to task_checker, which only gives
-        // up after a 5 minute grace and then reports the generic
-        // "never submitted" reason instead of the real cause.
-        const apiKey = await getStoredApiKeyFromModel(request.model);
-        if (!apiKey) {
-            throw new Error(
-                `No API key configured for ${request.model} — add one in Settings`,
-            );
-        }
-
-        const generation = createGeneration(db, storedRequest);
-        if (generation instanceof Error) {
-            throw generation;
-        }
-        console.log("[trpc] generation created:", generation.id);
-        await global_event_bus.put({
-            type: "generation_created",
-            gen: generation,
-        });
-
-        const created = await generate(request, apiKey).catch((error) =>
-            error instanceof Error ? error : new Error(String(error))
-        );
-        if (created instanceof Error) {
-            return failGeneration(created.message, generation as Generation);
-        }
-        const taskId = taskIdFromCreateResponse(created.res);
-        if (taskId instanceof Error) {
-            return failGeneration(taskId.message, generation as Generation);
-        }
-        console.log("[trpc] task created:", created);
-        const err = updateGeneration(db, {
-            id: generation.id,
-            task_id: taskId,
-        });
-        if (err instanceof Error) {
-            throw err;
-        }
-
-        const polled = await getTask(request.model, taskId, apiKey);
-        if (polled instanceof Error) {
-            // The task exists (we have its id) — leave it for
-            // task_checker to poll rather than failing the row.
-            console.error(
-                `[trpc] first poll of ${taskId} failed:`,
-                polled,
-            );
-            const gen = getGenerationById(db, generation.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            return gen;
-        }
-        if (polled.provider == "autodl") {
-            throw new Error("not implemented");
-        }
-        else {
-            const task = polled.task;
-            const err2 = updateGeneration(db, {
-                id: generation.id,
-                task_json: task,
-                status: localTaskStatus(task.status),
-            });
-            if (err2 instanceof Error) {
-                throw err2;
-            }
-
-            console.log("[trpc] task result:", task);
-
-            // Logging failure shouldn't fail the request — the task is created.
-            const recordErr = recordGeneration(db, {
-                taskId,
-                requestJson: JSON.stringify(storedRequest),
-                createdAt: new Date().toISOString(),
-                status: localTaskStatus(task.status),
-                task,
-            });
-            if (recordErr) {
-                console.error(
-                    "[trpc] failed to record task log:",
-                    recordErr,
-                );
-            }
-            const gen = getGenerationById(db, generation.id);
-            if (gen instanceof Error) {
-                throw gen;
-            }
-            return gen;
-        }
+        return result;
     });
 
-/** Normalize browser MIME aliases to the data-URI spellings MiniMax accepts. */
-function normalizeMiniMaxDataUrl(url: string): string {
-    return url
-        .replace(/^data:audio\/mpeg;base64,/, "data:audio/mp3;base64,")
-        .replace(
-            /^data:audio\/(?:x-wav|wave);base64,/,
-            "data:audio/wav;base64,",
+async function submitGeneration(
+    input: GenerateInput,
+) {
+    if (!db) {
+        return new Error("Database not initialized");
+    }
+    const projectRoot = (await getLastOpenedProject(kv))?.path;
+    if (!projectRoot) {
+        return new Error("Project not initialized");
+    }
+    const prepared = await prepareRequestMedia(input, projectRoot);
+    if (prepared instanceof Error) {
+        return prepared;
+    }
+    const { request, storedRequest } = prepared;
+    // Resolve the key *before* logging the generation: a row with
+    // no task id looks "queued" to task_checker, which only gives
+    // up after a 5 minute grace and then reports the generic
+    // "never submitted" reason instead of the real cause.
+    const apiKey = await getStoredApiKeyFromModel(request.model);
+    if (!apiKey) {
+        return new Error(
+            `No API key configured for ${request.model} — add one in Settings`,
         );
-}
-/** Keep generation history small by replacing inline MiniMax media with files. */
-async function externalizeMiniMaxAttachments(
-    projectRoot: string,
-    content: minimax.VideoGenerationContent[],
-): Promise<minimax.VideoGenerationContent[]> {
-    return await Promise.all(content.map(async (item) => {
-        if (item.type === "text") {
-            return item;
+    }
+
+    const generation = createGeneration(db, storedRequest);
+    if (generation instanceof Error) {
+        return generation;
+    }
+    console.log("[trpc] generation created:", generation.id);
+    await global_event_bus.put({
+        type: "generation_created",
+        gen: generation,
+    });
+
+    const created = await generate(request, apiKey);
+    if (created instanceof Error) {
+        return failGeneration(created.message, generation as Generation);
+    }
+    const taskId = taskIdFromCreateResponse(created.res);
+    if (taskId instanceof Error) {
+        return failGeneration(taskId.message, generation as Generation);
+    }
+    console.log("[trpc] task created:", created);
+    const err = updateGeneration(db, {
+        id: generation.id,
+        task_id: taskId,
+    });
+    if (err instanceof Error) {
+        return err;
+    }
+
+    const polled = await getTask(request.model, taskId, apiKey);
+    if (polled instanceof Error) {
+        // The task exists (we have its id) — leave it for
+        // task_checker to poll rather than failing the row.
+        console.error(
+            `[trpc] first poll of ${taskId} failed:`,
+            polled,
+        );
+        const gen = getGenerationById(db, generation.id);
+        if (gen instanceof Error) {
+            return gen;
+        }
+        return gen;
+    }
+    if (polled.provider == "autodl") {
+        throw new Error("not implemented");
+    }
+    else {
+        const task = polled.task;
+        const err2 = updateGeneration(db, {
+            id: generation.id,
+            task_json: task,
+            status: localTaskStatus(task.status),
+        });
+        if (err2 instanceof Error) {
+            return err2;
         }
 
-        const source = item.type === "image_url"
-            ? item.image_url.url
-            : item.type === "video_url"
-            ? item.video_url.url
-            : item.audio_url.url;
-        if (!source.startsWith("data:")) {
-            return item;
-        }
+        console.log("[trpc] task result:", task);
 
-        const url = await storeDataUrl(projectRoot, source);
-        if (url instanceof Error) {
-            throw url;
+        // Logging failure shouldn't fail the request — the task is created.
+        const recordErr = recordGeneration(db, {
+            taskId,
+            requestJson: JSON.stringify(storedRequest),
+            createdAt: new Date().toISOString(),
+            status: localTaskStatus(task.status),
+            task,
+        });
+        if (recordErr) {
+            console.error(
+                "[trpc] failed to record task log:",
+                recordErr,
+            );
         }
-        if (item.type === "image_url") {
-            return { ...item, image_url: { url } };
+        const gen = getGenerationById(db, generation.id);
+        if (gen instanceof Error) {
+            return gen;
         }
-        if (item.type === "video_url") {
-            return { ...item, video_url: { url } };
-        }
-        return { ...item, audio_url: { url } };
-    }));
+        return gen;
+    }
 }
 
 /**
@@ -549,11 +154,161 @@ const failGeneration = (reason: string, generation: Generation) => {
         status: "failed",
     });
     if (err instanceof Error) {
-        throw err;
+        return err;
     }
     const gen = getGenerationById(db!, generation.id);
     if (gen instanceof Error) {
-        throw gen;
+        return gen;
     }
     return gen;
 };
+
+/** Native file reads may fail; return those failures to the RPC boundary. */
+async function inlineMedia(url: string): Promise<string | Error> {
+    if (/^(data:|https?:\/\/|mm_file:\/\/)/.test(url)) {
+        return url;
+    }
+    let bytes: Uint8Array;
+    try {
+        bytes = await Deno.readFile(url);
+    }
+    catch (error) {
+        return error instanceof Error ? error : new Error(String(error));
+    }
+    const mime: Record<string, string> = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".mp3": "audio/mp3",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".ogg": "audio/ogg",
+    };
+    return `data:${
+        mime[extname(url).toLowerCase()] ?? "application/octet-stream"
+    };base64,${bytes.toBase64()}`;
+}
+
+/** Prepare dispatch and history copies using the provider's known media shape. */
+async function prepareRequestMedia(input: GenerateInput, projectRoot: string) {
+    const request = structuredClone(input);
+    const storedRequest = structuredClone(input);
+    if (
+        request.model === "fal/minimax/h3/reference-to-video" &&
+        storedRequest.model === "fal/minimax/h3/reference-to-video"
+    ) {
+        for (
+            const [index, url] of request.input.reference_image_urls.entries()
+        ) {
+            const media = await prepareMedia(url, projectRoot);
+            if (media instanceof Error) {
+                return media;
+            }
+            request.input.reference_image_urls[index] = media.inline;
+            storedRequest.input.reference_image_urls[index] = media.stored;
+        }
+    }
+    else if (
+        request.model === "autodl/minimax_h3_lightx2v_v5" &&
+        storedRequest.model === "autodl/minimax_h3_lightx2v_v5"
+    ) {
+        const keys = [
+            "ref_image_0",
+            "ref_image_1",
+            "ref_image_2",
+            "ref_image_3",
+            "ref_image_4",
+            "ref_image_5",
+            "ref_image_6",
+            "ref_image_7",
+            "ref_image_8",
+        ] as const;
+        for (const key of keys) {
+            const url = request.input[key];
+            if (url === undefined) {
+                continue;
+            }
+            const media = await prepareMedia(url, projectRoot);
+            if (media instanceof Error) {
+                return media;
+            }
+            request.input[key] = media.inline;
+            storedRequest.input[key] = media.stored;
+        }
+    }
+    else if ("content" in request && "content" in storedRequest) {
+        // Seedance and MiniMax both discriminate content items by type.
+        for (const [index, item] of request.content.entries()) {
+            const storedItem = storedRequest.content[index];
+            if (item.type === "image_url" && storedItem.type === "image_url") {
+                const media = await prepareMedia(
+                    item.image_url.url,
+                    projectRoot,
+                );
+                if (media instanceof Error) {
+                    return media;
+                }
+                item.image_url.url = media.inline;
+                storedItem.image_url.url = media.stored;
+            }
+            else if (
+                item.type === "video_url" && storedItem.type === "video_url"
+            ) {
+                const media = await prepareMedia(
+                    item.video_url.url,
+                    projectRoot,
+                );
+                if (media instanceof Error) {
+                    return media;
+                }
+                item.video_url.url = media.inline;
+                storedItem.video_url.url = media.stored;
+            }
+            else if (
+                item.type === "audio_url" && storedItem.type === "audio_url"
+            ) {
+                const media = await prepareMedia(
+                    item.audio_url.url,
+                    projectRoot,
+                );
+                if (media instanceof Error) {
+                    return media;
+                }
+                item.audio_url.url = media.inline;
+                storedItem.audio_url.url = media.stored;
+            }
+        }
+    }
+    else {
+        throw new Error("Unsupported generation request shape");
+    }
+    const parsed = GenerateInputSchema.safeParse(request);
+    if (!parsed.success) {
+        return parsed.error;
+    }
+    const stored = GenerateInputSchema.safeParse(storedRequest);
+    if (!stored.success) {
+        return stored.error;
+    }
+    return { request: parsed.data, storedRequest: stored.data };
+}
+
+async function prepareMedia(url: string, projectRoot: string) {
+    const inline = await inlineMedia(url);
+    if (inline instanceof Error) {
+        return inline;
+    }
+    if (!inline.startsWith("data:")) {
+        return { inline, stored: inline };
+    }
+    const stored = await storeDataUrl(projectRoot, inline);
+    if (stored instanceof Error) {
+        return stored;
+    }
+    return { inline, stored };
+}

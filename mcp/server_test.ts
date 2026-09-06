@@ -32,8 +32,8 @@ Deno.test("MCP schemas preserve object inputs and wrap scalar inputs", () => {
 
     assert(objectSchema?.type === "object", "generate must accept an object");
     assert(
-        (objectSchema.properties as Record<string, unknown>)?.prompt != null,
-        "generate.prompt is missing",
+        Array.isArray(objectSchema.anyOf) && objectSchema.anyOf.length === 4,
+        "generate must expose the native provider union",
     );
     assert(
         (scalarSchema?.properties as Record<string, unknown>)?.input != null,

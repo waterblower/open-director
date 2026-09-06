@@ -59,6 +59,16 @@ function zodInputSchema(input: unknown): JsonSchema | null {
     }
 }
 
+/** Object unions remain native MCP argument objects. */
+function isObjectSchema(schema: JsonSchema): boolean {
+    if (schema.type === "object") {
+        return true;
+    }
+    const branches = schema.anyOf ?? schema.oneOf;
+    return Array.isArray(branches) && branches.length > 0 &&
+        branches.every((branch) => isObjectSchema(branch as JsonSchema));
+}
+
 function inputContract(inputs: readonly unknown[]): Pick<
     Tool,
     "inputSchema" | "inputOf"
@@ -83,12 +93,12 @@ function inputContract(inputs: readonly unknown[]): Pick<
     }
 
     const knownSchemas = schemas as JsonSchema[];
-    const allObjects = knownSchemas.every((schema) => schema.type === "object");
+    const allObjects = knownSchemas.every(isObjectSchema);
 
     if (allObjects) {
         return {
             inputSchema: knownSchemas.length === 1
-                ? knownSchemas[0]
+                ? { ...knownSchemas[0], type: "object" }
                 : { type: "object", allOf: knownSchemas },
             inputOf: (args) => args,
         };
