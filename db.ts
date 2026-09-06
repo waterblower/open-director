@@ -20,44 +20,7 @@ import {
 } from "./apigen/mod.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
-
-/**
- * A TEXT column holding JSON serialized from `schema`. Parses and validates it
- * to the typed value.
- *
- * Malformed JSON or a schema mismatch is reported as a regular Zod issue (via
- * `ctx.addIssue` + `z.NEVER`) rather than thrown: a raw `throw` inside a
- * `.transform()` escapes `safeParse` as a real exception, so callers could not
- * rely on getting a result back. Compose with `.nullable().catch(null)` where a
- * single stale row (e.g. one written under a since-removed model/provider)
- * should degrade to `null` instead of failing the whole row or listing.
- */
-function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().transform((s, ctx): T => {
-        let value: unknown;
-        try {
-            value = JSON.parse(s);
-        } catch (err) {
-            ctx.addIssue({
-                code: "custom",
-                message: `Malformed JSON: ${
-                    err instanceof Error ? err.message : String(err)
-                }`,
-            });
-            return z.NEVER;
-        }
-        const result = schema.safeParse(value, { reportInput: true });
-        if (!result.success) {
-            ctx.addIssue({
-                code: "custom",
-                message: "Does not match schema",
-                params: { error: result.error },
-            });
-            return z.NEVER;
-        }
-        return result.data;
-    });
-}
+import schema from "./db.schema.sqlite?raw" with { type: "text" };
 
 // `let` (not `const`) so switching projects can swap in that project's DB; the
 // export is a live binding, so importers see the new handle after `reopenDb()`.
@@ -97,35 +60,7 @@ export async function getDatabase(project_root?: string) {
     Deno.mkdirSync(dir, { recursive: true });
     const path = join(dir, "database.sqlite");
     const db = new DatabaseSync(path);
-    db.exec(`
-        PRAGMA foreign_keys = ON;
-        CREATE TABLE IF NOT EXISTS Generations (
-            id            TEXT PRIMARY KEY,
-            task_id       TEXT UNIQUE,
-            status        TEXT,
-            request_json  TEXT,
-            task_json     TEXT,
-            created_at    TEXT,
-            downloaded_at TEXT,
-            failed_reason TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS ArchivedGenerations (
-            generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS GenerationReactions (
-            generation_id TEXT PRIMARY KEY REFERENCES Generations(id),
-            reaction      TEXT NOT NULL CHECK (reaction IN ('liked', 'disliked')),
-            reason        TEXT,
-            created_at    TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS ContentHashes (
-            generation_id TEXT UNIQUE REFERENCES Generations(id),
-            content_hash  TEXT UNIQUE
-        );
-    `);
+    db.exec(schema);
     return db;
 }
 
@@ -674,4 +609,42 @@ export function getGenerationIdByContentHash(
         "SELECT generation_id FROM ContentHashes WHERE content_hash = ?",
     ).get(contentHash) as { generation_id: string } | undefined;
     return row?.generation_id ?? null;
+}
+
+/**
+ * A TEXT column holding JSON serialized from `schema`. Parses and validates it
+ * to the typed value.
+ *
+ * Malformed JSON or a schema mismatch is reported as a regular Zod issue (via
+ * `ctx.addIssue` + `z.NEVER`) rather than thrown: a raw `throw` inside a
+ * `.transform()` escapes `safeParse` as a real exception, so callers could not
+ * rely on getting a result back. Compose with `.nullable().catch(null)` where a
+ * single stale row (e.g. one written under a since-removed model/provider)
+ * should degrade to `null` instead of failing the whole row or listing.
+ */
+function jsonColumn<T>(schema: z.ZodType<T>) {
+    return z.string().transform((s, ctx): T => {
+        let value: unknown;
+        try {
+            value = JSON.parse(s);
+        } catch (err) {
+            ctx.addIssue({
+                code: "custom",
+                message: `Malformed JSON: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            });
+            return z.NEVER;
+        }
+        const result = schema.safeParse(value, { reportInput: true });
+        if (!result.success) {
+            ctx.addIssue({
+                code: "custom",
+                message: "Does not match schema",
+                params: { error: result.error },
+            });
+            return z.NEVER;
+        }
+        return result.data;
+    });
 }

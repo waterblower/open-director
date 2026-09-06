@@ -1,0 +1,27 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS Generations (
+    id            TEXT PRIMARY KEY,
+    task_id       TEXT UNIQUE,
+    status        TEXT,
+    request_json  TEXT,
+    task_json     TEXT,
+    created_at    TEXT,
+    downloaded_at TEXT,
+    failed_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ArchivedGenerations (
+    generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
+);
+
+CREATE TABLE IF NOT EXISTS GenerationReactions (
+    generation_id TEXT PRIMARY KEY REFERENCES Generations(id),
+    reaction      TEXT NOT NULL CHECK (reaction IN ('liked', 'disliked')),
+    reason        TEXT,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ContentHashes (
+    generation_id TEXT UNIQUE REFERENCES Generations(id),
+    content_hash  TEXT UNIQUE
+);
