@@ -204,7 +204,8 @@ function loadComposerState(): Partial<ComposerState> | null {
     try {
         const raw = localStorage.getItem(COMPOSER_STATE_KEY);
         return raw ? JSON.parse(raw) as Partial<ComposerState> : null;
-    } catch {
+    }
+    catch {
         return null;
     }
 }
@@ -212,12 +213,17 @@ function loadComposerState(): Partial<ComposerState> | null {
 function saveComposerState(state: ComposerState): void {
     try {
         localStorage.setItem(COMPOSER_STATE_KEY, JSON.stringify(state));
-    } catch { /* storage unavailable or full — non-fatal */ }
+    }
+    catch { /* storage unavailable or full — non-fatal */ }
 }
 
 function kindOf(file: File): AttachmentKind {
-    if (file.type.startsWith("video/")) return "video";
-    if (file.type.startsWith("audio/")) return "audio";
+    if (file.type.startsWith("video/")) {
+        return "video";
+    }
+    if (file.type.startsWith("audio/")) {
+        return "audio";
+    }
     return "image";
 }
 
@@ -437,7 +443,9 @@ export function Composer(props: {
     // height so the last row can always scroll clear of it.
     useEffect(() => {
         const el = composerRef.current;
-        if (!el) return;
+        if (!el) {
+            return;
+        }
         const update = () => composerInset.value = el.offsetHeight + 48;
         update();
         const ro = new ResizeObserver(update);
@@ -463,22 +471,33 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            if (saved.mode) mode.value = saved.mode;
-            if (saved.ratio) ratio.value = saved.ratio;
+            if (saved.mode) {
+                mode.value = saved.mode;
+            }
+            if (saved.ratio) {
+                ratio.value = saved.ratio;
+            }
             if (saved.resolution && typeof saved.resolution === "object") {
                 resolution.value = saved.resolution;
-            } else if (typeof saved.resolution === "string") {
+            }
+            else if (typeof saved.resolution === "string") {
                 // Older composer state stored only the resolution string.
                 const savedResolution = saved.resolution;
                 const option = MODEL_RESOLUTIONS["doubao-seedance-2-0-260128"]
                     .find((option) => option.value === savedResolution);
-                if (option) resolution.value = option;
+                if (option) {
+                    resolution.value = option;
+                }
             }
-            if (saved.durationMode) durationMode.value = saved.durationMode;
+            if (saved.durationMode) {
+                durationMode.value = saved.durationMode;
+            }
             if (typeof saved.duration === "number") {
                 duration.value = saved.duration;
             }
-            if (typeof saved.audio === "boolean") audio.value = saved.audio;
+            if (typeof saved.audio === "boolean") {
+                audio.value = saved.audio;
+            }
         }
         hydrated.current = true;
     }, []);
@@ -494,13 +513,55 @@ export function Composer(props: {
             duration: duration.value,
             audio: audio.value,
         };
-        if (hydrated.current) saveComposerState(state);
+        if (hydrated.current) {
+            saveComposerState(state);
+        }
     });
 
     // Replace the composer's content (prompt text + reference media) and
     // generation settings with a past generation's request, as requested by
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
+        if (req.model === "autodl/minimax_h3_lightx2v_v5") {
+            const input = req.input;
+            model.value = req.model;
+            prompt.value = input.prompt;
+            ratio.value = input.resolution.endsWith("竖")
+                ? "9:16"
+                : input.resolution.endsWith("(1:1)")
+                ? "1:1"
+                : "16:9";
+            resolution.value = {
+                provider: "autodl",
+                value: input.resolution.startsWith("480")
+                    ? "480p"
+                    : input.resolution.startsWith("1080")
+                    ? "1080p"
+                    : "768p",
+            };
+            duration.value = input.duration;
+            durationMode.value = "seconds";
+            mode.value = "reference";
+            const urls = Object.entries(input).filter(([key, value]) =>
+                key.startsWith("ref_image_") && typeof value === "string"
+            ).sort(([a], [b]) => a.localeCompare(b));
+            attachments.value.forEach((item) => URL.revokeObjectURL(item.url));
+            attachments.value = await Promise.all(
+                urls.map(async ([, url]) => ({
+                    id: nextId.current++,
+                    kind: "image" as const,
+                    name: kindLabel("image", language.value),
+                    url: URL.createObjectURL(
+                        await (await fetch(url as string)).blob(),
+                    ),
+                })),
+            );
+            if (promptRef.current) {
+                promptRef.current.value = input.prompt;
+                autoGrow(promptRef.current);
+            }
+            return;
+        }
         if (req.model === "fal/minimax/h3/reference-to-video") {
             const input = req.input;
             prompt.value = input.prompt;
@@ -594,7 +655,8 @@ export function Composer(props: {
                 autoGrow(ta);
             }
             return;
-        } else if (
+        }
+        else if (
             req.model == "doubao-seedance-2-0-260128" ||
             req.model == "doubao-seedance-2-0-fast-260128" ||
             req.model == "doubao-seedance-2-0-mini-260615"
@@ -616,7 +678,9 @@ export function Composer(props: {
             // Settings — mirror how the request was assembled on submit: `duration`
             // is only present in "seconds" mode, omitted in "smart" mode.
             model.value = req.model;
-            if (req.ratio) ratio.value = req.ratio;
+            if (req.ratio) {
+                ratio.value = req.ratio;
+            }
             if (req.resolution) {
                 resolution.value = {
                     provider: "seedance",
@@ -626,7 +690,8 @@ export function Composer(props: {
             if (typeof req.duration === "number") {
                 durationMode.value = "seconds";
                 duration.value = req.duration;
-            } else {
+            }
+            else {
                 durationMode.value = "smart";
             }
             if (typeof req.generate_audio === "boolean") {
@@ -659,14 +724,17 @@ export function Composer(props: {
                 name: kindLabel(m.kind, language.value),
                 url: URL.createObjectURL(await (await fetch(m.url)).blob()),
             })));
-        } else {
+        }
+        else {
             throw new Error("Unsupported model: " + req.model);
         }
     };
 
     useSignalEffect(() => {
         const req = reusePrompt.value;
-        if (!req) return;
+        if (!req) {
+            return;
+        }
         reusePrompt.value = null; // consume once
         applyReuse(req).catch((err) =>
             console.error("[Composer] failed to apply reused request:", err)
@@ -699,13 +767,17 @@ export function Composer(props: {
     const resolutions = useComputed(() => {
         if (isSeedanceModel(model.value)) {
             return MODEL_RESOLUTIONS[model.value];
-        } else if (isMiniMaxModel(model.value)) {
+        }
+        else if (isMiniMaxModel(model.value)) {
             return MINIMAX_MODEL_RESOLUTIONS[model.value];
-        } else if (isFalModel(model.value)) {
+        }
+        else if (isFalModel(model.value)) {
             return FAL_MODEL_RESOLUTIONS[model.value];
-        } else if (isAutoDLModel(model.value)) {
+        }
+        else if (isAutoDLModel(model.value)) {
             return AUTODL_RESOLUTIONS;
-        } else {
+        }
+        else {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
@@ -741,21 +813,25 @@ export function Composer(props: {
             durationMode.value = "seconds";
             duration.value = Math.max(1, Math.min(15, duration.value));
             return;
-        } else if (isMiniMaxModel(model.value)) {
+        }
+        else if (isMiniMaxModel(model.value)) {
             const minimum = model.value === "MiniMax-H3-Max" ? 5 : 4;
             duration.value = Math.max(
                 minimum,
                 Math.min(15, duration.value),
             );
             durationMode.value = "seconds";
-            if (model.value === "MiniMax-H3-Max") mode.value = "frames";
+            if (model.value === "MiniMax-H3-Max") {
+                mode.value = "frames";
+            }
             if (
                 attachments.value.length === 0 && ratio.value === "adaptive"
             ) {
                 ratio.value = "16:9";
             }
             return;
-        } else if (!isSeedanceModel(model.value)) {
+        }
+        else if (!isSeedanceModel(model.value)) {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
@@ -770,11 +846,16 @@ export function Composer(props: {
         if (isFalModel(model.value)) {
             return prompt.value.trim().length > 0 &&
                 attachments.value.every((item) => item.kind === "image");
-        } else if (isMiniMaxModel(model.value)) {
-            if (!prompt.value.trim()) return false;
+        }
+        else if (isMiniMaxModel(model.value)) {
+            if (!prompt.value.trim()) {
+                return false;
+            }
             if (
                 attachments.value.length === 0 && ratio.value === "adaptive"
-            ) return false;
+            ) {
+                return false;
+            }
             if (
                 mode.value === "frames" ||
                 model.value === "MiniMax-H3-Max"
@@ -792,7 +873,8 @@ export function Composer(props: {
                 item.kind === "audio"
             ).length;
             return imageCount <= 9 && videoCount <= 3 && audioCount <= 3;
-        } else {
+        }
+        else {
             return prompt.value.trim().length > 0 ||
                 attachments.value.length > 0;
         }
@@ -803,7 +885,9 @@ export function Composer(props: {
     };
 
     const addFiles = (files: FileList | File[] | null) => {
-        if (!files) return;
+        if (!files) {
+            return;
+        }
         const miniMaxFrames = isMiniMaxModel(model.value) &&
             (mode.value === "frames" || model.value === "MiniMax-H3-Max");
         const accepted = isAutoDLModel(model.value)
@@ -831,7 +915,9 @@ export function Composer(props: {
             isMiniMaxModel(model.value) &&
             (mode.value === "frames" || model.value === "MiniMax-H3-Max") &&
             attachments.value.length >= 2
-        ) return;
+        ) {
+            return;
+        }
         const url = "/project-file/" +
             path.split("/").map(encodeURIComponent).join("/");
         const blob = await (await fetch(url)).blob();
@@ -847,11 +933,15 @@ export function Composer(props: {
     // Accept pasted media (e.g. an image copied from the file explorer).
     const onPaste = (e: ClipboardEvent) => {
         const files = e.clipboardData?.files;
-        if (!files || files.length === 0) return; // let text paste through
+        if (!files || files.length === 0) {
+            return; // let text paste through
+        }
         const media = Array.from(files).filter((f) =>
             /^(image|video|audio)\//.test(f.type)
         );
-        if (media.length === 0) return;
+        if (media.length === 0) {
+            return;
+        }
         e.preventDefault();
         addFiles(media);
     };
@@ -860,7 +950,9 @@ export function Composer(props: {
     // dragged from the project file explorer.
     const onDragOver = (e: DragEvent) => {
         const types = e.dataTransfer?.types;
-        if (!types) return;
+        if (!types) {
+            return;
+        }
         if (!types.includes("Files") && !types.includes(PROJECT_FILE_MIME)) {
             return; // ignore unrelated internal element drags
         }
@@ -871,7 +963,9 @@ export function Composer(props: {
 
     const onDragLeave = (e: DragEvent) => {
         // Ignore leaves into descendants; only clear when exiting the card.
-        if (e.currentTarget === e.target) dropActive.value = false;
+        if (e.currentTarget === e.target) {
+            dropActive.value = false;
+        }
     };
 
     const onDrop = (e: DragEvent) => {
@@ -891,18 +985,24 @@ export function Composer(props: {
         }
 
         const files = e.dataTransfer?.files;
-        if (!files || files.length === 0) return;
+        if (!files || files.length === 0) {
+            return;
+        }
         const media = Array.from(files).filter((f) =>
             /^(image|video|audio)\//.test(f.type)
         );
-        if (media.length === 0) return;
+        if (media.length === 0) {
+            return;
+        }
         e.preventDefault();
         addFiles(media);
     };
 
     const removeAttachment = (id: number) => {
         const target = attachments.value.find((a) => a.id === id);
-        if (target) URL.revokeObjectURL(target.url);
+        if (target) {
+            URL.revokeObjectURL(target.url);
+        }
         attachments.value = attachments.value.filter((a) => a.id !== id);
     };
 
@@ -933,7 +1033,9 @@ export function Composer(props: {
     const selectMention = (label: string) => {
         const m = mention.value;
         const ta = promptRef.current;
-        if (!m || !ta) return;
+        if (!m || !ta) {
+            return;
+        }
         const text = prompt.value;
         const insert = `@${label} `;
         prompt.value = text.slice(0, m.index) + insert +
@@ -958,25 +1060,31 @@ export function Composer(props: {
         const caret = ta.selectionStart ?? 0;
         if (caret > 0 && ta.value[caret - 1] === "@") {
             openMention(ta, caret - 1);
-        } else {
+        }
+        else {
             mention.value = null;
         }
     };
 
     const onPromptKeyDown = (e: KeyboardEvent) => {
-        if (!mention.value) return;
+        if (!mention.value) {
+            return;
+        }
         const items = labeled.value;
         if (e.key === "Escape") {
             e.preventDefault();
             mention.value = null;
-        } else if (e.key === "ArrowDown" && items.length > 0) {
+        }
+        else if (e.key === "ArrowDown" && items.length > 0) {
             e.preventDefault();
             mentionActive.value = (mentionActive.value + 1) % items.length;
-        } else if (e.key === "ArrowUp" && items.length > 0) {
+        }
+        else if (e.key === "ArrowUp" && items.length > 0) {
             e.preventDefault();
             mentionActive.value = (mentionActive.value + items.length - 1) %
                 items.length;
-        } else if (e.key === "Enter" && items.length > 0) {
+        }
+        else if (e.key === "Enter" && items.length > 0) {
             e.preventDefault();
             selectMention(items[mentionActive.value].label);
         }
@@ -1538,7 +1646,6 @@ export function Composer(props: {
                                 genError.value = null;
                                 const selected = model.value;
                                 const selectedResolution = resolution.value;
-                                const selectedRatio = ratio.value;
 
                                 // The server can't read blob: URLs, so
                                 // inline each attachment's bytes as a data
@@ -1551,43 +1658,6 @@ export function Composer(props: {
                                         ),
                                     })),
                                 );
-
-                                // if (isAutoDLModel(selected)) {
-                                //     if (
-                                //         selectedResolution.provider !== "autodl"
-                                //     ) return;
-                                //     const orientation = selectedRatio === "9:16"
-                                //         ? "竖"
-                                //         : selectedRatio === "1:1"
-                                //         ? "(1:1)"
-                                //         : "横";
-                                //     const request: AutoDLGenerateInput = {
-                                //         model: selected,
-                                //         input: {
-                                //             prompt: prompt.value.trim(),
-                                //             duration: duration.value,
-                                //             resolution:
-                                //                 `${selectedResolution.value}${orientation}`,
-                                //             ref_image_0:
-                                //                 atts[0].dataUrlOrFilePath,
-                                //             ...Object.fromEntries(
-                                //                 atts.slice(1).map((
-                                //                     attachment,
-                                //                     index,
-                                //                 ) => [
-                                //                     `ref_image_${index + 1}`,
-                                //                     attachment
-                                //                         .dataUrlOrFilePath,
-                                //                 ]),
-                                //             ),
-                                //         },
-                                //     };
-                                //     console.log(
-                                //         "[Composer] AutoDL submission:",
-                                //         request,
-                                //     );
-                                //     return;
-                                // }
 
                                 const gen_p = trpc.open.generate.mutate({
                                     model: selected,
@@ -1611,7 +1681,8 @@ export function Composer(props: {
                                 let gen;
                                 try {
                                     gen = await gen_p;
-                                } catch (err) {
+                                }
+                                catch (err) {
                                     console.error(
                                         "[Composer] generate request failed:",
                                         err,

@@ -154,7 +154,9 @@ export const tRPC_generate = publicProcedure
             request = { model, input: falInput };
             const storedUrls = await Promise.all(
                 inlineUrls.map(async (url) => {
-                    if (!url.startsWith("data:")) return url;
+                    if (!url.startsWith("data:")) {
+                        return url;
+                    }
                     const stored = await storeDataUrl(
                         projectRoot,
                         url,
@@ -176,7 +178,8 @@ export const tRPC_generate = publicProcedure
                     reference_image_urls: storedUrls,
                 },
             };
-        } else if (isMiniMaxModel(model)) {
+        }
+        else if (isMiniMaxModel(model)) {
             if (!prompt.trim()) {
                 throw new Error("MiniMax H3 requires a prompt");
             }
@@ -207,19 +210,22 @@ export const tRPC_generate = publicProcedure
                         image_url: { url },
                         role: index === 0 ? "first_frame" : "last_frame",
                     });
-                } else if (att.kind === "image") {
+                }
+                else if (att.kind === "image") {
                     content.push({
                         type: "image_url",
                         image_url: { url },
                         role: "reference_image",
                     });
-                } else if (att.kind === "video") {
+                }
+                else if (att.kind === "video") {
                     content.push({
                         type: "video_url",
                         video_url: { url },
                         role: "reference_video",
                     });
-                } else {
+                }
+                else {
                     content.push({
                         type: "audio_url",
                         audio_url: { url },
@@ -261,7 +267,8 @@ export const tRPC_generate = publicProcedure
                     content,
                 ),
             };
-        } else if (isSeedanceModel(model)) {
+        }
+        else if (isSeedanceModel(model)) {
             // Assemble Seedance multimodal content: optional text, then
             // each attachment as a typed reference.
             if (resolution === "768P" || resolution === "2K") {
@@ -270,7 +277,9 @@ export const tRPC_generate = publicProcedure
                 );
             }
             const content: seedance.ContentItem[] = [];
-            if (prompt) content.push({ type: "text", text: prompt });
+            if (prompt) {
+                content.push({ type: "text", text: prompt });
+            }
             for (const att of attachments) {
                 const url = await resolveToDataUrl(
                     att.dataUrlOrFilePath,
@@ -281,13 +290,15 @@ export const tRPC_generate = publicProcedure
                         image_url: { url },
                         role: "reference_image",
                     });
-                } else if (att.kind === "video") {
+                }
+                else if (att.kind === "video") {
                     content.push({
                         type: "video_url",
                         video_url: { url },
                         role: "reference_video",
                     });
-                } else {
+                }
+                else {
                     content.push({
                         type: "audio_url",
                         audio_url: { url },
@@ -314,10 +325,78 @@ export const tRPC_generate = publicProcedure
                     content,
                 ),
             };
-        } else if (isAutoDLModel(model)) {
-            console.log("[trpc] auto-dl model:", model);
-            throw "not implemented";
-        } else {
+        }
+        else if (isAutoDLModel(model)) {
+            if (!prompt.trim()) {
+                throw new Error("AutoDL requires a prompt");
+            }
+            if (mode !== "reference" || durationMode !== "seconds") {
+                throw new Error(
+                    "AutoDL requires reference mode and a fixed duration",
+                );
+            }
+            if (
+                attachments.length < 1 || attachments.length > 9 ||
+                attachments.some((att) => att.kind !== "image")
+            ) {
+                throw new Error("AutoDL requires 1–9 reference images");
+            }
+            if (
+                !["16:9", "9:16", "1:1", "horizontal", "vertical"].includes(
+                    ratio,
+                )
+            ) {
+                throw new Error("Unsupported AutoDL aspect ratio");
+            }
+            const size = resolution === "768P" ? "768p" : resolution;
+            const orientation = ratio === "9:16" || ratio === "vertical"
+                ? "竖"
+                : ratio === "1:1"
+                ? "(1:1)"
+                : "横";
+            const nativeResolution = autodl.AutoDL_GenerateInput_Schema.shape
+                .input.shape.resolution.parse(`${size}${orientation}`);
+            autodl.AutoDL_GenerateInput_Schema.shape.input.shape.duration.parse(
+                duration,
+            );
+            const inlineUrls = await Promise.all(
+                attachments.map((att) =>
+                    resolveToDataUrl(att.dataUrlOrFilePath)
+                ),
+            );
+            const input = autodl.AutoDL_GenerateInput_Schema.shape.input.parse({
+                prompt: prompt.trim(),
+                duration,
+                resolution: nativeResolution,
+                ...Object.fromEntries(
+                    inlineUrls.map((url, index) => [`ref_image_${index}`, url]),
+                ),
+            });
+            request = { model, input };
+            const storedUrls = await Promise.all(inlineUrls.map(async (url) => {
+                if (!url.startsWith("data:")) {
+                    return url;
+                }
+                const stored = await storeDataUrl(projectRoot, url);
+                if (stored instanceof Error) {
+                    throw stored;
+                }
+                return stored;
+            }));
+            storedRequest = {
+                model,
+                input: {
+                    ...input,
+                    ...Object.fromEntries(
+                        storedUrls.map((
+                            url,
+                            index,
+                        ) => [`ref_image_${index}`, url]),
+                    ),
+                },
+            };
+        }
+        else {
             throw new Error(`Unsupported model: ${model}`);
         }
 
@@ -342,7 +421,9 @@ export const tRPC_generate = publicProcedure
             gen: generation,
         });
 
-        const created = await generate(request, apiKey);
+        const created = await generate(request, apiKey).catch((error) =>
+            error instanceof Error ? error : new Error(String(error))
+        );
         if (created instanceof Error) {
             return failGeneration(created.message, generation as Generation);
         }
@@ -368,40 +449,47 @@ export const tRPC_generate = publicProcedure
                 polled,
             );
             const gen = getGenerationById(db, generation.id);
-            if (gen instanceof Error) throw gen;
+            if (gen instanceof Error) {
+                throw gen;
+            }
             return gen;
         }
-        const task = polled.task;
-        const err2 = updateGeneration(db, {
-            id: generation.id,
-            task_json: task,
-            status: localTaskStatus(task),
-        });
-        if (err2 instanceof Error) {
-            throw err2;
+        if (polled.provider == "autodl") {
+            throw new Error("not implemented");
         }
+        else {
+            const task = polled.task;
+            const err2 = updateGeneration(db, {
+                id: generation.id,
+                task_json: task,
+                status: localTaskStatus(task.status),
+            });
+            if (err2 instanceof Error) {
+                throw err2;
+            }
 
-        console.log("[trpc] task result:", task);
+            console.log("[trpc] task result:", task);
 
-        // Logging failure shouldn't fail the request — the task is created.
-        const recordErr = recordGeneration(db, {
-            taskId,
-            requestJson: JSON.stringify(storedRequest),
-            createdAt: new Date().toISOString(),
-            status: localTaskStatus(task),
-            task,
-        });
-        if (recordErr) {
-            console.error(
-                "[trpc] failed to record task log:",
-                recordErr,
-            );
+            // Logging failure shouldn't fail the request — the task is created.
+            const recordErr = recordGeneration(db, {
+                taskId,
+                requestJson: JSON.stringify(storedRequest),
+                createdAt: new Date().toISOString(),
+                status: localTaskStatus(task.status),
+                task,
+            });
+            if (recordErr) {
+                console.error(
+                    "[trpc] failed to record task log:",
+                    recordErr,
+                );
+            }
+            const gen = getGenerationById(db, generation.id);
+            if (gen instanceof Error) {
+                throw gen;
+            }
+            return gen;
         }
-        const gen = getGenerationById(db, generation.id);
-        if (gen instanceof Error) {
-            throw gen;
-        }
-        return gen;
     });
 
 /** Normalize browser MIME aliases to the data-URI spellings MiniMax accepts. */
@@ -419,17 +507,23 @@ async function externalizeMiniMaxAttachments(
     content: minimax.VideoGenerationContent[],
 ): Promise<minimax.VideoGenerationContent[]> {
     return await Promise.all(content.map(async (item) => {
-        if (item.type === "text") return item;
+        if (item.type === "text") {
+            return item;
+        }
 
         const source = item.type === "image_url"
             ? item.image_url.url
             : item.type === "video_url"
             ? item.video_url.url
             : item.audio_url.url;
-        if (!source.startsWith("data:")) return item;
+        if (!source.startsWith("data:")) {
+            return item;
+        }
 
         const url = await storeDataUrl(projectRoot, source);
-        if (url instanceof Error) throw url;
+        if (url instanceof Error) {
+            throw url;
+        }
         if (item.type === "image_url") {
             return { ...item, image_url: { url } };
         }

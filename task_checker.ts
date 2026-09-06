@@ -89,37 +89,46 @@ export async function check_and_download(): Promise<void | Error> {
                 }
                 continue;
             }
-            const task = polled.task;
 
-            // Record terminal failures (with the reason) so they drop out
-            // of `pending` and we stop polling them.
-            const status = localTaskStatus(task);
-            if (status === "failed") {
-                const reason = taskFailureReason(task);
-                console.log("[task-checker] task failed:", task, reason ?? "");
-                recordTaskStatus(db, {
-                    taskId: gen.task_id,
-                    status,
-                    taskJson: JSON.stringify(task),
-                    failedReason: reason,
-                });
-                continue;
+            if (polled.provider == "autodl") {
+                throw new Error("not implemented");
             }
+            else {
+                const task = polled.task;
+                // Record terminal failures (with the reason) so they drop out
+                // of `pending` and we stop polling them.
+                const status = localTaskStatus(task.status);
+                if (status === "failed") {
+                    const reason = taskFailureReason(task);
+                    console.log(
+                        "[task-checker] task failed:",
+                        task,
+                        reason ?? "",
+                    );
+                    recordTaskStatus(db, {
+                        taskId: gen.task_id,
+                        status,
+                        taskJson: JSON.stringify(task),
+                        failedReason: reason,
+                    });
+                    continue;
+                }
 
-            // Not ready yet (queued/running/…) — try again next pass.
-            if (status !== "succeeded") {
-                continue;
+                // Not ready yet (queued/running/…) — try again next pass.
+                if (status !== "succeeded") {
+                    continue;
+                }
+
+                await downloadAndRecord(
+                    db,
+                    project_path,
+                    gen.id,
+                    gen.task_id,
+                    gen.model ?? "",
+                    task,
+                    apiKey ?? "",
+                );
             }
-
-            await downloadAndRecord(
-                db,
-                project_path,
-                gen.id,
-                gen.task_id,
-                gen.model ?? "",
-                task,
-                apiKey ?? "",
-            );
         }
 
         // 3. Heal dirty data: rows we believe are downloaded but whose file is
@@ -153,24 +162,29 @@ export async function check_and_download(): Promise<void | Error> {
                         );
                         continue;
                     }
-                    const task = polled.task;
-                    const status = localTaskStatus(task);
-                    if (status !== "succeeded") {
-                        console.error(
-                            `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
+                    if (polled.provider == "autodl") {
+                        throw new Error("not implemented");
+                    }
+                    else {
+                        const task = polled.task;
+                        const status = localTaskStatus(task.status);
+                        if (status !== "succeeded") {
+                            console.error(
+                                `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
+                            );
+                            continue;
+                        }
+                        await downloadAndRecord(
+                            db,
+                            project_path,
+                            gen.id,
+                            gen.task_id,
+                            gen.model ?? "",
+                            task,
+                            apiKey ?? "",
                         );
                         continue;
                     }
-                    await downloadAndRecord(
-                        db,
-                        project_path,
-                        gen.id,
-                        gen.task_id,
-                        gen.model ?? "",
-                        task,
-                        apiKey ?? "",
-                    );
-                    continue;
                 }
 
                 // Backfill the content hash for videos downloaded before
@@ -258,7 +272,7 @@ async function downloadAndRecord(
 
     markDownloaded(db, {
         taskId,
-        status: localTaskStatus(task),
+        status: localTaskStatus(task.status),
         taskJson: JSON.stringify(task),
         downloadedAt: new Date().toISOString(),
     });

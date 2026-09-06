@@ -52,10 +52,10 @@ export type GenerationTask = z.infer<typeof GenerationTaskSchema>;
 export type LocalTaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export async function generate(
-    input: GenerateInput | autoDL.generate_Input,
+    input: GenerateInput,
     apiKey: string,
 ) {
-    if (isAutoDLModel(input.model)) {
+    if (input.model == "autodl/minimax_h3_lightx2v_v5") {
         const result = await autoDL.generate(input, apiKey);
         if (result instanceof Error) {
             return result;
@@ -147,16 +147,16 @@ export async function getTask(
     model: string,
     taskId: string,
     apiKey: string,
-): Promise<GetTaskResult | Error> {
+) {
     if (isAutoDLModel(model)) {
         const result = await autoDL.get(taskId, apiKey);
         if (result instanceof Error) {
             return result;
         }
         return {
-            provider: "autodl",
+            provider: "autodl" as const,
             model,
-            task: autoDLResultToTask(model, result.data!, result.msg),
+            task: result.data,
         };
     }
     else if (isFalModel(model)) {
@@ -165,7 +165,7 @@ export async function getTask(
             return result;
         }
         return {
-            provider: "fal",
+            provider: "fal" as const,
             model,
             task: falResultToTask(model, taskId, result),
         };
@@ -179,7 +179,7 @@ export async function getTask(
             return response;
         }
         return {
-            provider: "minimax",
+            provider: "minimax" as const,
             model,
             task: response.task,
         };
@@ -190,7 +190,7 @@ export async function getTask(
             return task;
         }
         return {
-            provider: "seedance",
+            provider: "seedance" as const,
             model,
             task,
         };
@@ -265,8 +265,8 @@ export function isFalModel(
 
 export function isAutoDLModel(
     value: string,
-): value is typeof AUTODL_Models[number] {
-    return AUTODL_Models.some((model) => model == value);
+) {
+    return AUTODL_Models[0] == value;
 }
 
 export function isFalInput(
@@ -323,16 +323,25 @@ export function isMiniMaxInput(
     return isMiniMaxModel(input.model);
 }
 
-export function localTaskStatus(task: GenerationTask): LocalTaskStatus {
-    switch (task.status) {
+export function localTaskStatus(
+    status:
+        | "queued"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled"
+        | "expired"
+        | undefined,
+): LocalTaskStatus {
+    switch (status) {
         case "cancelled":
         case "expired":
+        case "failed":
             return "failed";
         case "running":
         case "succeeded":
-        case "failed":
         case "queued":
-            return task.status;
+            return status;
         default:
             return "queued";
     }
@@ -357,58 +366,4 @@ export function taskFailureReason(task: GenerationTask): string | undefined {
         ? error.message
         : undefined;
     return code && message ? `${code}: ${message}` : message ?? code;
-}
-
-/** Normalize AutoDL responses for the shared polling and download pipeline. */
-export function autoDLResultToTask(
-    model: string,
-    data: NonNullable<z.infer<typeof autoDL.get_Output_Schema>["data"]>,
-    message: string,
-): SeedanceTask {
-    const timestamp = Date.parse(
-        data.created_at.includes("T")
-            ? data.created_at
-            : data.created_at.replace(" ", "T") + "+08:00",
-    );
-    const base = {
-        id: data.task_id,
-        model,
-        created_at: Number.isFinite(timestamp)
-            ? Math.floor(timestamp / 1000)
-            : Math.floor(Date.now() / 1000),
-    };
-    if (data.status === "QUEUED") {
-        return { ...base, status: "queued" };
-    }
-    if (data.status === "RUNNING") {
-        return { ...base, status: "running" };
-    }
-    if (data.status === "SUCCESS") {
-        const videos = data.results?.filter((item) => item.type === "video");
-        const video = videos?.find((item) => item.alias === "final_video") ??
-            videos?.[0];
-        if (video?.url) {
-            return {
-                ...base,
-                status: "succeeded",
-                content: { video_url: video.url },
-            };
-        }
-        return {
-            ...base,
-            status: "failed",
-            error: {
-                code: "MISSING_VIDEO",
-                message: "AutoDL completed without a video URL",
-            },
-        };
-    }
-    return {
-        ...base,
-        status: "failed",
-        error: {
-            code: data.status,
-            message: data.message || message || "AutoDL generation failed",
-        },
-    };
 }
