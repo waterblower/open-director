@@ -1,12 +1,4 @@
 import {
-    type Attachment,
-    type ComposerSettings,
-    restoreSettings,
-    type SettingsAction,
-    settingsControls,
-    transitionSettings,
-} from "./composer_settings.ts";
-import {
     type Signal,
     useComputed,
     useSignal,
@@ -14,14 +6,20 @@ import {
 } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { buildGenerationRequest } from "./generation_request.ts";
+import type { CreateTaskRequest } from "../apigen/seedance/seedance.ts";
+import type { CreateVideoTaskRequest } from "../apigen/minimax.ts";
+import type { FalInput } from "../apigen/fal.ts";
 import { PROJECT_FILE_MIME } from "@/constants.ts";
 import type {
     AspectRatio,
     SeedanceModel,
 } from "../apigen/seedance/seedance.ts";
 import type { generate_Input as AutoDLGenerateInput } from "../apigen/autodl.ts";
-import { type GenerateInput, isAutoDLModel } from "../apigen/mod.ts";
+import {
+    type GenerateInput,
+    isAutoDLModel,
+    isMiniMaxInput,
+} from "../apigen/mod.ts";
 
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { get_text, Language, language, trpc } from "../trpc/client.ts";
@@ -40,36 +38,267 @@ export function Composer(props: {
     const { genError, composerInset, reusePrompt } = props;
 
     const prompt = useSignal("");
-    const settings = useSignal<ComposerSettings>(restoreSettings(null));
-    const controls = useComputed(() => settingsControls(settings.value));
-    const attachments = useComputed(() => settings.value.attachments);
-    const model = useComputed(() => settings.value.model);
-    const mode = useComputed(() => controls.value.mode);
-    const ratio = useComputed(() => settings.value.ratio);
-    const resolution = useComputed(() => ({
-        provider: isSeedanceModel(model.value)
-            ? "seedance"
+    const model = useSignal<GenerationModel>("doubao-seedance-2-0-260128");
+    const provider_input_seedance = useSignal<SeedanceInput>({
+        content: [],
+        ratio: "21:9",
+        resolution: "480p",
+        duration: 4,
+        generate_audio: true,
+    });
+    const provider_input_minimax = useSignal<MiniMaxInput>({
+        content: [],
+        ratio: "16:9",
+        resolution: "768P",
+        duration: 5,
+    });
+    const provider_input_fal = useSignal<FalDraft>({
+        reference_image_urls: [],
+        aspect_ratio: "16:9",
+        resolution: "768P",
+        duration: 5,
+        enable_safety_checker: false,
+        prompt_expansion_mode: "fast",
+    });
+    const provider_input_autodl = useSignal<AutoDLDraft>({
+        ref_image_0: "",
+        resolution: "768p横",
+        duration: 5,
+    });
+    // Frame/reference selection is editor state; native requests encode it in media roles.
+    const minimaxMode = useSignal<"reference" | "frames">("reference");
+    const mediaLabels = useRef(new Map<string, Attachment>());
+    const attachments = useComputed(() => {
+        let media: { kind: AttachmentKind; url: string }[];
+        if (isSeedanceModel(model.value)) {
+            media = contentMedia(provider_input_seedance.value.content);
+        }
+        else if (isMiniMaxModel(model.value)) {
+            media = contentMedia(provider_input_minimax.value.content);
+        }
+        else if (isFalModel(model.value)) {
+            media = provider_input_fal.value.reference_image_urls.map((
+                url,
+            ) => ({ kind: "image", url }));
+        }
+        else {
+            media = autoDLMedia(provider_input_autodl.value);
+        }
+        return media.map((item, index) =>
+            mediaLabels.current.get(item.url) ??
+                {
+                    ...item,
+                    id: index,
+                    name: kindLabel(item.kind, language.value),
+                }
+        );
+    });
+    const getMode = () =>
+        isSeedanceModel(model.value)
+            ? "reference"
             : isMiniMaxModel(model.value)
-            ? "minimax"
+            ? model.value === "MiniMax-H3-Max" ? "frames" : minimaxMode.value
+            : "reference";
+    const getRatio = (): AspectRatio => {
+        if (isSeedanceModel(model.value)) {
+            return provider_input_seedance.value.ratio ?? "adaptive";
+        }
+        if (isMiniMaxModel(model.value)) {
+            return provider_input_minimax.value.ratio ?? "adaptive";
+        }
+        if (isFalModel(model.value)) {
+            return provider_input_fal.value.aspect_ratio;
+        }
+        return provider_input_autodl.value.resolution.endsWith("竖")
+            ? "9:16"
+            : provider_input_autodl.value.resolution.endsWith("(1:1)")
+            ? "1:1"
+            : "16:9";
+    };
+    const getResolution = (): Resolution => {
+        if (isSeedanceModel(model.value)) {
+            return {
+                provider: "seedance",
+                value: provider_input_seedance.value.resolution ?? "480p",
+            };
+        }
+        if (isMiniMaxModel(model.value)) {
+            return {
+                provider: "minimax",
+                value: provider_input_minimax.value.resolution === "480P"
+                    ? "480p"
+                    : "768p",
+            };
+        }
+        if (isFalModel(model.value)) {
+            return {
+                provider: "fal",
+                value: provider_input_fal.value.resolution === "480P"
+                    ? "480p"
+                    : "768p",
+            };
+        }
+        const value = provider_input_autodl.value.resolution;
+        return {
+            provider: "autodl",
+            value: value.startsWith("480")
+                ? "480p"
+                : value.startsWith("1080")
+                ? "1080p"
+                : "768p",
+        };
+    };
+    const getDurationMode = () =>
+        isSeedanceModel(model.value) &&
+            provider_input_seedance.value.duration === undefined
+            ? "smart"
+            : "seconds";
+    const getDuration = () =>
+        isSeedanceModel(model.value)
+            ? provider_input_seedance.value.duration ?? 4
+            : isMiniMaxModel(model.value)
+            ? provider_input_minimax.value.duration
             : isFalModel(model.value)
-            ? "fal"
-            : "autodl",
-        value: settings.value.resolution,
-    }));
-    const durationMode = useComputed(() => controls.value.durationMode);
-    const duration = useComputed(() => controls.value.duration);
-    const audio = useComputed(() => controls.value.audio);
-    const updateSettings = (action: SettingsAction) => {
-        const next = transitionSettings(settings.value, action);
-        const candidates = action.type === "attachments"
-            ? [...settings.value.attachments, ...action.value]
-            : settings.value.attachments;
-        for (const item of candidates) {
-            if (!next.attachments.some((kept) => kept.url === item.url)) {
+            ? provider_input_fal.value.duration
+            : provider_input_autodl.value.duration;
+    const setAttachments = (items: Attachment[]) => {
+        for (const item of attachments.value) {
+            if (!items.some((kept) => kept.url === item.url)) {
                 URL.revokeObjectURL(item.url);
+                mediaLabels.current.delete(item.url);
             }
         }
-        settings.value = next;
+        for (const item of items) {
+            mediaLabels.current.set(item.url, item);
+        }
+        if (isSeedanceModel(model.value)) {
+            provider_input_seedance.value = {
+                ...provider_input_seedance.value,
+                content: seedanceMedia(items),
+            };
+        }
+        else if (isMiniMaxModel(model.value)) {
+            provider_input_minimax.value = {
+                ...provider_input_minimax.value,
+                content: miniMaxMedia(items, getMode()),
+            };
+        }
+        else if (isFalModel(model.value)) {
+            provider_input_fal.value = {
+                ...provider_input_fal.value,
+                reference_image_urls: items.map((item) => item.url),
+            };
+        }
+        else {
+            const input = { ...provider_input_autodl.value };
+            for (const key of AUTODL_IMAGE_KEYS) {
+                delete input[key];
+            }
+            input.ref_image_0 = "";
+            for (const [index, item] of items.entries()) {
+                input[AUTODL_IMAGE_KEYS[index]] = item.url;
+            }
+            provider_input_autodl.value = input;
+        }
+    };
+    const setMode = (value: "reference" | "frames") => {
+        if (isSeedanceModel(model.value)) {
+            return;
+        }
+        else {
+            minimaxMode.value = value;
+        }
+        setAttachments(attachments.value);
+    };
+    const setRatio = (value: AspectRatio) => {
+        if (isSeedanceModel(model.value)) {
+            provider_input_seedance.value = {
+                ...provider_input_seedance.value,
+                ratio: value,
+            };
+        }
+        else if (isMiniMaxModel(model.value)) {
+            provider_input_minimax.value = {
+                ...provider_input_minimax.value,
+                ratio: value,
+            };
+        }
+        else if (isFalModel(model.value)) {
+            provider_input_fal.value = {
+                ...provider_input_fal.value,
+                aspect_ratio: value,
+            };
+        }
+        else {
+            const size = getResolution().value as "480p" | "768p" | "1080p";
+            provider_input_autodl.value = {
+                ...provider_input_autodl.value,
+                resolution: `${size}${
+                    value === "9:16" ? "竖" : value === "1:1" ? "(1:1)" : "横"
+                }`,
+            };
+        }
+    };
+    const setResolution = (value: Resolution) => {
+        if (value.provider === "seedance") {
+            provider_input_seedance.value = {
+                ...provider_input_seedance.value,
+                resolution: value.value,
+            };
+        }
+        else if (value.provider === "minimax") {
+            provider_input_minimax.value = {
+                ...provider_input_minimax.value,
+                resolution: value.value === "480p" ? "480P" : "768P",
+            };
+        }
+        else if (value.provider === "fal") {
+            provider_input_fal.value = {
+                ...provider_input_fal.value,
+                resolution: value.value === "480p" ? "480P" : "768P",
+            };
+        }
+        else {
+            const ratio = getRatio();
+            provider_input_autodl.value = {
+                ...provider_input_autodl.value,
+                resolution: `${value.value}${
+                    ratio === "9:16" ? "竖" : ratio === "1:1" ? "(1:1)" : "横"
+                }`,
+            };
+        }
+    };
+    const setDuration = (duration: number) => {
+        if (isSeedanceModel(model.value)) {
+            provider_input_seedance.value = {
+                ...provider_input_seedance.value,
+                duration,
+            };
+        }
+        else if (isMiniMaxModel(model.value)) {
+            provider_input_minimax.value = {
+                ...provider_input_minimax.value,
+                duration,
+            };
+        }
+        else if (isFalModel(model.value)) {
+            provider_input_fal.value = {
+                ...provider_input_fal.value,
+                duration,
+            };
+        }
+        else {
+            provider_input_autodl.value = {
+                ...provider_input_autodl.value,
+                duration,
+            };
+        }
+    };
+    const setDurationMode = (value: "seconds" | "smart") => {
+        provider_input_seedance.value = {
+            ...provider_input_seedance.value,
+            duration: value === "smart" ? undefined : 4,
+        };
     };
     const popover = useSignal<Popover>(null);
     const mention = useSignal<Mention | null>(null);
@@ -113,16 +342,46 @@ export function Composer(props: {
                     autoGrow(ta);
                 }
             }
-            settings.value = restoreSettings(saved.settings ?? saved);
+            if (saved.providers) {
+                minimaxMode.value = saved.minimaxMode ?? "reference";
+                model.value = saved.model ?? model.value;
+                provider_input_seedance.value = {
+                    ...saved.providers.seedance,
+                    content: [],
+                };
+                provider_input_minimax.value = {
+                    ...saved.providers.minimax,
+                    content: [],
+                };
+                provider_input_fal.value = {
+                    ...saved.providers.fal,
+                    reference_image_urls: [],
+                };
+                provider_input_autodl.value = {
+                    ...saved.providers.autodl,
+                    ref_image_0: "",
+                };
+            }
         }
         hydrated.current = true;
     }, []);
 
     useSignalEffect(() => {
-        const { attachments: _attachments, ...savedSettings } = settings.value;
+        const autodl = { ...provider_input_autodl.value };
+        for (const key of AUTODL_IMAGE_KEYS) {
+            delete autodl[key];
+        }
+        autodl.ref_image_0 = "";
         const state: ComposerState = {
             prompt: prompt.value,
-            settings: savedSettings,
+            model: model.value,
+            minimaxMode: minimaxMode.value,
+            providers: {
+                seedance: { ...provider_input_seedance.value, content: [] },
+                minimax: { ...provider_input_minimax.value, content: [] },
+                fal: { ...provider_input_fal.value, reference_image_urls: [] },
+                autodl,
+            },
         };
         if (hydrated.current) {
             saveComposerState(state);
@@ -134,20 +393,10 @@ export function Composer(props: {
     // the results grid's reuse button.
     const applyReuse = async (req: GenerateInput) => {
         let text: string;
-        let saved: Record<string, unknown>;
         let media: { kind: AttachmentKind; url: string }[];
         if (req.model === "autodl/minimax_h3_lightx2v_v5") {
             text = req.input.prompt;
-            saved = {
-                model: req.model,
-                ratio: req.input.resolution.endsWith("竖")
-                    ? "9:16"
-                    : req.input.resolution.endsWith("(1:1)")
-                    ? "1:1"
-                    : "16:9",
-                resolution: req.input.resolution.replace(/横|竖|\(1:1\)/g, ""),
-                duration: req.input.duration,
-            };
+
             media = Object.entries(req.input).filter(([key, value]) =>
                 key.startsWith("ref_image_") && typeof value === "string"
             ).sort(([a], [b]) => a.localeCompare(b)).map(([, url]) => ({
@@ -157,12 +406,7 @@ export function Composer(props: {
         }
         else if (req.model === "fal/minimax/h3/reference-to-video") {
             text = req.input.prompt;
-            saved = {
-                model: req.model,
-                ratio: req.input.aspect_ratio,
-                resolution: req.input.resolution,
-                duration: req.input.duration,
-            };
+
             media = req.input.reference_image_urls.map((url) => ({
                 kind: "image",
                 url,
@@ -172,21 +416,7 @@ export function Composer(props: {
             text = req.content.filter((item) => item.type === "text").map((
                 item,
             ) => item.text).join("\n");
-            saved = {
-                model: req.model,
-                ratio: req.ratio,
-                resolution: req.resolution,
-                duration: req.duration,
-                durationMode: req.duration === undefined ? "smart" : "seconds",
-                audio: "generate_audio" in req ? req.generate_audio : false,
-                mode: req.content.some((item) =>
-                        item.type === "image_url" &&
-                        (item.role === "first_frame" ||
-                            item.role === "last_frame")
-                    )
-                    ? "frames"
-                    : "reference",
-            };
+
             media = req.content.flatMap(
                 (item): { kind: AttachmentKind; url: string }[] => {
                     if (item.type === "image_url") {
@@ -232,19 +462,31 @@ export function Composer(props: {
                 url: URL.createObjectURL(blob),
             });
         }
-        for (const item of attachments.value) {
-            URL.revokeObjectURL(item.url);
+        model.value = req.model;
+        setAttachments([]);
+        if (req.model === "autodl/minimax_h3_lightx2v_v5") {
+            const { prompt: _prompt, ...input } = req.input;
+            provider_input_autodl.value = input;
         }
-        settings.value = restoreSettings(saved, loaded);
-        for (const item of loaded) {
-            if (
-                !settings.value.attachments.some((kept) =>
-                    kept.url === item.url
+        else if (req.model === "fal/minimax/h3/reference-to-video") {
+            const { prompt: _prompt, ...input } = req.input;
+            provider_input_fal.value = input;
+        }
+        else if (isMiniMaxInput(req)) {
+            const { model: _model, ...input } = req;
+            provider_input_minimax.value = input;
+            minimaxMode.value = req.content.some((item) =>
+                    item.type === "image_url" &&
+                    (item.role === "first_frame" || item.role === "last_frame")
                 )
-            ) {
-                URL.revokeObjectURL(item.url);
-            }
+                ? "frames"
+                : "reference";
         }
+        else {
+            const { model: _model, ...input } = req;
+            provider_input_seedance.value = input;
+        }
+        setAttachments(loaded);
         prompt.value = text;
         if (promptRef.current) {
             promptRef.current.value = text;
@@ -281,9 +523,9 @@ export function Composer(props: {
     });
 
     const durationLabel = useComputed(() =>
-        durationMode.value === "smart"
+        getDurationMode() === "smart"
             ? get_text("smart", language.value)
-            : `${duration.value}${get_text("s_unit", language.value)}`
+            : `${getDuration()}${get_text("s_unit", language.value)}`
     );
 
     const selectedModel = useComputed(() => getModelOption(model.value));
@@ -306,50 +548,6 @@ export function Composer(props: {
             throw new Error(`unsupported model: ${model.value}`);
         }
     });
-    const canSubmit = useComputed(() => {
-        if (isAutoDLModel(model.value)) {
-            return prompt.value.trim().length > 0 &&
-                attachments.value.length >= 1 &&
-                attachments.value.length <= 9 &&
-                attachments.value.every((item) => item.kind === "image");
-        }
-        if (isFalModel(model.value)) {
-            return prompt.value.trim().length > 0 &&
-                attachments.value.every((item) => item.kind === "image");
-        }
-        else if (isMiniMaxModel(model.value)) {
-            if (!prompt.value.trim()) {
-                return false;
-            }
-            if (
-                attachments.value.length === 0 && ratio.value === "adaptive"
-            ) {
-                return false;
-            }
-            if (
-                mode.value === "frames" ||
-                model.value === "MiniMax-H3-Max"
-            ) {
-                return attachments.value.length <= 2 &&
-                    attachments.value.every((item) => item.kind === "image");
-            }
-            const imageCount = attachments.value.filter((item) =>
-                item.kind === "image"
-            ).length;
-            const videoCount = attachments.value.filter((item) =>
-                item.kind === "video"
-            ).length;
-            const audioCount = attachments.value.filter((item) =>
-                item.kind === "audio"
-            ).length;
-            return imageCount <= 9 && videoCount <= 3 && audioCount <= 3;
-        }
-        else {
-            return prompt.value.trim().length > 0 ||
-                attachments.value.length > 0;
-        }
-    });
-
     const togglePopover = (which: Exclude<Popover, null>) => {
         popover.value = popover.value === which ? null : which;
     };
@@ -359,13 +557,12 @@ export function Composer(props: {
             return;
         }
         const miniMaxFrames = isMiniMaxModel(model.value) &&
-            (mode.value === "frames" || model.value === "MiniMax-H3-Max");
+            (getMode() === "frames" || model.value === "MiniMax-H3-Max");
         const accepted = isAutoDLModel(model.value)
             ? Array.from(files).filter((file) => file.type.startsWith("image/"))
                 .slice(0, Math.max(0, 9 - attachments.value.length))
-            : miniMaxFrames
+            : miniMaxFrames || isFalModel(model.value)
             ? Array.from(files).filter((file) => file.type.startsWith("image/"))
-                .slice(0, Math.max(0, 2 - attachments.value.length))
             : Array.from(files);
         const added = accepted.map((file) => ({
             id: nextId.current++,
@@ -373,10 +570,7 @@ export function Composer(props: {
             name: file.name,
             url: URL.createObjectURL(file),
         }));
-        updateSettings({
-            type: "attachments",
-            value: [...attachments.value, ...added],
-        });
+        setAttachments([...attachments.value, ...added]);
     };
 
     // Attach an image dragged from the file explorer. The path is project-
@@ -384,10 +578,10 @@ export function Composer(props: {
     // object URL so it behaves like a file attachment (revocable, and the bytes
     // are held client-side for sending on to remote servers).
     const addProjectImage = async (path: string) => {
+        // AutoDL has exactly nine named image fields in its input shape.
         if (
-            isMiniMaxModel(model.value) &&
-            (mode.value === "frames" || model.value === "MiniMax-H3-Max") &&
-            attachments.value.length >= 2
+            isAutoDLModel(model.value) &&
+            attachments.value.length === AUTODL_IMAGE_KEYS.length
         ) {
             return;
         }
@@ -405,15 +599,12 @@ export function Composer(props: {
             return error instanceof Error ? error : new Error(String(error));
         }
 
-        updateSettings({
-            type: "attachments",
-            value: [...attachments.value, {
-                id: nextId.current++,
-                kind: "image",
-                name: path.split("/").pop() ?? path,
-                url: URL.createObjectURL(blob),
-            }],
-        });
+        setAttachments([...attachments.value, {
+            id: nextId.current++,
+            kind: "image",
+            name: path.split("/").pop() ?? path,
+            url: URL.createObjectURL(blob),
+        }]);
     };
 
     // Accept pasted media (e.g. an image copied from the file explorer).
@@ -486,14 +677,11 @@ export function Composer(props: {
     };
 
     const removeAttachment = (id: number) => {
-        updateSettings({
-            type: "attachments",
-            value: attachments.value.filter((a) => a.id !== id),
-        });
+        setAttachments(attachments.value.filter((a) => a.id !== id));
     };
 
     const clearAll = () => {
-        updateSettings({ type: "attachments", value: [] });
+        setAttachments([]);
         prompt.value = "";
         const ta = promptRef.current;
         if (ta) {
@@ -611,7 +799,7 @@ export function Composer(props: {
                                 {get_text(
                                     isAutoDLModel(model.value) ||
                                         isMiniMaxModel(model.value) &&
-                                            (mode.value === "frames" ||
+                                            (getMode() === "frames" ||
                                                 model.value ===
                                                     "MiniMax-H3-Max")
                                         ? "reference_images"
@@ -626,7 +814,7 @@ export function Composer(props: {
                             multiple
                             accept={isAutoDLModel(model.value) ||
                                     isMiniMaxModel(model.value) &&
-                                        (mode.value === "frames" ||
+                                        (getMode() === "frames" ||
                                             model.value === "MiniMax-H3-Max")
                                 ? "image/*"
                                 : "image/*,video/*,audio/*"}
@@ -807,10 +995,14 @@ export function Composer(props: {
                                             key={item.value}
                                             type="button"
                                             onClick={() => {
-                                                updateSettings({
-                                                    type: "model",
-                                                    value: item.value,
-                                                });
+                                                model.value = item.value;
+                                                if (
+                                                    isMiniMaxModel(item.value)
+                                                ) {
+                                                    setAttachments(
+                                                        attachments.value,
+                                                    );
+                                                }
                                                 popover.value = null;
                                             }}
                                             class={`w-full flex items-start gap-2 px-3 py-2.5 rounded-lg text-left hover:bg-gray-50 ${
@@ -840,9 +1032,7 @@ export function Composer(props: {
                         </div>
 
                         {/* Mode selector */}
-                        {model.value !== "MiniMax-H3-Max" &&
-                            !isFalModel(model.value) &&
-                            !isAutoDLModel(model.value) && (
+                        {model.value === "MiniMax-H3" && (
                             <div class="relative">
                                 <button
                                     type="button"
@@ -850,7 +1040,7 @@ export function Composer(props: {
                                     class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
                                 >
                                     <VideoIcon class="size-4" />
-                                    {mode.value === "reference"
+                                    {getMode() === "reference"
                                         ? get_text("reference", language.value)
                                         : get_text(
                                             "first_last_frame",
@@ -891,14 +1081,11 @@ export function Composer(props: {
                                                 key={item.value}
                                                 type="button"
                                                 onClick={() => {
-                                                    updateSettings({
-                                                        type: "mode",
-                                                        value: item.value,
-                                                    });
+                                                    setMode(item.value);
                                                     popover.value = null;
                                                 }}
                                                 class={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-gray-800 hover:bg-gray-50 ${
-                                                    mode.value === item.value
+                                                    getMode() === item.value
                                                         ? "bg-indigo-50 hover:bg-indigo-50"
                                                         : ""
                                                 }`}
@@ -908,7 +1095,7 @@ export function Composer(props: {
                                                     item.textId,
                                                     language.value,
                                                 )}
-                                                {mode.value === item.value && (
+                                                {getMode() === item.value && (
                                                     <span class="ml-auto">
                                                         <CheckIcon />
                                                     </span>
@@ -928,10 +1115,10 @@ export function Composer(props: {
                                 class="flex items-center h-9 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 divide-x divide-gray-200"
                             >
                                 <span class="px-2.5 flex items-center gap-1.5">
-                                    {ratio.value}
+                                    {getRatio()}
                                 </span>
                                 <span class="px-2.5">
-                                    {resolution.value.value}
+                                    {getResolution().value}
                                 </span>
                                 <span class="px-2.5">
                                     {durationLabel.value}
@@ -960,12 +1147,9 @@ export function Composer(props: {
                                                 key={r.value}
                                                 type="button"
                                                 onClick={() =>
-                                                    updateSettings({
-                                                        type: "ratio",
-                                                        value: r.value,
-                                                    })}
+                                                    setRatio(r.value)}
                                                 class={`flex flex-col items-center justify-end gap-2 h-16 rounded-lg border text-xs pb-2 ${
-                                                    ratio.value ===
+                                                    getRatio() ===
                                                             r.value
                                                         ? "border-gray-800 text-gray-900 bg-white"
                                                         : "border-transparent bg-gray-50 text-gray-600 hover:bg-gray-100"
@@ -1011,15 +1195,12 @@ export function Composer(props: {
                                                 key={`${res.provider}:${res.value}`}
                                                 type="button"
                                                 onClick={() =>
-                                                    updateSettings({
-                                                        type: "resolution",
-                                                        value: res.value,
-                                                    })}
+                                                    setResolution(res)}
                                                 class={`h-9 rounded-md text-sm ${
-                                                    resolution.value
+                                                    getResolution()
                                                                 .provider ===
                                                             res.provider &&
-                                                        resolution.value
+                                                        getResolution()
                                                                 .value ===
                                                             res.value
                                                         ? "bg-white shadow text-gray-900 font-medium"
@@ -1053,13 +1234,11 @@ export function Composer(props: {
                                                     key={dm.value}
                                                     type="button"
                                                     onClick={() =>
-                                                        updateSettings({
-                                                            type:
-                                                                "durationMode",
-                                                            value: dm.value,
-                                                        })}
+                                                        setDurationMode(
+                                                            dm.value,
+                                                        )}
                                                     class={`h-9 rounded-md text-sm ${
-                                                        durationMode.value ===
+                                                        getDurationMode() ===
                                                                 dm.value
                                                             ? "bg-white shadow text-gray-900 font-medium"
                                                             : "text-gray-500 hover:text-gray-700"
@@ -1073,7 +1252,7 @@ export function Composer(props: {
                                             ))}
                                         </div>
                                     )}
-                                    {durationMode.value === "seconds" && (
+                                    {getDurationMode() === "seconds" && (
                                         <div class="flex items-center gap-4 mb-5">
                                             <input
                                                 type="range"
@@ -1089,19 +1268,16 @@ export function Composer(props: {
                                                     ? 10
                                                     : 15}
                                                 step={1}
-                                                value={duration.value}
+                                                value={getDuration()}
                                                 onInput={(e) =>
-                                                    updateSettings({
-                                                        type: "duration",
-                                                        value: Number(
-                                                            e.currentTarget
-                                                                .value,
-                                                        ),
-                                                    })}
+                                                    setDuration(Number(
+                                                        e.currentTarget
+                                                            .value,
+                                                    ))}
                                                 class="flex-1 accent-indigo-500"
                                             />
                                             <span class="w-16 h-9 rounded-lg border border-gray-200 flex items-center justify-center text-sm text-gray-700 gap-1">
-                                                {duration.value}
+                                                {getDuration()}
                                                 <span class="text-gray-400">
                                                     {get_text(
                                                         "s_unit",
@@ -1120,12 +1296,13 @@ export function Composer(props: {
                             <button
                                 type="button"
                                 onClick={() =>
-                                    updateSettings({
-                                        type: "audio",
-                                        value: !audio.value,
-                                    })}
+                                    provider_input_seedance.value = {
+                                        ...provider_input_seedance.value,
+                                        generate_audio: !provider_input_seedance
+                                            .value.generate_audio,
+                                    }}
                                 class={`flex items-center gap-1.5 px-3 h-9 rounded-lg border text-sm ${
-                                    audio.value
+                                    provider_input_seedance.value.generate_audio
                                         ? "border-indigo-300 bg-indigo-50 text-indigo-600"
                                         : "border-gray-200 text-gray-500 hover:bg-gray-50"
                                 }`}
@@ -1148,37 +1325,115 @@ export function Composer(props: {
                         {/* Submit */}
                         <button
                             type="button"
-                            disabled={!canSubmit.value}
                             class="size-9 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-300 text-white flex items-center justify-center ml-1"
                             aria-label={get_text("generate", language.value)}
                             onClick={async () => {
                                 genError.value = null;
-                                const submittedSettings = settings.value;
+                                const submittedModel = model.value;
                                 const submittedPrompt = prompt.value;
-                                const submitted = settingsControls(
-                                    submittedSettings,
-                                );
-
-                                // The server can't read blob: URLs, so
-                                // inline each attachment's bytes as a data
-                                // URL before sending.
-                                const atts = await Promise.all(
-                                    submitted.attachments.map(async (a) => ({
-                                        kind: a.kind,
-                                        dataUrlOrFilePath: await toDataUrl(
-                                            a.url,
-                                        ),
-                                    })),
-                                );
-
-                                const request = buildGenerationRequest({
-                                    ...submitted,
-                                    prompt: submittedPrompt,
-                                    attachments: atts,
-                                });
-                                if (request instanceof Error) {
-                                    genError.value = request.message;
-                                    return;
+                                const submittedInput =
+                                    isSeedanceModel(submittedModel)
+                                        ? provider_input_seedance.value
+                                        : isMiniMaxModel(submittedModel)
+                                        ? provider_input_minimax.value
+                                        : isFalModel(submittedModel)
+                                        ? provider_input_fal.value
+                                        : provider_input_autodl.value;
+                                let request: GenerateInput;
+                                if (isSeedanceModel(submittedModel)) {
+                                    request = {
+                                        ...provider_input_seedance.value,
+                                        model: submittedModel,
+                                        content: [
+                                            {
+                                                type: "text",
+                                                text: submittedPrompt,
+                                            },
+                                            ...provider_input_seedance.value
+                                                .content.filter((item) =>
+                                                    item.type !== "text"
+                                                ),
+                                        ],
+                                    };
+                                }
+                                else if (isMiniMaxModel(submittedModel)) {
+                                    request = {
+                                        ...provider_input_minimax.value,
+                                        model: submittedModel,
+                                        content: [
+                                            {
+                                                type: "text",
+                                                text: submittedPrompt,
+                                            },
+                                            ...provider_input_minimax.value
+                                                .content.filter((item) =>
+                                                    item.type !== "text"
+                                                ),
+                                        ],
+                                    };
+                                }
+                                else if (
+                                    submittedModel ===
+                                        "fal/minimax/h3/reference-to-video"
+                                ) {
+                                    request = {
+                                        model: submittedModel,
+                                        input: {
+                                            ...provider_input_fal.value,
+                                            prompt: submittedPrompt,
+                                        },
+                                    };
+                                }
+                                else {
+                                    request = {
+                                        model: submittedModel,
+                                        input: {
+                                            ...provider_input_autodl.value,
+                                            prompt: submittedPrompt,
+                                        },
+                                    };
+                                }
+                                request = structuredClone(request);
+                                // Inline browser object URLs for the backend to forward.
+                                if ("content" in request) {
+                                    for (const item of request.content) {
+                                        const media = item.type === "image_url"
+                                            ? item.image_url
+                                            : item.type === "video_url"
+                                            ? item.video_url
+                                            : item.type === "audio_url"
+                                            ? item.audio_url
+                                            : null;
+                                        if (media?.url.startsWith("blob:")) {
+                                            media.url = await toDataUrl(
+                                                media.url,
+                                            );
+                                        }
+                                    }
+                                }
+                                else if (
+                                    request.model ===
+                                        "fal/minimax/h3/reference-to-video"
+                                ) {
+                                    for (
+                                        const [index, url] of request.input
+                                            .reference_image_urls.entries()
+                                    ) {
+                                        if (url.startsWith("blob:")) {
+                                            request.input
+                                                .reference_image_urls[index] =
+                                                    await toDataUrl(url);
+                                        }
+                                    }
+                                }
+                                else {
+                                    for (const key of AUTODL_IMAGE_KEYS) {
+                                        const url = request.input[key];
+                                        if (url?.startsWith("blob:")) {
+                                            request.input[key] =
+                                                await toDataUrl(url);
+                                        }
+                                    }
                                 }
                                 const gen = await trpc.open.generate.mutate(
                                     request,
@@ -1188,8 +1443,16 @@ export function Composer(props: {
                                     return;
                                 }
                                 if (
-                                    settings.value === submittedSettings &&
-                                    prompt.value === submittedPrompt
+                                    model.value === submittedModel &&
+                                    prompt.value === submittedPrompt &&
+                                    submittedInput ===
+                                        (isSeedanceModel(submittedModel)
+                                            ? provider_input_seedance.value
+                                            : isMiniMaxModel(submittedModel)
+                                            ? provider_input_minimax.value
+                                            : isFalModel(submittedModel)
+                                            ? provider_input_fal.value
+                                            : provider_input_autodl.value)
                                 ) {
                                     clearAll();
                                 }
@@ -1231,6 +1494,107 @@ export function Composer(props: {
     );
 }
 
+type SeedanceInput = Omit<CreateTaskRequest, "model">;
+type MiniMaxInput = Omit<CreateVideoTaskRequest, "model">;
+type FalDraft = Omit<FalInput, "prompt">;
+type AutoDLDraft = Omit<AutoDLGenerateInput["input"], "prompt">;
+type Attachment = {
+    id: number;
+    kind: AttachmentKind;
+    name: string;
+    url: string;
+};
+const AUTODL_IMAGE_KEYS = [
+    "ref_image_0",
+    "ref_image_1",
+    "ref_image_2",
+    "ref_image_3",
+    "ref_image_4",
+    "ref_image_5",
+    "ref_image_6",
+    "ref_image_7",
+    "ref_image_8",
+] as const;
+
+function contentMedia(
+    content: SeedanceInput["content"] | MiniMaxInput["content"],
+): { kind: AttachmentKind; url: string }[] {
+    return content.flatMap((item): { kind: AttachmentKind; url: string }[] => {
+        if (item.type === "image_url") {
+            return [{ kind: "image", url: item.image_url.url }];
+        }
+        if (item.type === "video_url") {
+            return [{ kind: "video", url: item.video_url.url }];
+        }
+        if (item.type === "audio_url") {
+            return [{ kind: "audio", url: item.audio_url.url }];
+        }
+        return [];
+    });
+}
+function autoDLMedia(
+    input: AutoDLDraft,
+): { kind: AttachmentKind; url: string }[] {
+    const media: { kind: AttachmentKind; url: string }[] = [];
+    for (const key of AUTODL_IMAGE_KEYS) {
+        const url = input[key];
+        if (url) {
+            media.push({ kind: "image", url });
+        }
+    }
+    return media;
+}
+function seedanceMedia(items: Attachment[]): SeedanceInput["content"] {
+    return items.map((item) => {
+        if (item.kind === "image") {
+            return {
+                type: "image_url",
+                image_url: { url: item.url },
+                role: "reference_image",
+            };
+        }
+        if (item.kind === "video") {
+            return {
+                type: "video_url",
+                video_url: { url: item.url },
+                role: "reference_video",
+            };
+        }
+        return {
+            type: "audio_url",
+            audio_url: { url: item.url },
+            role: "reference_audio",
+        };
+    });
+}
+function miniMaxMedia(
+    items: Attachment[],
+    mode: "reference" | "frames",
+): MiniMaxInput["content"] {
+    return items.map((item, index) => {
+        if (item.kind === "image") {
+            return {
+                type: "image_url",
+                image_url: { url: item.url },
+                role: mode === "frames"
+                    ? index === 0 ? "first_frame" : "last_frame"
+                    : "reference_image",
+            };
+        }
+        if (item.kind === "video") {
+            return {
+                type: "video_url",
+                video_url: { url: item.url },
+                role: "reference_video",
+            };
+        }
+        return {
+            type: "audio_url",
+            audio_url: { url: item.url },
+            role: "reference_audio",
+        };
+    });
+}
 type AttachmentKind = "image" | "video" | "audio";
 
 type Resolution = {
@@ -1388,7 +1752,14 @@ const COMPOSER_STATE_KEY = "composer.state.v1";
 /** Persisted composer fields (attachments are intentionally excluded). */
 interface ComposerState {
     prompt: string;
-    settings: Omit<ComposerSettings, "attachments">;
+    model: GenerationModel;
+    minimaxMode: "reference" | "frames";
+    providers: {
+        seedance: SeedanceInput;
+        minimax: MiniMaxInput;
+        fal: FalDraft;
+        autodl: AutoDLDraft;
+    };
 }
 
 /** Read persisted composer state (client only); null if absent/unreadable. */
