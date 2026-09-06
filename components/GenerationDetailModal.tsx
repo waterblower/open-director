@@ -16,7 +16,9 @@ import { type Generation } from "@/db.ts";
 function formatDuration(seconds: number, lang: Language): string {
     const s = Math.max(0, Math.round(seconds));
     const sUnit = get_text("s_unit", lang);
-    if (s < 60) return `${s}${sUnit}`;
+    if (s < 60) {
+        return `${s}${sUnit}`;
+    }
     const m = Math.floor(s / 60);
     return `${m}${get_text("m_unit", lang)}${s % 60}${sUnit}`;
 }
@@ -31,8 +33,12 @@ function isMiniMaxRequest(
 
 function promptText(req: GenerateInput | null | undefined): string {
     // fal requests carry a flat endpoint payload instead of `content` items.
-    if (req && "input" in req) return req.input.prompt.trim();
-    if (!req || !("content" in req)) return "";
+    if (req && "input" in req) {
+        return req.input.prompt.trim();
+    }
+    if (!req || !("content" in req)) {
+        return "";
+    }
     return req.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
@@ -71,7 +77,9 @@ export function GenerationDetailModal(props: {
             project_root: projectRoot,
             id: generation.id,
         }).then((stored) => {
-            if (reactionRevision.current !== revision) return;
+            if (reactionRevision.current !== revision) {
+                return;
+            }
             savedReaction.value = stored?.reaction ?? null;
             savedReason.value = stored?.reason ?? "";
         }).catch((err) =>
@@ -118,7 +126,9 @@ export function GenerationDetailModal(props: {
     // Close on Escape, like a native dialog.
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+                onClose();
+            }
         };
         globalThis.addEventListener("keydown", onKeyDown);
         return () => globalThis.removeEventListener("keydown", onKeyDown);
@@ -126,7 +136,9 @@ export function GenerationDetailModal(props: {
 
     const pickReaction = (reaction: Reaction) => {
         if (savedReaction.value === reaction) {
-            if (reactionBusy.value) return;
+            if (reactionBusy.value) {
+                return;
+            }
             reactionBusy.value = true;
             onClearReaction(generation, projectRoot)
                 .catch((err) =>
@@ -143,7 +155,9 @@ export function GenerationDetailModal(props: {
     };
 
     const confirmReaction = async () => {
-        if (!pendingReaction.value || reactionBusy.value) return;
+        if (!pendingReaction.value || reactionBusy.value) {
+            return;
+        }
         reactionBusy.value = true;
         try {
             await onReact(
@@ -153,12 +167,14 @@ export function GenerationDetailModal(props: {
                 projectRoot,
             );
             pendingReaction.value = null;
-        } catch (err) {
+        }
+        catch (err) {
             console.error(
                 "[GenerationDetailModal] failed to save reaction:",
                 err,
             );
-        } finally {
+        }
+        finally {
             reactionBusy.value = false;
         }
     };
@@ -172,16 +188,18 @@ export function GenerationDetailModal(props: {
     const createdAt = typeof task?.created_at === "number"
         ? task.created_at
         : null;
-    const updatedAt = typeof task?.updated_at === "number"
-        ? task.updated_at
-        : null;
+    const updatedAt =
+        task && "updated_at" in task && typeof task.updated_at === "number"
+            ? task.updated_at
+            : null;
     const elapsed = createdAt != null && updatedAt != null
         ? updatedAt - createdAt
         : null;
 
-    const usage = task?.usage && typeof task.usage === "object"
-        ? task.usage
-        : null;
+    const usage =
+        task && "usage" in task && task.usage && typeof task.usage === "object"
+            ? task.usage
+            : null;
     const totalTokens = usage && "total_tokens" in usage &&
             typeof usage.total_tokens === "number"
         ? usage.total_tokens
@@ -203,7 +221,13 @@ export function GenerationDetailModal(props: {
     const stats = !req ? null : "input" in req
         ? {
             resolution: req.input.resolution,
-            ratio: req.input.aspect_ratio,
+            ratio: "aspect_ratio" in req.input
+                ? req.input.aspect_ratio
+                : req.input.resolution.endsWith("竖")
+                ? "9:16"
+                : req.input.resolution.endsWith("(1:1)")
+                ? "1:1"
+                : "16:9",
             duration: req.input.duration,
         }
         : {
@@ -216,10 +240,16 @@ export function GenerationDetailModal(props: {
     // /project-file or data:) URLs, in prompt order.
     type Reference = { kind: "image" | "video" | "audio"; url: string };
     const references: Reference[] = req && "input" in req
-        ? req.input.reference_image_urls.map((url) => ({
-            kind: "image" as const,
-            url,
-        }))
+        ? ("reference_image_urls" in req.input
+            ? req.input.reference_image_urls
+            : Object.entries(req.input).filter(([key, value]) =>
+                key.startsWith("ref_image_") && typeof value === "string"
+            ).sort(([a], [b]) => a.localeCompare(b)).map(([, value]) =>
+                value as string
+            )).map((url) => ({
+                kind: "image" as const,
+                url,
+            }))
         : (req && "content" in req ? req.content : [])
             .flatMap(
                 (c): Reference[] => {
@@ -244,7 +274,9 @@ export function GenerationDetailModal(props: {
             draggable={false}
             onClick={(e) => {
                 e.stopPropagation();
-                if (e.target === e.currentTarget) onClose();
+                if (e.target === e.currentTarget) {
+                    onClose();
+                }
             }}
         >
             <div
@@ -691,7 +723,8 @@ function CopyButton(props: { value: string }) {
             await navigator.clipboard.writeText(props.value);
             copied.value = true;
             setTimeout(() => copied.value = false, 1500);
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[CopyButton] failed to copy to clipboard:", err);
         }
     };

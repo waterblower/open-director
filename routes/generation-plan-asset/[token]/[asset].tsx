@@ -7,7 +7,9 @@ export const handler = define.handlers({
             ctx.params.token,
             ctx.params.asset,
         );
-        if (!asset) return new Response("Not found", { status: 404 });
+        if (!asset) {
+            return new Response("Not found", { status: 404 });
+        }
 
         try {
             const stat = await Deno.stat(asset.path);
@@ -21,7 +23,8 @@ export const handler = define.handlers({
                     "content-security-policy": "default-src 'none'; sandbox",
                 },
             });
-        } catch (err) {
+        }
+        catch (err) {
             if (err instanceof Deno.errors.NotFound) {
                 return new Response("Not found", { status: 404 });
             }

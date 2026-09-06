@@ -31,7 +31,9 @@ export function GenerationsGrid(
     // Fetch the archived list on demand — only while that tab is open, and
     // again whenever the active project changes.
     useEffect(() => {
-        if (tab.value !== "archived" || !projectRoot) return;
+        if (tab.value !== "archived" || !projectRoot) {
+            return;
+        }
         let cancelled = false;
         archivedLoading.value = true;
         (async () => {
@@ -43,14 +45,17 @@ export function GenerationsGrid(
                     "[GenerationsGrid] failed to load archived generations 1:",
                     rows,
                 );
-            } else {
+            }
+            else {
                 if (!cancelled) {
                     archivedResults.value = new Map(
                         rows.data.map((v) => [v.id, v]),
                     );
                 }
             }
-            if (!cancelled) archivedLoading.value = false;
+            if (!cancelled) {
+                archivedLoading.value = false;
+            }
         })();
         return () => {
             cancelled = true;
@@ -75,20 +80,25 @@ export function GenerationsGrid(
             });
             if (rows.error) {
                 console.error(rows);
-            } else if (!cancelled) {
+            }
+            else if (!cancelled) {
                 reactedResults.value = new Map(
                     rows.data.map((v) => [v.id, v]),
                 );
             }
 
-            if (!cancelled) reactedLoading.value = false;
+            if (!cancelled) {
+                reactedLoading.value = false;
+            }
         })();
         return () => {
             cancelled = true;
         };
     }, [tab.value, projectRoot]);
 
-    if (results.value.size === 0 && !projectRoot) return null;
+    if (results.value.size === 0 && !projectRoot) {
+        return null;
+    }
 
     const isReactionTab = tab.value === "liked" || tab.value === "disliked";
     const currentResults = tab.value === "archived"
@@ -118,7 +128,9 @@ export function GenerationsGrid(
     // archived list and adds it back to the active list. This is the only
     // place that calls these mutations or mutates the maps.
     const handleArchiveToggle = async (video: GeneratedVideo) => {
-        if (!projectRoot) return;
+        if (!projectRoot) {
+            return;
+        }
         if (tab.value === "archived") {
             await trpc.unarchiveGeneration.mutate({
                 project_root: projectRoot,
@@ -131,7 +143,8 @@ export function GenerationsGrid(
             const next = new Map(results.value);
             next.set(video.id, video);
             results.value = next;
-        } else {
+        }
+        else {
             await trpc.archiveGeneration.mutate({
                 project_root: projectRoot,
                 id: video.id,
@@ -151,7 +164,9 @@ export function GenerationsGrid(
         updated: GeneratedVideo,
     ) => {
         for (const map of [results, archivedResults]) {
-            if (!map.value.has(video.id)) continue;
+            if (!map.value.has(video.id)) {
+                continue;
+            }
             const next = new Map(map.value);
             next.set(video.id, updated);
             map.value = next;
@@ -159,7 +174,8 @@ export function GenerationsGrid(
         const nextReacted = new Map(reactedResults.value);
         if (updated.reaction) {
             nextReacted.set(video.id, updated);
-        } else {
+        }
+        else {
             nextReacted.delete(video.id);
         }
         reactedResults.value = nextReacted;
@@ -170,7 +186,9 @@ export function GenerationsGrid(
         reaction: "liked" | "disliked",
         reason?: string,
     ) => {
-        if (!projectRoot) return;
+        if (!projectRoot) {
+            return;
+        }
         await trpc.open.setGenerationReaction.mutate({
             project_root: projectRoot,
             id: video.id,
@@ -185,7 +203,9 @@ export function GenerationsGrid(
     };
 
     const handleClearReaction = async (video: GeneratedVideo) => {
-        if (!projectRoot) return;
+        if (!projectRoot) {
+            return;
+        }
         await trpc.open.clearGenerationReaction.mutate({
             project_root: projectRoot,
             id: video.id,

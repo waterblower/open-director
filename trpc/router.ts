@@ -46,6 +46,7 @@ import {
     isFalModel,
     isMiniMaxModel,
     localTaskStatus,
+    Providers,
     taskIdFromCreateResponse,
 } from "../apigen/mod.ts";
 import type { FalInput } from "../apigen/fal.ts";
@@ -62,7 +63,9 @@ export const VIDEOS_DIR = ".open-director/generations";
 
 /** Obscure an API key for display, keeping only its head and tail. */
 function maskKey(key: string): string {
-    if (key.length <= 12) return "••••";
+    if (key.length <= 12) {
+        return "••••";
+    }
     return `${key.slice(0, 8)}…${key.slice(-5)}`;
 }
 /** Directory under the project root where uploaded attachments are stored. */
@@ -93,8 +96,11 @@ async function exists(path: string): Promise<boolean> {
     try {
         await Deno.lstat(path);
         return true;
-    } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return false;
+    }
+    catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+            return false;
+        }
         throw err;
     }
 }
@@ -157,7 +163,8 @@ async function listDir(absPath: string): Promise<DirEntry[] | Error> {
                 : 1
         );
         return entries;
-    } catch (e) {
+    }
+    catch (e) {
         return e as Error;
     }
 }
@@ -190,12 +197,16 @@ async function buildVideoList(
     scope: VideoListScope,
 ): Promise<VideoListItem[] | Error> {
     const resolvedDir = await resolveInProject(projectRoot, VIDEOS_DIR);
-    if (resolvedDir instanceof Error) throw resolvedDir;
+    if (resolvedDir instanceof Error) {
+        throw resolvedDir;
+    }
     const dir = resolvedDir;
     // Creates the dir if missing; a no-op (no throw) when it already exists.
     await Deno.mkdir(dir, { recursive: true });
 
-    if (!db) return [];
+    if (!db) {
+        return [];
+    }
     const rows = listGenerations(db);
     if (rows instanceof Error) {
         return rows;
@@ -218,7 +229,9 @@ async function buildVideoList(
     //    file alone. A file with no log row can never be archived or
     //    reacted to (there's no ULID id to key on).
     for await (const entry of Deno.readDir(dir)) {
-        if (!entry.isFile || !VIDEO_EXT.test(entry.name)) continue;
+        if (!entry.isFile || !VIDEO_EXT.test(entry.name)) {
+            continue;
+        }
         const taskId = entry.name.replace(VIDEO_EXT, "");
         onDisk.add(taskId);
 
@@ -226,7 +239,9 @@ async function buildVideoList(
 
         const row = rowById.get(taskId);
         if (!row) {
-            if (scope !== "active") continue;
+            if (scope !== "active") {
+                continue;
+            }
             videos.push({
                 status: "succeeded",
                 id: taskId,
@@ -236,7 +251,9 @@ async function buildVideoList(
             });
             continue;
         }
-        if (!included(row.id)) continue;
+        if (!included(row.id)) {
+            continue;
+        }
         const reaction = reactions.get(row.id);
         videos.push({
             status: "succeeded",
@@ -253,8 +270,12 @@ async function buildVideoList(
     //    still queued/running on the seedance server. Surface them with
     //    whatever status we last recorded.
     for (const row of rows) {
-        if (row.task_id && onDisk.has(row.task_id)) continue;
-        if (!included(row.id)) continue;
+        if (row.task_id && onDisk.has(row.task_id)) {
+            continue;
+        }
+        if (!included(row.id)) {
+            continue;
+        }
         const reaction = reactions.get(row.id);
         videos.push({
             status: row.status,
@@ -285,7 +306,9 @@ export const appRouter = router({
     // afterwards so all views re-fetch against the new project.
     pickProject: publicProcedure.mutation(async () => {
         const path = await pickProjectFolder();
-        if (!path) return null;
+        if (!path) {
+            return null;
+        }
         await registerProject(kv, path);
         reopenDb(); // point the generations DB at the new project
         return { path };
@@ -316,16 +339,21 @@ export const appRouter = router({
     getGenerationIdForFile: publicProcedure
         .input(z.object({ project_root: z.string(), path: z.string() }))
         .query(async ({ input }) => {
-            if (!db) return null;
+            if (!db) {
+                return null;
+            }
             const target = await resolveInProject(
                 input.project_root,
                 input.path,
             );
-            if (target instanceof Error) return null;
+            if (target instanceof Error) {
+                return null;
+            }
             let bytes: Uint8Array;
             try {
                 bytes = await Deno.readFile(target);
-            } catch {
+            }
+            catch {
                 return null;
             }
             const hash = await sha256Hex(bytes);
@@ -365,7 +393,9 @@ export const appRouter = router({
     loadProjectData: publicProcedure.query(async () => {
         console.log("[trpc] loadProjectData called");
         const rootPath = (await getLastOpenedProject(kv))?.path;
-        if (!rootPath) return null;
+        if (!rootPath) {
+            return null;
+        }
 
         const savedState = await loadFileExplorerState(rootPath);
         if (savedState instanceof Error) {
@@ -423,7 +453,9 @@ export const appRouter = router({
                 return { ok: false };
             }
             const target = await resolveInProject(projectRoot, opts.input);
-            if (target instanceof Error) throw target;
+            if (target instanceof Error) {
+                throw target;
+            }
             const command = Deno.build.os === "windows"
                 ? new Deno.Command("cmd", { args: ["/c", "start", "", target] })
                 : Deno.build.os === "darwin"
@@ -455,14 +487,22 @@ export const appRouter = router({
         .mutation(async (opts): Promise<{ dest: string }> => {
             const { src, destDir, name } = opts.input;
             const projectRoot = (await getLastOpenedProject(kv))?.path;
-            if (!projectRoot) throw new Error("Project not initialized");
+            if (!projectRoot) {
+                throw new Error("Project not initialized");
+            }
             const srcAbs = await resolveInProject(projectRoot, src);
             const destDirAbs = await resolveInProject(projectRoot, destDir);
-            if (srcAbs instanceof Error) throw srcAbs;
-            if (destDirAbs instanceof Error) throw destDirAbs;
+            if (srcAbs instanceof Error) {
+                throw srcAbs;
+            }
+            if (destDirAbs instanceof Error) {
+                throw destDirAbs;
+            }
 
             const srcBase = basename(srcAbs);
-            if (!srcBase) throw new Error("Invalid source path");
+            if (!srcBase) {
+                throw new Error("Invalid source path");
+            }
 
             let base = srcBase;
             if (name) {
@@ -496,9 +536,13 @@ export const appRouter = router({
                 throw new Error("Invalid name");
             }
             const projectRoot = (await getLastOpenedProject(kv))?.path;
-            if (!projectRoot) throw new Error("Project not initialized");
+            if (!projectRoot) {
+                throw new Error("Project not initialized");
+            }
             const destDirAbs = await resolveInProject(projectRoot, destDir);
-            if (destDirAbs instanceof Error) throw destDirAbs;
+            if (destDirAbs instanceof Error) {
+                throw destDirAbs;
+            }
 
             const comma = dataUrl.indexOf(",");
             if (!dataUrl.startsWith("data:") || comma === -1) {
@@ -522,11 +566,17 @@ export const appRouter = router({
         .input(z.object({ path: z.string() }))
         .mutation(async (opts): Promise<{ ok: boolean }> => {
             const { path } = opts.input;
-            if (!path) throw new Error("Cannot delete the project root");
+            if (!path) {
+                throw new Error("Cannot delete the project root");
+            }
             const projectRoot = (await getLastOpenedProject(kv))?.path;
-            if (!projectRoot) throw new Error("Project not initialized");
+            if (!projectRoot) {
+                throw new Error("Project not initialized");
+            }
             const target = await resolveInProject(projectRoot, path);
-            if (target instanceof Error) throw target;
+            if (target instanceof Error) {
+                throw target;
+            }
             await Deno.remove(target, { recursive: true });
             return { ok: true };
         }),
@@ -543,20 +593,29 @@ export const appRouter = router({
             const slash = path.lastIndexOf("/");
             const dir = slash === -1 ? "" : path.slice(0, slash);
             const dest = dir ? `${dir}/${name}` : name;
-            if (dest === path) return { path };
+            if (dest === path) {
+                return { path };
+            }
 
             const projectRoot = (await getLastOpenedProject(kv))?.path;
-            if (!projectRoot) throw new Error("Project not initialized");
+            if (!projectRoot) {
+                throw new Error("Project not initialized");
+            }
             const srcAbs = await resolveInProject(projectRoot, path);
             const destAbs = await resolveInProject(projectRoot, dest);
-            if (srcAbs instanceof Error) throw srcAbs;
-            if (destAbs instanceof Error) throw destAbs;
+            if (srcAbs instanceof Error) {
+                throw srcAbs;
+            }
+            if (destAbs instanceof Error) {
+                throw destAbs;
+            }
             if (await exists(destAbs)) {
                 throw new Error(`已存在同名文件：${name}`);
             }
             try {
                 await Deno.rename(srcAbs, destAbs);
-            } catch (err) {
+            }
+            catch (err) {
                 console.error("[trpc] failed to move file:", err);
             }
             return { path: dest };
@@ -627,9 +686,9 @@ export const appRouter = router({
     // Whether a provider API key is configured, plus a masked preview. The full
     // key is never sent to the client.
     getApiKeyStatus: publicProcedure
-        .input(z.enum(["seedance", "minimax", "fal"]).optional())
+        .input(z.enum(Providers))
         .query(async ({ input }) => {
-            const provider = input ?? "seedance";
+            const provider = input;
             const key = await getStoredApiKey(provider);
             return {
                 hasKey: !!key,
@@ -641,11 +700,11 @@ export const appRouter = router({
     // MiniMax clients read their keys from KV when dispatched.
     setApiKey: publicProcedure
         .input(z.object({
-            provider: z.enum(["seedance", "minimax", "fal"]).optional(),
+            provider: z.enum(Providers),
             apiKey: z.string().trim().min(1),
         }))
         .mutation(async (opts) => {
-            const provider = opts.input.provider ?? "seedance";
+            const provider = opts.input.provider;
             const key = opts.input.apiKey;
             await setStoredApiKey(provider, key);
             return { hasKey: true, masked: maskKey(key) };
@@ -697,385 +756,7 @@ export const appRouter = router({
         // composer makes. Attachments arrive as data URLs (the browser inlines its
         // blob: bytes); the API call + key live server-side. task_checker later
         // polls + downloads the result, keyed by the same task id.
-        generate: publicProcedure
-            .input(z.object({
-                model: z.union([
-                    z.enum([
-                        "doubao-seedance-2-0-260128",
-                        "doubao-seedance-2-0-fast-260128",
-                        "doubao-seedance-2-0-mini-260615",
-                        "fal/minimax/h3/reference-to-video",
-                    ]),
-                    MiniMaxVideoModelSchema,
-                ]),
-                prompt: z.string(),
-                attachments: z.array(z.object({
-                    kind: z.enum(["image", "video", "audio"]),
-                    dataUrlOrFilePath: z.string(),
-                })),
-                ratio: z.enum([
-                    "16:9",
-                    "9:16",
-                    "1:1",
-                    "4:3",
-                    "3:4",
-                    "21:9",
-                    "adaptive",
-                    "horizontal",
-                    "vertical",
-                ]),
-                resolution: z.enum([
-                    "1080p",
-                    "720p",
-                    "480p",
-                    "768P",
-                    "2K",
-                ]),
-                durationMode: z.enum(["seconds", "smart"]),
-                duration: z.number(),
-                audio: z.boolean(),
-                mode: z.enum(["reference", "frames"]).default("reference"),
-            }))
-            .mutation(async (opts) => {
-                if (!db) {
-                    throw new Error("Database not initialized");
-                }
-                const {
-                    prompt,
-                    attachments,
-                    ratio,
-                    durationMode,
-                    duration,
-                    audio,
-                    resolution,
-                    model,
-                    mode,
-                } = opts.input;
-
-                const projectRoot = (await getLastOpenedProject(kv))?.path;
-                if (!projectRoot) {
-                    throw new Error("Project not initialized");
-                }
-
-                let request: GenerateInput;
-                let storedRequest: GenerateInput;
-                if (isFalModel(model)) {
-                    if (!prompt.trim()) {
-                        throw new Error(
-                            "fal reference-to-video requires a prompt",
-                        );
-                    }
-                    if (attachments.some((att) => att.kind !== "image")) {
-                        throw new Error(
-                            "fal reference-to-video accepts image references only",
-                        );
-                    }
-                    const falResolution = resolution === "480p"
-                        ? "480P"
-                        : resolution === "768P"
-                        ? "768P"
-                        : null;
-                    if (!falResolution) {
-                        throw new Error(
-                            `Unsupported fal resolution: ${resolution}`,
-                        );
-                    }
-                    if (duration > 15) {
-                        throw new Error("fal duration must be at most 15s");
-                    }
-                    const falRatio = ratio === "horizontal"
-                        ? "16:9"
-                        : ratio === "vertical"
-                        ? "9:16"
-                        : ratio;
-                    // fal fetches references by URL, and our uploads dir isn't
-                    // reachable from the internet — so send the bytes inline
-                    // and only externalize the copy we persist.
-                    const inlineUrls = await Promise.all(
-                        attachments.map((att) =>
-                            resolveToDataUrl(att.dataUrlOrFilePath)
-                        ),
-                    );
-                    const falInput: FalInput = {
-                        prompt: prompt.trim(),
-                        duration,
-                        resolution: falResolution,
-                        enable_safety_checker: false,
-                        prompt_expansion_mode: "fast",
-                        aspect_ratio: falRatio,
-                        reference_image_urls: inlineUrls,
-                    };
-                    request = { model, input: falInput };
-                    const storedUrls = await Promise.all(
-                        inlineUrls.map(async (url) => {
-                            if (!url.startsWith("data:")) return url;
-                            const stored = await storeDataUrl(
-                                projectRoot,
-                                url,
-                            );
-                            if (stored instanceof Error) {
-                                console.error(
-                                    "[trpc] failed to store generated asset:",
-                                    stored,
-                                );
-                                return url;
-                            }
-                            return stored;
-                        }),
-                    );
-                    storedRequest = {
-                        model,
-                        input: {
-                            ...falInput,
-                            reference_image_urls: storedUrls,
-                        },
-                    };
-                } else if (isMiniMaxModel(model)) {
-                    if (!prompt.trim()) {
-                        throw new Error("MiniMax H3 requires a prompt");
-                    }
-
-                    const useFrames = mode === "frames" ||
-                        model === "MiniMax-H3-Max";
-                    if (
-                        useFrames &&
-                        (attachments.length > 2 ||
-                            attachments.some((att) => att.kind !== "image"))
-                    ) {
-                        throw new Error(
-                            "MiniMax frame generation accepts at most two images",
-                        );
-                    }
-                    const content: VideoGenerationContent[] = [{
-                        type: "text",
-                        text: prompt.trim(),
-                    }];
-                    for (const [index, att] of attachments.entries()) {
-                        const rawUrl = await resolveToDataUrl(
-                            att.dataUrlOrFilePath,
-                        );
-                        const url = normalizeMiniMaxDataUrl(rawUrl);
-                        if (useFrames) {
-                            content.push({
-                                type: "image_url",
-                                image_url: { url },
-                                role: index === 0
-                                    ? "first_frame"
-                                    : "last_frame",
-                            });
-                        } else if (att.kind === "image") {
-                            content.push({
-                                type: "image_url",
-                                image_url: { url },
-                                role: "reference_image",
-                            });
-                        } else if (att.kind === "video") {
-                            content.push({
-                                type: "video_url",
-                                video_url: { url },
-                                role: "reference_video",
-                            });
-                        } else {
-                            content.push({
-                                type: "audio_url",
-                                audio_url: { url },
-                                role: "reference_audio",
-                            });
-                        }
-                    }
-
-                    const outputResolution = resolution === "2K"
-                        ? "2K"
-                        : resolution === "768P"
-                        ? "768P"
-                        : resolution === "480p"
-                        ? "480P"
-                        : null;
-                    if (!outputResolution) {
-                        throw new Error(
-                            `Unsupported MiniMax resolution: ${resolution}`,
-                        );
-                    }
-                    const outputRatio = ratio === "horizontal"
-                        ? "16:9"
-                        : ratio === "vertical"
-                        ? "9:16"
-                        : ratio;
-                    request = {
-                        model,
-                        content,
-                        resolution: outputResolution,
-                        duration,
-                        ratio: useFrames && attachments.length > 0
-                            ? "adaptive"
-                            : outputRatio,
-                    };
-                    storedRequest = {
-                        ...request,
-                        content: await externalizeMiniMaxAttachments(
-                            projectRoot,
-                            content,
-                        ),
-                    };
-                } else {
-                    // Assemble Seedance multimodal content: optional text, then
-                    // each attachment as a typed reference.
-                    if (resolution === "768P" || resolution === "2K") {
-                        throw new Error(
-                            `Unsupported Seedance resolution: ${resolution}`,
-                        );
-                    }
-                    const content: ContentItem[] = [];
-                    if (prompt) content.push({ type: "text", text: prompt });
-                    for (const att of attachments) {
-                        const url = await resolveToDataUrl(
-                            att.dataUrlOrFilePath,
-                        );
-                        if (att.kind === "image") {
-                            content.push({
-                                type: "image_url",
-                                image_url: { url },
-                                role: "reference_image",
-                            });
-                        } else if (att.kind === "video") {
-                            content.push({
-                                type: "video_url",
-                                video_url: { url },
-                                role: "reference_video",
-                            });
-                        } else {
-                            content.push({
-                                type: "audio_url",
-                                audio_url: { url },
-                                role: "reference_audio",
-                            });
-                        }
-                    }
-                    const seedanceRequest = {
-                        model,
-                        content,
-                        generate_audio: audio,
-                        resolution,
-                        ratio: ratio as Exclude<
-                            typeof ratio,
-                            "horizontal" | "vertical"
-                        >,
-                        ...(durationMode === "seconds" ? { duration } : {}),
-                    } satisfies SeedanceCreateTaskRequest;
-                    request = seedanceRequest;
-                    storedRequest = {
-                        ...seedanceRequest,
-                        content: await externalizeAttachments(
-                            projectRoot,
-                            content,
-                        ),
-                    };
-                }
-
-                // Resolve the key *before* logging the generation: a row with
-                // no task id looks "queued" to task_checker, which only gives
-                // up after a 5 minute grace and then reports the generic
-                // "never submitted" reason instead of the real cause.
-                const apiKey = await getStoredApiKeyFromModel(request.model);
-                if (!apiKey) {
-                    throw new Error(
-                        `No API key configured for ${request.model} — add one in Settings`,
-                    );
-                }
-
-                const generation = createGeneration(db, storedRequest);
-                if (generation instanceof Error) {
-                    throw generation;
-                }
-                console.log("[trpc] generation created:", generation.id);
-                await global_event_bus.put({
-                    type: "generation_created",
-                    gen: generation,
-                });
-
-                /**
-                 * Mark the just-created row failed with the real reason. Any
-                 * throw from here on would otherwise strand it in "queued".
-                 */
-                const failGeneration = (reason: string) => {
-                    console.error(
-                        `[trpc] generation ${generation.id} failed:`,
-                        reason,
-                    );
-                    const err = updateGeneration(db!, {
-                        id: generation.id,
-                        failed_reason: reason,
-                        status: "failed",
-                    });
-                    if (err instanceof Error) throw err;
-                    const gen = getGenerationById(db!, generation.id);
-                    if (gen instanceof Error) throw gen;
-                    return gen;
-                };
-
-                const created = await generate(request, apiKey).catch((err) =>
-                    err instanceof Error ? err : new Error(String(err))
-                );
-                if (created instanceof Error) {
-                    return failGeneration(created.message);
-                }
-                const taskId = taskIdFromCreateResponse(created.res);
-                if (taskId instanceof Error) {
-                    return failGeneration(taskId.message);
-                }
-                console.log("[trpc] task created:", created);
-                const err = updateGeneration(db, {
-                    id: generation.id,
-                    task_id: taskId,
-                });
-                if (err instanceof Error) {
-                    throw err;
-                }
-
-                const polled = await getTask(request.model, taskId, apiKey);
-                if (polled instanceof Error) {
-                    // The task exists (we have its id) — leave it for
-                    // task_checker to poll rather than failing the row.
-                    console.error(
-                        `[trpc] first poll of ${taskId} failed:`,
-                        polled,
-                    );
-                    const gen = getGenerationById(db, generation.id);
-                    if (gen instanceof Error) throw gen;
-                    return gen;
-                }
-                const task = polled.task;
-                const err2 = updateGeneration(db, {
-                    id: generation.id,
-                    task_json: task,
-                    status: localTaskStatus(task),
-                });
-                if (err2 instanceof Error) {
-                    throw err2;
-                }
-
-                console.log("[trpc] task result:", task);
-
-                // Logging failure shouldn't fail the request — the task is created.
-                const recordErr = recordGeneration(db, {
-                    taskId,
-                    requestJson: JSON.stringify(storedRequest),
-                    createdAt: new Date().toISOString(),
-                    status: localTaskStatus(task),
-                    task,
-                });
-                if (recordErr) {
-                    console.error(
-                        "[trpc] failed to record task log:",
-                        recordErr,
-                    );
-                }
-                const gen = getGenerationById(db, generation.id);
-                if (gen instanceof Error) {
-                    throw gen;
-                }
-                return gen;
-            }),
+        generate: tRPC_generate,
 
         // Read the generation log by ULID id (e.g. to show a video's prompt/metadata).
         getGenerationById: publicProcedure
@@ -1147,7 +828,9 @@ export const appRouter = router({
                 if (gen instanceof Error) {
                     throw gen;
                 }
-                if (!gen) return null;
+                if (!gen) {
+                    return null;
+                }
                 return getGenerationReaction(db, gen.id);
             }),
         listGenerations: publicProcedure.query(() => {
@@ -1309,6 +992,7 @@ import {
     setStoredApiKey,
 } from "../kv.ts";
 import { getLastOpenedProject, registerProject } from "../project_registry.ts";
+import { tRPC_generate } from "@/trpc/generate.ts";
 (async () => {
     let i = 0;
     for (;;) {
@@ -1361,17 +1045,23 @@ async function externalizeMiniMaxAttachments(
     content: VideoGenerationContent[],
 ): Promise<VideoGenerationContent[]> {
     return await Promise.all(content.map(async (item) => {
-        if (item.type === "text") return item;
+        if (item.type === "text") {
+            return item;
+        }
 
         const source = item.type === "image_url"
             ? item.image_url.url
             : item.type === "video_url"
             ? item.video_url.url
             : item.audio_url.url;
-        if (!source.startsWith("data:")) return item;
+        if (!source.startsWith("data:")) {
+            return item;
+        }
 
         const url = await storeDataUrl(projectRoot, source);
-        if (url instanceof Error) throw url;
+        if (url instanceof Error) {
+            throw url;
+        }
         if (item.type === "image_url") {
             return { ...item, image_url: { url } };
         }
@@ -1392,7 +1082,9 @@ async function externalizeMiniMaxAttachments(
 export async function resolveToDataUrl(
     dataUrlOrFilePath: string,
 ): Promise<string> {
-    if (dataUrlOrFilePath.startsWith("data:")) return dataUrlOrFilePath;
+    if (dataUrlOrFilePath.startsWith("data:")) {
+        return dataUrlOrFilePath;
+    }
     const bytes = await Deno.readFile(dataUrlOrFilePath);
     const ext = dataUrlOrFilePath.split(".").pop()?.toLowerCase() ?? "";
     const mime = EXT_MIME[ext] ?? "application/octet-stream";

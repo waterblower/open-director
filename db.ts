@@ -7,6 +7,7 @@
  * Uses Deno's built-in `node:sqlite`, which is part of the runtime — so it
  * compiles into a `deno compile` binary with no external native library.
  */
+import { get_Output_Schema as AutoDLResponseSchema } from "./apigen/autodl.ts";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "@std/path";
 import { ulid } from "@std/ulid";
@@ -14,50 +15,19 @@ import { z } from "zod";
 import {
     type GenerateInput,
     GenerateInputSchema,
-    type GenerationTask,
     GenerationTaskSchema,
     type LocalTaskStatus,
 } from "./apigen/mod.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
+import schema from "./db.schema.sqlite?raw" with { type: "text" };
 
-/**
- * A TEXT column holding JSON serialized from `schema`. Parses and validates it
- * to the typed value.
- *
- * Malformed JSON or a schema mismatch is reported as a regular Zod issue (via
- * `ctx.addIssue` + `z.NEVER`) rather than thrown: a raw `throw` inside a
- * `.transform()` escapes `safeParse` as a real exception, so callers could not
- * rely on getting a result back. Compose with `.nullable().catch(null)` where a
- * single stale row (e.g. one written under a since-removed model/provider)
- * should degrade to `null` instead of failing the whole row or listing.
- */
-function jsonColumn<T>(schema: z.ZodType<T>) {
-    return z.string().transform((s, ctx): T => {
-        let value: unknown;
-        try {
-            value = JSON.parse(s);
-        } catch (err) {
-            ctx.addIssue({
-                code: "custom",
-                message: `Malformed JSON: ${
-                    err instanceof Error ? err.message : String(err)
-                }`,
-            });
-            return z.NEVER;
-        }
-        const result = schema.safeParse(value, { reportInput: true });
-        if (!result.success) {
-            ctx.addIssue({
-                code: "custom",
-                message: "Does not match schema",
-                params: { error: result.error },
-            });
-            return z.NEVER;
-        }
-        return result.data;
-    });
-}
+// Store each provider's response in its native shape.
+export const GenerationResponseSchema = z.union([
+    GenerationTaskSchema,
+    AutoDLResponseSchema.shape.data,
+]);
+export type GenerationResponse = z.infer<typeof GenerationResponseSchema>;
 
 // `let` (not `const`) so switching projects can swap in that project's DB; the
 // export is a live binding, so importers see the new handle after `reopenDb()`.
@@ -74,7 +44,8 @@ export async function reopenDb() {
     }
     try {
         db.close();
-    } catch (e) {
+    }
+    catch (e) {
         throw e as Error;
     }
     db = await getDatabase();
@@ -97,35 +68,7 @@ export async function getDatabase(project_root?: string) {
     Deno.mkdirSync(dir, { recursive: true });
     const path = join(dir, "database.sqlite");
     const db = new DatabaseSync(path);
-    db.exec(`
-        PRAGMA foreign_keys = ON;
-        CREATE TABLE IF NOT EXISTS Generations (
-            id            TEXT PRIMARY KEY,
-            task_id       TEXT UNIQUE,
-            status        TEXT,
-            request_json  TEXT,
-            task_json     TEXT,
-            created_at    TEXT,
-            downloaded_at TEXT,
-            failed_reason TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS ArchivedGenerations (
-            generation_id TEXT PRIMARY KEY REFERENCES Generations(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS GenerationReactions (
-            generation_id TEXT PRIMARY KEY REFERENCES Generations(id),
-            reaction      TEXT NOT NULL CHECK (reaction IN ('liked', 'disliked')),
-            reason        TEXT,
-            created_at    TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS ContentHashes (
-            generation_id TEXT UNIQUE REFERENCES Generations(id),
-            content_hash  TEXT UNIQUE
-        );
-    `);
+    db.exec(schema);
     return db;
 }
 
@@ -139,7 +82,7 @@ export const GenerationRowSchema = z.object({
     // the whole row — so one stale row can't break a whole listing.
     request_json: jsonColumn(GenerateInputSchema).nullable().catch(null),
     task_id: z.string().nullable().optional(),
-    task_json: jsonColumn(GenerationTaskSchema).nullable().catch(null)
+    task_json: jsonColumn(GenerationResponseSchema).nullable().catch(null)
         .optional(),
     downloaded_at: z.iso.datetime().nullable().optional(),
     failed_reason: z.string().nullable().optional(),
@@ -174,7 +117,8 @@ export function createGeneration(
             request_json: request,
             created_at: new Date().toISOString(),
         };
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -184,7 +128,7 @@ export const UpdateGenerationSchema = z.object({
     status: z.enum(["running", "succeeded", "failed", "queued"]).optional(),
     request_json: jsonColumn(GenerateInputSchema).optional(),
     task_id: z.string().optional(),
-    task_json: jsonColumn(GenerationTaskSchema).optional(),
+    task_json: jsonColumn(GenerationResponseSchema).optional(),
     downloaded_at: z.iso.datetime().optional(),
     failed_reason: z.string().optional(),
 });
@@ -207,8 +151,12 @@ export function updateGeneration(
         binds[col] = value;
     };
 
-    if (gen.status !== undefined) set("status", gen.status);
-    if (gen.task_id !== undefined) set("task_id", gen.task_id);
+    if (gen.status !== undefined) {
+        set("status", gen.status);
+    }
+    if (gen.task_id !== undefined) {
+        set("task_id", gen.task_id);
+    }
     if (gen.request_json !== undefined) {
         set(
             "request_json",
@@ -228,7 +176,9 @@ export function updateGeneration(
         set("failed_reason", gen.failed_reason);
     }
 
-    if (sets.length === 0) return; // nothing to change
+    if (sets.length === 0) {
+        return; // nothing to change
+    }
 
     try {
         const result = db.prepare(
@@ -237,7 +187,8 @@ export function updateGeneration(
         if (result.changes === 0) {
             return new Error(`No generation with id ${gen.id}`);
         }
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -251,7 +202,7 @@ export function recordGeneration(db: DatabaseSync, row: {
     createdAt: string;
     requestJson: string;
     status?: LocalTaskStatus;
-    task: GenerationTask;
+    task: GenerationResponse;
 }): void | Error {
     try {
         db.prepare(
@@ -272,7 +223,8 @@ export function recordGeneration(db: DatabaseSync, row: {
             task_json: JSON.stringify(row.task),
             created_at: row.createdAt,
         });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -393,7 +345,9 @@ export function recordTaskStatus(db: DatabaseSync, row: {
 }
 
 function parseRow(row: unknown): Generation | Error {
-    if (row === undefined) return new Error("row not found");
+    if (row === undefined) {
+        return new Error("row not found");
+    }
     const result = GenerationRowSchema.safeParse(row);
     if (!result.success) {
         return result.error;
@@ -436,7 +390,9 @@ export function getGenerationRequest(
     ).get(idOrTaskId, idOrTaskId) as
         | { request_json: string | null }
         | undefined;
-    if (!row?.request_json) return null;
+    if (!row?.request_json) {
+        return null;
+    }
     const parsed = GenerateInputSchema.safeParse(
         JSON.parse(row.request_json),
     );
@@ -458,7 +414,9 @@ export function getGenerationDetail(
     const row = db.prepare(
         "SELECT * FROM Generations WHERE id = ? OR task_id = ? LIMIT 1",
     ).get(idOrTaskId, idOrTaskId);
-    if (row === undefined) return null;
+    if (row === undefined) {
+        return null;
+    }
     return parseRow(row);
 }
 
@@ -468,7 +426,9 @@ export function listGenerations(db: DatabaseSync): Generation[] | Error {
         "SELECT * FROM Generations ORDER BY created_at DESC",
     ).all();
     const result = z.array(GenerationRowSchema).safeParse(rows);
-    if (!result.success) return result.error;
+    if (!result.success) {
+        return result.error;
+    }
     return result.data;
 }
 
@@ -492,7 +452,8 @@ export function archiveGeneration(
             `INSERT OR IGNORE INTO ArchivedGenerations (generation_id)
              VALUES (:generation_id)`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -506,7 +467,8 @@ export function unarchiveGeneration(
         db.prepare(
             `DELETE FROM ArchivedGenerations WHERE generation_id = :generation_id`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -567,7 +529,8 @@ export function setGenerationReaction(
             reason: reason ?? null,
             created_at: new Date().toISOString(),
         });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -581,7 +544,8 @@ export function clearGenerationReaction(
         db.prepare(
             `DELETE FROM GenerationReactions WHERE generation_id = :generation_id`,
         ).run({ generation_id: generationId });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -594,7 +558,9 @@ export function getGenerationReaction(
     const row = db.prepare(
         "SELECT reaction, reason FROM GenerationReactions WHERE generation_id = ?",
     ).get(generationId);
-    if (row === undefined) return null;
+    if (row === undefined) {
+        return null;
+    }
     const parsed = GenerationReactionRowSchema.pick({
         reaction: true,
         reason: true,
@@ -649,7 +615,8 @@ export function recordContentHash(
              ON CONFLICT(generation_id) DO UPDATE SET
                  content_hash = excluded.content_hash`,
         ).run({ generation_id: generationId, content_hash: contentHash });
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }
@@ -674,4 +641,43 @@ export function getGenerationIdByContentHash(
         "SELECT generation_id FROM ContentHashes WHERE content_hash = ?",
     ).get(contentHash) as { generation_id: string } | undefined;
     return row?.generation_id ?? null;
+}
+
+/**
+ * A TEXT column holding JSON serialized from `schema`. Parses and validates it
+ * to the typed value.
+ *
+ * Malformed JSON or a schema mismatch is reported as a regular Zod issue (via
+ * `ctx.addIssue` + `z.NEVER`) rather than thrown: a raw `throw` inside a
+ * `.transform()` escapes `safeParse` as a real exception, so callers could not
+ * rely on getting a result back. Compose with `.nullable().catch(null)` where a
+ * single stale row (e.g. one written under a since-removed model/provider)
+ * should degrade to `null` instead of failing the whole row or listing.
+ */
+function jsonColumn<T>(schema: z.ZodType<T>) {
+    return z.string().transform((s, ctx): T => {
+        let value: unknown;
+        try {
+            value = JSON.parse(s);
+        }
+        catch (err) {
+            ctx.addIssue({
+                code: "custom",
+                message: `Malformed JSON: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            });
+            return z.NEVER;
+        }
+        const result = schema.safeParse(value, { reportInput: true });
+        if (!result.success) {
+            ctx.addIssue({
+                code: "custom",
+                message: "Does not match schema",
+                params: { error: result.error },
+            });
+            return z.NEVER;
+        }
+        return result.data;
+    });
 }

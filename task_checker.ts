@@ -1,3 +1,4 @@
+import { safeFetch } from "./apigen/fetch.ts";
 /**
  * Reconciles the Seedance server's tasks with the local
  * `<project>/.project/generations` dir: any succeeded task whose video isn't on
@@ -80,7 +81,8 @@ export async function check_and_download(): Promise<void | Error> {
                             e,
                         );
                     }
-                } else {
+                }
+                else {
                     console.error(
                         `[task-checker] get task ${gen.task_id} failed:`,
                         polled,
@@ -88,14 +90,34 @@ export async function check_and_download(): Promise<void | Error> {
                 }
                 continue;
             }
-            const task = polled.task;
 
+            const task = polled.task;
             // Record terminal failures (with the reason) so they drop out
             // of `pending` and we stop polling them.
-            const status = localTaskStatus(task);
+            const status = polled.provider === "autodl"
+                ? polled.task.status === "SUCCESS"
+                    ? "succeeded"
+                    : polled.task.status === "FAILED"
+                    ? "failed"
+                    : polled.task.status === "RUNNING"
+                    ? "running"
+                    : "queued"
+                : localTaskStatus(polled.task.status);
             if (status === "failed") {
-                const reason = taskFailureReason(task);
-                console.log("[task-checker] task failed:", task, reason ?? "");
+                const reason = polled.provider === "autodl"
+                    ? polled.task.status === "FAILED"
+                        ? polled.task.message ||
+                            (typeof polled.task.error === "string"
+                                ? polled.task.error
+                                : polled.task.error?.message) ||
+                            "AutoDL generation failed"
+                        : undefined
+                    : taskFailureReason(polled.task);
+                console.log(
+                    "[task-checker] task failed:",
+                    task,
+                    reason ?? "",
+                );
                 recordTaskStatus(db, {
                     taskId: gen.task_id,
                     status,
@@ -106,7 +128,14 @@ export async function check_and_download(): Promise<void | Error> {
             }
 
             // Not ready yet (queued/running/…) — try again next pass.
-            if (status !== "succeeded") continue;
+            if (status !== "succeeded") {
+                recordTaskStatus(db, {
+                    taskId: gen.task_id,
+                    status,
+                    taskJson: JSON.stringify(task),
+                });
+                continue;
+            }
 
             await downloadAndRecord(
                 db,
@@ -114,7 +143,7 @@ export async function check_and_download(): Promise<void | Error> {
                 gen.id,
                 gen.task_id,
                 gen.model ?? "",
-                task,
+                polled,
                 apiKey ?? "",
             );
         }
@@ -151,7 +180,15 @@ export async function check_and_download(): Promise<void | Error> {
                         continue;
                     }
                     const task = polled.task;
-                    const status = localTaskStatus(task);
+                    const status = polled.provider === "autodl"
+                        ? polled.task.status === "SUCCESS"
+                            ? "succeeded"
+                            : polled.task.status === "FAILED"
+                            ? "failed"
+                            : polled.task.status === "RUNNING"
+                            ? "running"
+                            : "queued"
+                        : localTaskStatus(polled.task.status);
                     if (status !== "succeeded") {
                         console.error(
                             `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
@@ -164,7 +201,7 @@ export async function check_and_download(): Promise<void | Error> {
                         gen.id,
                         gen.task_id,
                         gen.model ?? "",
-                        task,
+                        polled,
                         apiKey ?? "",
                     );
                     continue;
@@ -175,7 +212,8 @@ export async function check_and_download(): Promise<void | Error> {
                 if (getContentHashByGenerationId(db, gen.id) == null) {
                     await hashAndRecord(db, gen.id, dest);
                 }
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     `[task-checker] healing generation ${gen.task_id} failed:`,
                     err,
@@ -191,7 +229,9 @@ export async function check_and_download(): Promise<void | Error> {
         for (const gen of stuck) {
             try {
                 const ageMs = Date.now() - Date.parse(gen.created_at);
-                if (ageMs <= QUEUED_GRACE_MS) continue; // still being submitted
+                if (ageMs <= QUEUED_GRACE_MS) {
+                    continue; // still being submitted
+                }
 
                 console.log(
                     `[task-checker] failing stuck queued generation ${gen.id} (never submitted)`,
@@ -208,7 +248,8 @@ export async function check_and_download(): Promise<void | Error> {
                         err,
                     );
                 }
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     `[task-checker] healing queued generation ${gen.id} failed:`,
                     err,
@@ -232,10 +273,28 @@ async function downloadAndRecord(
     genId: string,
     taskId: string,
     model: string,
-    task: GenerationTask,
+    polled: Exclude<Awaited<ReturnType<typeof getTask>>, Error>,
     apiKey: string,
 ): Promise<void> {
-    const response = await getVideoContent(model, taskId, task, apiKey);
+    let response: Response | Error;
+    if (polled.provider === "autodl") {
+        if (polled.task.status !== "SUCCESS") {
+            return;
+        }
+        const video = polled.task.results.find((item) =>
+            item.alias === "final_video"
+        );
+        if (!video?.url) {
+            console.error(
+                `[task-checker] AutoDL task ${taskId} has no video URL`,
+            );
+            return;
+        }
+        response = await safeFetch(video.url);
+    }
+    else {
+        response = await getVideoContent(model, taskId, polled.task, apiKey);
+    }
     if (response instanceof Error) {
         console.error(`[task-checker] download ${taskId} failed:`, response);
         return;
@@ -251,8 +310,8 @@ async function downloadAndRecord(
 
     markDownloaded(db, {
         taskId,
-        status: localTaskStatus(task),
-        taskJson: JSON.stringify(task),
+        status: "succeeded",
+        taskJson: JSON.stringify(polled.task),
         downloadedAt: new Date().toISOString(),
     });
 
@@ -291,7 +350,8 @@ async function hashAndRecord(
                 err,
             );
         }
-    } catch (err) {
+    }
+    catch (err) {
         console.error(`[task-checker] hash ${dest} failed:`, err);
     }
 }
@@ -301,8 +361,11 @@ async function fileExists(path: string): Promise<boolean> {
     try {
         await Deno.stat(path);
         return true;
-    } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return false;
+    }
+    catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+            return false;
+        }
         throw err;
     }
 }
@@ -319,7 +382,8 @@ async function writeVideoResponse(response: Response, dest: string) {
     });
     try {
         await response.body.pipeTo(file.writable);
-    } catch (err) {
+    }
+    catch (err) {
         return err as Error;
     }
 }

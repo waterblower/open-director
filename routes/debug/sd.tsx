@@ -23,9 +23,13 @@ async function fetchAllTasks(): Promise<Task[] | Error> {
             page_num: page,
             page_size: 500,
         });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         all.push(...res.items);
-        if (res.items.length === 0 || all.length >= res.total) break;
+        if (res.items.length === 0 || all.length >= res.total) {
+            break;
+        }
     }
     return all;
 }
@@ -54,11 +58,15 @@ async function fetchAllFiles(): Promise<ArkFile[] | Error> {
                 res.issues[0].code === "invalid_type" &&
                 res.issues[0].path.length === 0 &&
                 res.issues[0].message.includes("received null")
-            ) return [];
+            ) {
+                return [];
+            }
             return res;
         }
         all.push(...res.data);
-        if (!res.has_more) return all;
+        if (!res.has_more) {
+            return all;
+        }
         if (res.data.length === 0 || !res.last_id) {
             return new Error(
                 "Seedance Files API reported more files without a cursor",
@@ -93,7 +101,9 @@ const FILE_STATUS_ORDER: FileStatus[] = [
 ];
 
 function fmtTime(unixSec: number): string {
-    if (!unixSec) return "—";
+    if (!unixSec) {
+        return "—";
+    }
     return new Date(unixSec * 1000).toISOString().replace("T", " ").slice(
         0,
         19,
@@ -101,8 +111,12 @@ function fmtTime(unixSec: number): string {
 }
 
 function fmtBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 ** 2) {
+        return `${(bytes / 1024).toFixed(1)} KiB`;
+    }
     if (bytes < 1024 ** 3) {
         return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
     }

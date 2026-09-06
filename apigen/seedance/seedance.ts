@@ -511,7 +511,9 @@ export class SeedanceClient {
         const res = await this.get(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = TaskSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -542,12 +544,16 @@ export class SeedanceClient {
         if (params?.page_size !== undefined) {
             query.set("page_size", String(params.page_size));
         }
-        if (params?.status) query.set("filter.status", params.status);
+        if (params?.status) {
+            query.set("filter.status", params.status);
+        }
         // task_ids is passed as a repeated query parameter
         for (const id of params?.task_ids ?? []) {
             query.append("filter.task_ids", id);
         }
-        if (params?.model) query.set("filter.model", params.model);
+        if (params?.model) {
+            query.set("filter.model", params.model);
+        }
         if (params?.service_tier) {
             query.set("filter.service_tier", params.service_tier);
         }
@@ -555,7 +561,9 @@ export class SeedanceClient {
         const res = await this.get(
             `/contents/generations/tasks${qs ? `?${qs}` : ""}`,
         );
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = ListTasksResponseSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -569,7 +577,9 @@ export class SeedanceClient {
         const res = await this.delete(
             `/contents/generations/tasks/${encodeURIComponent(taskId)}`,
         );
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = CancelTaskResponseSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -585,7 +595,9 @@ export class SeedanceClient {
             "/contents/generations/tasks",
             request,
         );
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         // The create endpoint returns only the task id; validate strictly so
         // any unexpected shape surfaces as an Error instead of silently passing.
         const parsed = z.object({ id: z.string() }).strict().safeParse(res);
@@ -601,7 +613,9 @@ export class SeedanceClient {
         form.append("file", request.file);
         form.append("purpose", request.purpose);
         const res = await this.postForm("/files", form);
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         console.log("[apigen/seedance] file uploaded:", res);
         const parsed = ArkFileSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
@@ -609,7 +623,9 @@ export class SeedanceClient {
 
     async getFile(fileId: string): Promise<ArkFile | Error> {
         const res = await this.get(`/files/${encodeURIComponent(fileId)}`);
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = ArkFileSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -618,15 +634,23 @@ export class SeedanceClient {
         params?: ListFilesRequest,
     ): Promise<ListFilesResponse | Error> {
         const query = new URLSearchParams();
-        if (params?.purpose) query.set("purpose", params.purpose);
+        if (params?.purpose) {
+            query.set("purpose", params.purpose);
+        }
         if (params?.limit !== undefined) {
             query.set("limit", String(params.limit));
         }
-        if (params?.after) query.set("after", params.after);
-        if (params?.order) query.set("order", params.order);
+        if (params?.after) {
+            query.set("after", params.after);
+        }
+        if (params?.order) {
+            query.set("order", params.order);
+        }
         const qs = query.toString();
         const res = await this.get(`/files${qs ? `?${qs}` : ""}`);
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = ListFilesResponseSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -635,7 +659,9 @@ export class SeedanceClient {
         const res = await this.delete(
             `/files/${encodeURIComponent(fileId)}`,
         );
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         const parsed = DeleteFileResponseSchema.safeParse(res);
         return parsed.success ? parsed.data : parsed.error;
     }
@@ -647,7 +673,9 @@ export class SeedanceClient {
     async postForm<T>(path: string, form: FormData) {
         // Do NOT set Content-Type — the browser/runtime must set it with the boundary
         const res = await this.fetchRaw(path, { method: "POST", body: form });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         return this.parseResponse(res);
     }
 
@@ -657,19 +685,25 @@ export class SeedanceClient {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         return this.parseResponse(res);
     }
 
     async get(path: string) {
         const res = await this.fetchRaw(path, { method: "GET" });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         return this.parseResponse(res);
     }
 
     async delete<T>(path: string) {
         const res = await this.fetchRaw(path, { method: "DELETE" });
-        if (res instanceof Error) return res;
+        if (res instanceof Error) {
+            return res;
+        }
         return this.parseResponse(res);
     }
 
@@ -693,7 +727,8 @@ export class SeedanceClient {
                 },
                 signal: controller.signal,
             });
-        } catch (err) {
+        }
+        catch (err) {
             if (controller.signal.aborted) {
                 return new SeedanceError(
                     0,
@@ -707,7 +742,8 @@ export class SeedanceClient {
                 "network_error",
                 `Request to ${path} failed: ${message}`,
             );
-        } finally {
+        }
+        finally {
             clearTimeout(timer);
         }
     }
@@ -723,7 +759,8 @@ export class SeedanceClient {
         if (text) {
             try {
                 body = JSON.parse(text);
-            } catch {
+            }
+            catch {
                 body = undefined;
             }
         }

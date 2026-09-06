@@ -73,7 +73,9 @@ async function upsertProject(
                 .check(entry)
                 .set(key, updated)
                 .commit();
-            if (result.ok) return updated;
+            if (result.ok) {
+                return updated;
+            }
             continue;
         }
         if (entry.value !== null) {
@@ -90,7 +92,9 @@ async function upsertProject(
             .check(entry)
             .set(key, project)
             .commit();
-        if (result.ok) return project;
+        if (result.ok) {
+            return project;
+        }
     }
 }
 
@@ -107,7 +111,8 @@ async function canonicalizeProjectPath(path: string): Promise<string> {
     const absolute = resolve(path);
     try {
         return await Deno.realPath(absolute);
-    } catch (error) {
+    }
+    catch (error) {
         if (
             error instanceof Deno.errors.NotFound ||
             error instanceof Deno.errors.PermissionDenied

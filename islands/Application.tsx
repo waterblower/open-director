@@ -59,7 +59,9 @@ export default function Application() {
                     // Older list responses keyed pending cards by provider task
                     // id. Remove that stale entry before inserting the finished
                     // generation under its canonical database id.
-                    if (gen.task_id) next.delete(gen.task_id);
+                    if (gen.task_id) {
+                        next.delete(gen.task_id);
+                    }
                     next.set(gen.id, {
                         id: gen.id,
                         status: gen.status,
@@ -68,7 +70,8 @@ export default function Application() {
                         has_request: gen.request_json != null,
                     });
                     generated_videos.value = next;
-                } else if (event.type == "generation_created") {
+                }
+                else if (event.type == "generation_created") {
                     const { gen } = event;
                     addGenerations(generated_videos, {
                         id: gen.id,
@@ -76,9 +79,12 @@ export default function Application() {
                         created_at: gen.created_at,
                         has_request: gen.request_json != null,
                     });
-                } else if (event.type == "fs_changed") {
+                }
+                else if (event.type == "fs_changed") {
                     const pd = projectData.value;
-                    if (!pd) return;
+                    if (!pd) {
+                        return;
+                    }
                     // "" = project root (paths are relative to the root).
                     const res = await readDir(pd.rootPath, "");
                     if (res instanceof Error) {
@@ -117,15 +123,20 @@ export default function Application() {
     useEffect(() => {
         (async () => {
             try {
-                const [seedance, minimax, fal] = await Promise.all([
+                const [seedance, minimax, fal, autodl] = await Promise.all([
                     trpc.getApiKeyStatus.query("seedance"),
                     trpc.getApiKeyStatus.query("minimax"),
                     trpc.getApiKeyStatus.query("fal"),
+                    trpc.getApiKeyStatus.query("autodl"),
                 ]);
-                if (!seedance.hasKey && !minimax.hasKey && !fal.hasKey) {
+                if (
+                    !seedance.hasKey && !minimax.hasKey && !fal.hasKey &&
+                    !autodl.hasKey
+                ) {
                     settingsOpen.value = true;
                 }
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     "[Application] failed to load API key status:",
                     err,
@@ -175,7 +186,9 @@ export default function Application() {
             // subscribe it to `projectData`, and since it also *writes*
             // `projectData.value` below, that would self-trigger an infinite
             // reload loop (loadProjectData firing "like crazy").
-            if (!projectData.peek()) return;
+            if (!projectData.peek()) {
+                return;
+            }
             const data = await loadProjectData();
             if (!data) {
                 return;
@@ -198,7 +211,9 @@ export default function Application() {
     const loadedRoot = useRef<string | null | undefined>(undefined);
     useSignalEffect(() => {
         const root = projectData.value?.rootPath ?? null;
-        if (root === loadedRoot.current) return;
+        if (root === loadedRoot.current) {
+            return;
+        }
         loadedRoot.current = root;
         (async () => {
             if (!root) {
@@ -278,7 +293,8 @@ export function updateGenerations(
     const existing_gen = new_generations.get(gen.id);
     if (existing_gen) {
         new_generations.set(gen.id, { ...existing_gen, ...gen });
-    } else {
+    }
+    else {
         throw new Error(`Generation ${gen.id} not found`);
     }
     generations.value = new_generations;

@@ -62,8 +62,11 @@ export const handler = define.handlers({
         const candidates = [ctx.params.path];
         try {
             const decoded = decodeURIComponent(ctx.params.path);
-            if (decoded !== ctx.params.path) candidates.push(decoded);
-        } catch { /* malformed escape — ignore */ }
+            if (decoded !== ctx.params.path) {
+                candidates.push(decoded);
+            }
+        }
+        catch { /* malformed escape — ignore */ }
 
         let target: string | null = null;
         let size = 0;
@@ -81,9 +84,12 @@ export const handler = define.handlers({
                     ext = rel.split(".").pop()?.toLowerCase() ?? "";
                     break;
                 }
-            } catch { /* try next candidate */ }
+            }
+            catch { /* try next candidate */ }
         }
-        if (target === null) return new Response("Not found", { status: 404 });
+        if (target === null) {
+            return new Response("Not found", { status: 404 });
+        }
 
         const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
         const range = ctx.req.headers.get("range");

@@ -20,7 +20,9 @@ export function McpInfoModal(props: { onClose: () => void }) {
     // Close on Escape, like a native dialog.
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+                onClose();
+            }
         };
         globalThis.addEventListener("keydown", onKeyDown);
         return () => globalThis.removeEventListener("keydown", onKeyDown);
@@ -35,13 +37,15 @@ export function McpInfoModal(props: { onClose: () => void }) {
                 ]);
                 info.value = serverInfo;
                 projectDir.value = dir;
-            } catch (err) {
+            }
+            catch (err) {
                 console.error(
                     "[McpInfoModal] failed to load MCP server info:",
                     err,
                 );
                 error.value = err instanceof Error ? err.message : String(err);
-            } finally {
+            }
+            finally {
                 loading.value = false;
             }
         })();
@@ -58,7 +62,9 @@ export function McpInfoModal(props: { onClose: () => void }) {
         <div
             class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={(e) => {
-                if (e.target === e.currentTarget) onClose();
+                if (e.target === e.currentTarget) {
+                    onClose();
+                }
             }}
         >
             <div class="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-white text-gray-800 shadow-2xl">
@@ -243,7 +249,8 @@ function CopyField(
             await navigator.clipboard.writeText(props.value);
             copied.value = true;
             setTimeout(() => copied.value = false, 1500);
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[CopyField] failed to copy to clipboard:", err);
         }
     };

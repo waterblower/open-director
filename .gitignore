@@ -19,3 +19,4 @@ db.script.ts
 *.jpeg
 *.mp4
 /apigen/data
+/apigen/tests

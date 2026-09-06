@@ -16,13 +16,19 @@ export function Footbar(props: { onOpenSettings: () => void }) {
 
     useEffect(() => {
         const onPointerDown = (e: PointerEvent) => {
-            if (!languageMenuOpen.value) return;
+            if (!languageMenuOpen.value) {
+                return;
+            }
             const target = e.target as Node | null;
-            if (target && languageMenuRef.current?.contains(target)) return;
+            if (target && languageMenuRef.current?.contains(target)) {
+                return;
+            }
             languageMenuOpen.value = false;
         };
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") languageMenuOpen.value = false;
+            if (e.key === "Escape") {
+                languageMenuOpen.value = false;
+            }
         };
         globalThis.addEventListener("pointerdown", onPointerDown);
         globalThis.addEventListener("keydown", onKeyDown);

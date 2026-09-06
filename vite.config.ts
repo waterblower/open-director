@@ -11,7 +11,8 @@ function getGitHash(): string {
         }).outputSync();
         const hash = new TextDecoder().decode(result.stdout).trim();
         return result.success && hash ? hash : "unknown";
-    } catch {
+    }
+    catch {
         return "unknown";
     }
 }

@@ -133,11 +133,15 @@ export function parseGenerationPlan(source: string): GenerationPlanTask[] {
 function pruneRegisteredPlans(): void {
     const now = Date.now();
     for (const [token, plan] of registeredPlans) {
-        if (plan.expiresAt <= now) registeredPlans.delete(token);
+        if (plan.expiresAt <= now) {
+            registeredPlans.delete(token);
+        }
     }
     while (registeredPlans.size >= MAX_REGISTERED_PLANS) {
         const oldest = registeredPlans.keys().next().value;
-        if (oldest === undefined) break;
+        if (oldest === undefined) {
+            break;
+        }
         registeredPlans.delete(oldest);
     }
 }
@@ -173,9 +177,13 @@ async function pickTomlFile(): Promise<string | null> {
     })();
 
     const { success, stdout } = await command.output();
-    if (!success) return null;
+    if (!success) {
+        return null;
+    }
     const output = new TextDecoder().decode(stdout).trim();
-    if (!output) return null;
+    if (!output) {
+        return null;
+    }
     const path = Deno.build.os === "windows"
         ? new TextDecoder().decode(
             Uint8Array.from(atob(output), (char) => char.charCodeAt(0)),
@@ -206,19 +214,28 @@ async function inspectReference(
     const candidate = resolve(planDir, referencePath);
     const projectRelative = relative(projectRoot, candidate);
     const safePath = await resolveInProject(projectRoot, projectRelative);
-    if (safePath instanceof Error) return { status: "blocked" };
+    if (safePath instanceof Error) {
+        return { status: "blocked" };
+    }
 
     let stat: Deno.FileInfo;
     try {
         stat = await Deno.stat(safePath);
-    } catch (err) {
-        if (err instanceof Deno.errors.NotFound) return { status: "missing" };
+    }
+    catch (err) {
+        if (err instanceof Deno.errors.NotFound) {
+            return { status: "missing" };
+        }
         throw err;
     }
-    if (!stat.isFile) return { status: "missing" };
+    if (!stat.isFile) {
+        return { status: "missing" };
+    }
 
     const contentType = IMAGE_CONTENT_TYPES[extname(safePath).toLowerCase()];
-    if (!contentType) return { status: "unsupported" };
+    if (!contentType) {
+        return { status: "unsupported" };
+    }
     return { status: "ready", path: safePath, contentType };
 }
 
@@ -237,7 +254,9 @@ export async function loadGenerationPlan(
 
     for (const task of tasks) {
         for (const referencePath of task.reference_image_paths) {
-            if (assets[referencePath]) continue;
+            if (assets[referencePath]) {
+                continue;
+            }
             const inspected = await inspectReference(planPath, referencePath);
             if (inspected.status !== "ready") {
                 assets[referencePath] = {
@@ -290,7 +309,9 @@ export function getGenerationPlanAsset(
 ): RegisteredAsset | null {
     pruneRegisteredPlans();
     const plan = registeredPlans.get(token);
-    if (!plan) return null;
+    if (!plan) {
+        return null;
+    }
     plan.expiresAt = Date.now() + PLAN_TTL_MS;
     return plan.assets.get(assetId) ?? null;
 }

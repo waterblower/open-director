@@ -8,8 +8,12 @@ import type {
 import { trpc } from "../trpc/client.ts";
 
 function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -222,12 +226,16 @@ export default function GenerationPlan() {
         loading.value = true;
         try {
             const selected = await trpc.pickGenerationPlan.mutate();
-            if (selected) plan.value = selected;
-        } catch (cause) {
+            if (selected) {
+                plan.value = selected;
+            }
+        }
+        catch (cause) {
             error.value = cause instanceof Error
                 ? cause.message
                 : "Unable to open this generation plan.";
-        } finally {
+        }
+        finally {
             loading.value = false;
         }
     };

@@ -50,12 +50,23 @@ function zodInputSchema(input: unknown): JsonSchema | null {
         return withoutDialect(
             z.toJSONSchema(input as z.ZodType, { io: "input" }) as JsonSchema,
         );
-    } catch {
+    }
+    catch {
         // tRPC accepts parsers other than Zod. Such a parser can still be
         // called through MCP, but there is no generic way to infer its JSON
         // Schema, so advertise an open argument object.
         return null;
     }
+}
+
+/** Object unions remain native MCP argument objects. */
+function isObjectSchema(schema: JsonSchema): boolean {
+    if (schema.type === "object") {
+        return true;
+    }
+    const branches = schema.anyOf ?? schema.oneOf;
+    return Array.isArray(branches) && branches.length > 0 &&
+        branches.every((branch) => isObjectSchema(branch as JsonSchema));
 }
 
 function inputContract(inputs: readonly unknown[]): Pick<
@@ -82,12 +93,12 @@ function inputContract(inputs: readonly unknown[]): Pick<
     }
 
     const knownSchemas = schemas as JsonSchema[];
-    const allObjects = knownSchemas.every((schema) => schema.type === "object");
+    const allObjects = knownSchemas.every(isObjectSchema);
 
     if (allObjects) {
         return {
             inputSchema: knownSchemas.length === 1
-                ? knownSchemas[0]
+                ? { ...knownSchemas[0], type: "object" }
                 : { type: "object", allOf: knownSchemas },
             inputOf: (args) => args,
         };
@@ -184,7 +195,9 @@ async function callTrpcProcedure(tool: Tool, args: unknown): Promise<unknown> {
         tool.inputOf(args),
     );
 
-    if (tool.type !== "subscription") return result;
+    if (tool.type !== "subscription") {
+        return result;
+    }
     if (!isAsyncIterable(result)) {
         throw new Error(
             `tRPC subscription "${tool.name}" did not return an async iterable.`,
@@ -197,7 +210,8 @@ async function callTrpcProcedure(tool: Tool, args: unknown): Promise<unknown> {
     try {
         const next = await iterator.next();
         return next.done ? null : next.value;
-    } finally {
+    }
+    finally {
         await iterator.return?.();
     }
 }
@@ -250,7 +264,9 @@ export async function handleMcpPayload(
         const out: JsonRpcResponse[] = [];
         for (const msg of payload) {
             const response = await handleSingle(msg);
-            if (response) out.push(response);
+            if (response) {
+                out.push(response);
+            }
         }
         return out.length ? out : null;
     }
@@ -320,7 +336,8 @@ async function handleSingle(msg: unknown): Promise<JsonRpcResponse | null> {
                     content: [{ type: "text", text: resultText(result) }],
                     isError: false,
                 });
-            } catch (err) {
+            }
+            catch (err) {
                 // Tool failures are a tool result (not a protocol-level
                 // error), so the model can read and react to the message.
                 const message = err instanceof Error

@@ -17,7 +17,8 @@ export const handler = define.handlers({
         let payload: unknown;
         try {
             payload = await ctx.req.json();
-        } catch {
+        }
+        catch {
             return Response.json(
                 {
                     jsonrpc: "2.0",

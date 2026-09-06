@@ -74,13 +74,17 @@ export function GenerationCard(
     const reactionBusy = useSignal(false);
 
     const toggleArchive = async () => {
-        if (archiveBusy.value) return;
+        if (archiveBusy.value) {
+            return;
+        }
         archiveBusy.value = true;
         try {
             await onArchiveToggle(generation);
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[GenerationCard] failed to toggle archive:", err);
-        } finally {
+        }
+        finally {
             archiveBusy.value = false;
         }
     };
@@ -88,7 +92,9 @@ export function GenerationCard(
     const pickReaction = (reaction: Reaction) => {
         if (generation.reaction === reaction) {
             // Already reacted this way — clicking again removes it.
-            if (reactionBusy.value) return;
+            if (reactionBusy.value) {
+                return;
+            }
             reactionBusy.value = true;
             onClearReaction(generation)
                 .catch((err) =>
@@ -105,7 +111,9 @@ export function GenerationCard(
     };
 
     const confirmReaction = async () => {
-        if (!reasonModal.value || reactionBusy.value) return;
+        if (!reasonModal.value || reactionBusy.value) {
+            return;
+        }
         reactionBusy.value = true;
         try {
             await onReact(
@@ -114,16 +122,20 @@ export function GenerationCard(
                 reasonText.value.trim() || undefined,
             );
             reasonModal.value = null;
-        } catch (err) {
+        }
+        catch (err) {
             console.error("[GenerationCard] failed to save reaction:", err);
-        } finally {
+        }
+        finally {
             reactionBusy.value = false;
         }
     };
 
     const openDetail = async () => {
         detailOpen.value = true;
-        if (detail.value || detailLoading.value) return;
+        if (detail.value || detailLoading.value) {
+            return;
+        }
         detailLoading.value = true;
         const res = await trpc.open.getGenerationDetail.query(
             generation.id,
@@ -147,7 +159,9 @@ export function GenerationCard(
         <div
             draggable={!!url}
             onDragStart={(e) => {
-                if (!url || !e.dataTransfer) return;
+                if (!url || !e.dataTransfer) {
+                    return;
+                }
                 e.dataTransfer.setData(PROJECT_FILE_MIME, rel);
                 // Mark the drag as a grid video so the explorer prompts for a
                 // name before saving it (see constants.ts).
@@ -187,7 +201,8 @@ export function GenerationCard(
                                 SIZE,
                                 SIZE,
                             );
-                        } catch {
+                        }
+                        catch {
                             /* tainted/undecoded — keep bg */
                         }
                     }
@@ -267,7 +282,8 @@ export function GenerationCard(
                                 if (req) {
                                     reusePrompt.value = req;
                                 }
-                            } catch (err) {
+                            }
+                            catch (err) {
                                 console.error(
                                     "[GenerationCard] failed to load request for reuse:",
                                     err,

@@ -85,12 +85,15 @@ export async function storeDataUrl(
     const name = `${hash}.${ext}`;
 
     const dir = await resolveInProject(projectRoot, UPLOADS_DIR);
-    if (dir instanceof Error) throw dir;
+    if (dir instanceof Error) {
+        throw dir;
+    }
     await Deno.mkdir(dir, { recursive: true });
     const abs = join(dir, name);
     try {
         await Deno.lstat(abs); // already stored — content-addressed, so identical
-    } catch {
+    }
+    catch {
         await Deno.writeFile(abs, bytes);
     }
 
