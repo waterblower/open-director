@@ -7,6 +7,7 @@
  * Uses Deno's built-in `node:sqlite`, which is part of the runtime — so it
  * compiles into a `deno compile` binary with no external native library.
  */
+import { get_Output_Schema as AutoDLResponseSchema } from "./apigen/autodl.ts";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "@std/path";
 import { ulid } from "@std/ulid";
@@ -14,13 +15,19 @@ import { z } from "zod";
 import {
     type GenerateInput,
     GenerateInputSchema,
-    type GenerationTask,
     GenerationTaskSchema,
     type LocalTaskStatus,
 } from "./apigen/mod.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
 import schema from "./db.schema.sqlite?raw" with { type: "text" };
+
+// Store each provider's response in its native shape.
+export const GenerationResponseSchema = z.union([
+    GenerationTaskSchema,
+    AutoDLResponseSchema.shape.data,
+]);
+export type GenerationResponse = z.infer<typeof GenerationResponseSchema>;
 
 // `let` (not `const`) so switching projects can swap in that project's DB; the
 // export is a live binding, so importers see the new handle after `reopenDb()`.
@@ -75,7 +82,7 @@ export const GenerationRowSchema = z.object({
     // the whole row — so one stale row can't break a whole listing.
     request_json: jsonColumn(GenerateInputSchema).nullable().catch(null),
     task_id: z.string().nullable().optional(),
-    task_json: jsonColumn(GenerationTaskSchema).nullable().catch(null)
+    task_json: jsonColumn(GenerationResponseSchema).nullable().catch(null)
         .optional(),
     downloaded_at: z.iso.datetime().nullable().optional(),
     failed_reason: z.string().nullable().optional(),
@@ -121,7 +128,7 @@ export const UpdateGenerationSchema = z.object({
     status: z.enum(["running", "succeeded", "failed", "queued"]).optional(),
     request_json: jsonColumn(GenerateInputSchema).optional(),
     task_id: z.string().optional(),
-    task_json: jsonColumn(GenerationTaskSchema).optional(),
+    task_json: jsonColumn(GenerationResponseSchema).optional(),
     downloaded_at: z.iso.datetime().optional(),
     failed_reason: z.string().optional(),
 });
@@ -195,7 +202,7 @@ export function recordGeneration(db: DatabaseSync, row: {
     createdAt: string;
     requestJson: string;
     status?: LocalTaskStatus;
-    task: GenerationTask;
+    task: GenerationResponse;
 }): void | Error {
     try {
         db.prepare(

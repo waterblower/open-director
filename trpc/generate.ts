@@ -17,6 +17,7 @@ import {
     GenerateInputSchema,
     getTask,
     localTaskStatus,
+    taskFailureReason,
     taskIdFromCreateResponse,
 } from "@/apigen/mod.ts";
 import { extname } from "@std/path";
@@ -101,42 +102,55 @@ async function submitGeneration(
         }
         return gen;
     }
-    if (polled.provider == "autodl") {
-        throw new Error("not implemented");
+    const task = polled.task;
+    const status = polled.provider === "autodl"
+        ? polled.task.status === "SUCCESS"
+            ? "succeeded"
+            : polled.task.status === "FAILED"
+            ? "failed"
+            : polled.task.status === "RUNNING"
+            ? "running"
+            : "queued"
+        : localTaskStatus(polled.task.status);
+    const failedReason = polled.provider === "autodl"
+        ? polled.task.status === "FAILED"
+            ? polled.task.message || (typeof polled.task.error === "string"
+                ? polled.task.error
+                : polled.task.error?.message) ||
+                "AutoDL generation failed"
+            : undefined
+        : taskFailureReason(polled.task);
+    const err2 = updateGeneration(db, {
+        id: generation.id,
+        task_json: task,
+        status,
+        failed_reason: failedReason,
+    });
+    if (err2 instanceof Error) {
+        return err2;
     }
-    else {
-        const task = polled.task;
-        const err2 = updateGeneration(db, {
-            id: generation.id,
-            task_json: task,
-            status: localTaskStatus(task.status),
-        });
-        if (err2 instanceof Error) {
-            return err2;
-        }
 
-        console.log("[trpc] task result:", task);
+    console.log("[trpc] task result:", task);
 
-        // Logging failure shouldn't fail the request — the task is created.
-        const recordErr = recordGeneration(db, {
-            taskId,
-            requestJson: JSON.stringify(storedRequest),
-            createdAt: new Date().toISOString(),
-            status: localTaskStatus(task.status),
-            task,
-        });
-        if (recordErr) {
-            console.error(
-                "[trpc] failed to record task log:",
-                recordErr,
-            );
-        }
-        const gen = getGenerationById(db, generation.id);
-        if (gen instanceof Error) {
-            return gen;
-        }
+    // Logging failure shouldn't fail the request — the task is created.
+    const recordErr = recordGeneration(db, {
+        taskId,
+        requestJson: JSON.stringify(storedRequest),
+        createdAt: new Date().toISOString(),
+        status,
+        task,
+    });
+    if (recordErr) {
+        console.error(
+            "[trpc] failed to record task log:",
+            recordErr,
+        );
+    }
+    const gen = getGenerationById(db, generation.id);
+    if (gen instanceof Error) {
         return gen;
     }
+    return gen;
 }
 
 /**

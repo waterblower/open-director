@@ -1,3 +1,4 @@
+import { safeFetch } from "./apigen/fetch.ts";
 /**
  * Reconciles the Seedance server's tasks with the local
  * `<project>/.project/generations` dir: any succeeded task whose video isn't on
@@ -90,45 +91,61 @@ export async function check_and_download(): Promise<void | Error> {
                 continue;
             }
 
-            if (polled.provider == "autodl") {
-                throw new Error("not implemented");
-            }
-            else {
-                const task = polled.task;
-                // Record terminal failures (with the reason) so they drop out
-                // of `pending` and we stop polling them.
-                const status = localTaskStatus(task.status);
-                if (status === "failed") {
-                    const reason = taskFailureReason(task);
-                    console.log(
-                        "[task-checker] task failed:",
-                        task,
-                        reason ?? "",
-                    );
-                    recordTaskStatus(db, {
-                        taskId: gen.task_id,
-                        status,
-                        taskJson: JSON.stringify(task),
-                        failedReason: reason,
-                    });
-                    continue;
-                }
-
-                // Not ready yet (queued/running/…) — try again next pass.
-                if (status !== "succeeded") {
-                    continue;
-                }
-
-                await downloadAndRecord(
-                    db,
-                    project_path,
-                    gen.id,
-                    gen.task_id,
-                    gen.model ?? "",
+            const task = polled.task;
+            // Record terminal failures (with the reason) so they drop out
+            // of `pending` and we stop polling them.
+            const status = polled.provider === "autodl"
+                ? polled.task.status === "SUCCESS"
+                    ? "succeeded"
+                    : polled.task.status === "FAILED"
+                    ? "failed"
+                    : polled.task.status === "RUNNING"
+                    ? "running"
+                    : "queued"
+                : localTaskStatus(polled.task.status);
+            if (status === "failed") {
+                const reason = polled.provider === "autodl"
+                    ? polled.task.status === "FAILED"
+                        ? polled.task.message ||
+                            (typeof polled.task.error === "string"
+                                ? polled.task.error
+                                : polled.task.error?.message) ||
+                            "AutoDL generation failed"
+                        : undefined
+                    : taskFailureReason(polled.task);
+                console.log(
+                    "[task-checker] task failed:",
                     task,
-                    apiKey ?? "",
+                    reason ?? "",
                 );
+                recordTaskStatus(db, {
+                    taskId: gen.task_id,
+                    status,
+                    taskJson: JSON.stringify(task),
+                    failedReason: reason,
+                });
+                continue;
             }
+
+            // Not ready yet (queued/running/…) — try again next pass.
+            if (status !== "succeeded") {
+                recordTaskStatus(db, {
+                    taskId: gen.task_id,
+                    status,
+                    taskJson: JSON.stringify(task),
+                });
+                continue;
+            }
+
+            await downloadAndRecord(
+                db,
+                project_path,
+                gen.id,
+                gen.task_id,
+                gen.model ?? "",
+                polled,
+                apiKey ?? "",
+            );
         }
 
         // 3. Heal dirty data: rows we believe are downloaded but whose file is
@@ -162,29 +179,32 @@ export async function check_and_download(): Promise<void | Error> {
                         );
                         continue;
                     }
-                    if (polled.provider == "autodl") {
-                        throw new Error("not implemented");
-                    }
-                    else {
-                        const task = polled.task;
-                        const status = localTaskStatus(task.status);
-                        if (status !== "succeeded") {
-                            console.error(
-                                `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
-                            );
-                            continue;
-                        }
-                        await downloadAndRecord(
-                            db,
-                            project_path,
-                            gen.id,
-                            gen.task_id,
-                            gen.model ?? "",
-                            task,
-                            apiKey ?? "",
+                    const task = polled.task;
+                    const status = polled.provider === "autodl"
+                        ? polled.task.status === "SUCCESS"
+                            ? "succeeded"
+                            : polled.task.status === "FAILED"
+                            ? "failed"
+                            : polled.task.status === "RUNNING"
+                            ? "running"
+                            : "queued"
+                        : localTaskStatus(polled.task.status);
+                    if (status !== "succeeded") {
+                        console.error(
+                            `[task-checker] cannot re-download ${gen.task_id}: status ${status}`,
                         );
                         continue;
                     }
+                    await downloadAndRecord(
+                        db,
+                        project_path,
+                        gen.id,
+                        gen.task_id,
+                        gen.model ?? "",
+                        polled,
+                        apiKey ?? "",
+                    );
+                    continue;
                 }
 
                 // Backfill the content hash for videos downloaded before
@@ -253,10 +273,28 @@ async function downloadAndRecord(
     genId: string,
     taskId: string,
     model: string,
-    task: GenerationTask,
+    polled: Exclude<Awaited<ReturnType<typeof getTask>>, Error>,
     apiKey: string,
 ): Promise<void> {
-    const response = await getVideoContent(model, taskId, task, apiKey);
+    let response: Response | Error;
+    if (polled.provider === "autodl") {
+        if (polled.task.status !== "SUCCESS") {
+            return;
+        }
+        const video = polled.task.results.find((item) =>
+            item.alias === "final_video"
+        );
+        if (!video?.url) {
+            console.error(
+                `[task-checker] AutoDL task ${taskId} has no video URL`,
+            );
+            return;
+        }
+        response = await safeFetch(video.url);
+    }
+    else {
+        response = await getVideoContent(model, taskId, polled.task, apiKey);
+    }
     if (response instanceof Error) {
         console.error(`[task-checker] download ${taskId} failed:`, response);
         return;
@@ -272,8 +310,8 @@ async function downloadAndRecord(
 
     markDownloaded(db, {
         taskId,
-        status: localTaskStatus(task.status),
-        taskJson: JSON.stringify(task),
+        status: "succeeded",
+        taskJson: JSON.stringify(polled.task),
         downloadedAt: new Date().toISOString(),
     });
 

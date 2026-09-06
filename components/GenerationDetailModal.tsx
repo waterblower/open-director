@@ -188,16 +188,18 @@ export function GenerationDetailModal(props: {
     const createdAt = typeof task?.created_at === "number"
         ? task.created_at
         : null;
-    const updatedAt = typeof task?.updated_at === "number"
-        ? task.updated_at
-        : null;
+    const updatedAt =
+        task && "updated_at" in task && typeof task.updated_at === "number"
+            ? task.updated_at
+            : null;
     const elapsed = createdAt != null && updatedAt != null
         ? updatedAt - createdAt
         : null;
 
-    const usage = task?.usage && typeof task.usage === "object"
-        ? task.usage
-        : null;
+    const usage =
+        task && "usage" in task && task.usage && typeof task.usage === "object"
+            ? task.usage
+            : null;
     const totalTokens = usage && "total_tokens" in usage &&
             typeof usage.total_tokens === "number"
         ? usage.total_tokens

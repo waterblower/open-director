@@ -104,11 +104,26 @@ export const get_Output_Schema = z.object({
     code: z.string(),
     data: z.union([
         z.object({
+            status: z.literal("QUEUED"),
+            task_id: z.string(),
+            created_at: z.string(),
+        }),
+        z.object({
+            status: z.literal("FAILED"),
+            task_id: z.string(),
+            created_at: z.string(),
+            message: z.string().optional(),
+            error: z.union([
+                z.string(),
+                z.object({ message: z.string().optional() }),
+            ]).optional(),
+        }),
+        z.object({
             status: z.literal("RUNNING"),
             task_id: z.string(),
             client_id: z.string(),
-            created_at: z.coerce.date(),
-            started_at: z.coerce.date(),
+            created_at: z.string(),
+            started_at: z.string(),
             duration: z.number(),
             results: z.array(z.void()),
         }),
@@ -116,9 +131,9 @@ export const get_Output_Schema = z.object({
             status: z.literal("SUCCESS"),
             task_id: z.string(),
             client_id: z.string(),
-            created_at: z.coerce.date(),
-            started_at: z.coerce.date(),
-            finished_at: z.coerce.date(),
+            created_at: z.string(),
+            started_at: z.string(),
+            finished_at: z.string(),
             duration: z.number(),
             results: z.array(z.object({
                 type: z.enum(["video"]),
