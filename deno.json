@@ -15,6 +15,7 @@
         "indentWidth": 4,
         "nextControlFlowPosition": "nextLine",
         "singleBodyPosition": "nextLine",
+        "newLineKind": "lf",
         "exclude": [".agents/"]
     },
     "compile": {
