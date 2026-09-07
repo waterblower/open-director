@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import { fresh } from "@fresh/plugin-vite";
 import tailwindcss from "@tailwindcss/vite";
+import { fromFileUrl } from "@std/path";
 
 function getGitHash(): string {
     try {
@@ -18,7 +19,30 @@ function getGitHash(): string {
 }
 
 export default defineConfig({
-    plugins: [fresh(), tailwindcss()],
+    plugins: [
+        {
+            name: "database-schema-text",
+            enforce: "pre",
+            resolveId(source) {
+                if (source === "./db.schema.sqlite") {
+                    return "\0database-schema-text";
+                }
+            },
+            async load(id) {
+                if (id !== "\0database-schema-text") {
+                    return;
+                }
+                const path = fromFileUrl(
+                    new URL("./db.schema.sqlite", import.meta.url),
+                );
+                this.addWatchFile(path);
+                const schema = await Deno.readTextFile(path);
+                return `export default ${JSON.stringify(schema)};`;
+            },
+        },
+        fresh(),
+        tailwindcss(),
+    ],
     define: {
         "import.meta.env.VITE_GIT_HASH": JSON.stringify(getGitHash()),
     },

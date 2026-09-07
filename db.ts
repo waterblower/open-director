@@ -20,7 +20,7 @@ import {
 } from "./apigen/mod.ts";
 import { getLastOpenedProject } from "./project_registry.ts";
 import { kv } from "./kv.ts";
-import schema from "./db.schema.sqlite?raw" with { type: "text" };
+import schema from "./db.schema.sqlite" with { type: "text" };
 
 // Store each provider's response in its native shape.
 export const GenerationResponseSchema = z.union([
