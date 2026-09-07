@@ -363,12 +363,21 @@ export async function loadFileExplorerState(
 }
 
 export async function saveFileExplorerState(
-    dir: string,
+    projectRootPath: string,
     state: FileExplorerState,
-) {
-    await Deno.mkdir(dir, { recursive: true });
-    await Deno.writeTextFile(
-        join(dir, "file-explorer.json"),
-        JSON.stringify(state, null, 2),
+): Promise<void | Error> {
+    const statePath = await resolveInProject(
+        projectRootPath,
+        ".open-director/file-explorer.json",
     );
+    if (statePath instanceof Error) {
+        return statePath;
+    }
+    try {
+        await Deno.mkdir(dirname(statePath), { recursive: true });
+        await Deno.writeTextFile(statePath, JSON.stringify(state, null, 2));
+    }
+    catch (error) {
+        return error instanceof Error ? error : new Error(String(error));
+    }
 }

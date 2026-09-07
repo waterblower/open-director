@@ -78,3 +78,11 @@ Use ordinary helpers with concrete data arguments for shared operations. Do not 
 Always put exported public code at the top of the file, immediately after imports. Put file-local, non-exported helper functions, types, and constants below the public code. A reader should encounter the module's public interface before its implementation helpers.
 
 Preserve runtime initialization dependencies when reordering declarations; do not introduce access to an uninitialized binding.
+
+## Rule 6: Test file naming
+
+Name TypeScript test files with the `.test.ts` suffix, not `_test.ts`. For example, tests for `project.ts` belong in `project.test.ts`.
+
+## Rule 7: Use Deno standard assertions
+
+Import test assertions from `@std/assert` (for example, `assert` and `assertEquals`). Do not implement custom assertion helpers when the standard library provides the assertion.

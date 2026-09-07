@@ -1,11 +1,10 @@
+import { assert } from "@std/assert";
 import { resolve } from "@std/path";
-import { loadFileExplorerState, resolveInProject } from "./project.ts";
-
-function assert(condition: unknown, message: string): asserts condition {
-    if (!condition) {
-        throw new Error(message);
-    }
-}
+import {
+    loadFileExplorerState,
+    resolveInProject,
+    saveFileExplorerState,
+} from "./project.ts";
 
 async function createDirectoryLink(
     target: string,
@@ -146,4 +145,25 @@ Deno.test("loadFileExplorerState migrates legacy root-relative paths", async () 
     finally {
         await Deno.remove(root, { recursive: true });
     }
+});
+
+Deno.test("explorer state is saved inside the internal project directory", async () => {
+    const root = await Deno.makeTempDir({ prefix: "open-director-state-" });
+    const state = { expanded: ["images"], selected: "images/example.png" };
+    const result = await saveFileExplorerState(root, state);
+    assert(!(result instanceof Error), "Saving should succeed");
+    const loaded = await loadFileExplorerState(root);
+    assert(
+        JSON.stringify(loaded) === JSON.stringify(state),
+        "State should round-trip",
+    );
+    const entries = [];
+    for await (const entry of Deno.readDir(root)) {
+        entries.push(entry.name);
+    }
+    assert(
+        entries.length === 1 && entries[0] === ".open-director",
+        "Project root should contain only the internal directory",
+    );
+    await Deno.remove(root, { recursive: true });
 });

@@ -429,10 +429,13 @@ export const appRouter = router({
             childrenByPath[rel] = dirs;
         }
 
-        await saveFileExplorerState(rootPath, {
+        const saveError = await saveFileExplorerState(rootPath, {
             expanded: Object.keys(childrenByPath),
             selected,
         });
+        if (saveError instanceof Error) {
+            return asAPIError(saveError);
+        }
 
         return {
             error: false as const,
@@ -733,11 +736,10 @@ export const appRouter = router({
             if (!projectDir) {
                 throw new Error("Project not initialized");
             }
-            const dir = await resolveInProject(projectDir, ".open-director");
-            if (dir instanceof Error) {
-                throw dir;
+            const result = await saveFileExplorerState(projectDir, opts.input);
+            if (result instanceof Error) {
+                return asAPIError(result);
             }
-            await saveFileExplorerState(dir, opts.input);
         }),
 
     backend_events: publicProcedure.subscription(async function* () {
