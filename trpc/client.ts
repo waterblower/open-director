@@ -357,10 +357,6 @@ const TEXTS = {
         English: "Image Grid Editor",
         Chinese: "图片加网格",
     },
-    generation_plan: {
-        English: "Generation Plan",
-        Chinese: "生成计划",
-    },
     open_in_browser: {
         English: "Open in Browser",
         Chinese: "在浏览器中打开",

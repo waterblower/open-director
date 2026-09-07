@@ -56,7 +56,6 @@ import {
 } from "../apigen/minimax.ts";
 import { chan, closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
-import { pickAndLoadGenerationPlan } from "../generation_plan.ts";
 
 /** Directory under the project root where generated videos are stored. */
 export const VIDEOS_DIR = ".open-director/generations";
@@ -294,12 +293,6 @@ async function buildVideoList(
 }
 
 export const appRouter = router({
-    // Open a native TOML picker on the backend, parse the selected generation
-    // plan, and return short-lived HTTP URLs for its local reference images.
-    pickGenerationPlan: publicProcedure.mutation(() =>
-        pickAndLoadGenerationPlan()
-    ),
-
     // Open a native OS folder picker, switch the active project to the chosen
     // folder, and persist it (Deno KV) so the next launch reopens it. Returns
     // the new path, or null if the user cancelled. The client should reload

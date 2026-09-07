@@ -65,7 +65,6 @@
         "@std/assert": "jsr:@std/assert@^1.0.19",
         "@std/async": "jsr:@std/async@^1.4.0",
         "@std/path": "jsr:@std/path@^1.0.9",
-        "@std/toml": "jsr:@std/toml@^1.0.11",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
         "@types/node": "npm:@types/node@^25.9.3",
         "fresh": "jsr:@fresh/core@^2.3.3",
