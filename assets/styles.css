@@ -1,4 +1,9 @@
 @import "tailwindcss";
+
+video::-webkit-media-controls-panel {
+    background: transparent !important;
+}
+
 .fresh-gradient {
     background-color: rgb(134, 239, 172);
     background-image: linear-gradient(
