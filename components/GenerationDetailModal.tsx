@@ -184,16 +184,22 @@ export function GenerationDetailModal(props: {
     const req = detail?.request_json ?? null;
     const task = detail?.task_json ?? null;
 
-    // created_at / updated_at are unix seconds; their gap is the time spent
-    // queued + running on the server.
+    // Include queue time. AutoDL uses date strings and finished_at; other
+    // providers use Unix seconds and updated_at.
     const createdAt = typeof task?.created_at === "number"
         ? task.created_at
+        : typeof task?.created_at === "string"
+        ? Date.parse(task.created_at) / 1000
         : null;
     const updatedAt =
         task && "updated_at" in task && typeof task.updated_at === "number"
             ? task.updated_at
+            : task && "finished_at" in task &&
+                    typeof task.finished_at === "string"
+            ? Date.parse(task.finished_at) / 1000
             : null;
-    const elapsed = createdAt != null && updatedAt != null
+    const elapsed = createdAt != null && updatedAt != null &&
+            Number.isFinite(createdAt) && Number.isFinite(updatedAt)
         ? updatedAt - createdAt
         : null;
 
