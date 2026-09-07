@@ -435,12 +435,7 @@ export function GenerationCard(
                     </span>
                 </div>
             </div>
-            <div class="absolute bottom-0 inset-x-0 px-2.5 pt-6 pb-2 flex items-center gap-1.5 pointer-events-none">
-                <VideoIcon class="size-3.5 text-white/60 shrink-0" />
-                <span class="text-white/90 text-[11px] leading-tight truncate">
-                    {generation.id}
-                </span>
-            </div>
+
             {detailOpen.value && (
                 <GenerationDetailModal
                     projectRoot={props.projectRoot}
