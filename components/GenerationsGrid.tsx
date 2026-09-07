@@ -3,7 +3,8 @@ import { useEffect } from "preact/hooks";
 import type { GenerateInput } from "../apigen/mod.ts";
 import { type GeneratedVideo, GenerationCard } from "./GenerationCard.tsx";
 import { GenerationTabs } from "./GenerationTabs.tsx";
-import { get_text, language, trpc } from "@/trpc/client.ts";
+import { trpc } from "@/trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 
 type SortOrder = "newest" | "oldest";
 export type Tab = "active" | "archived" | "liked" | "disliked";

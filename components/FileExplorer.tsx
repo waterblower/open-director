@@ -1,12 +1,7 @@
 import { type Signal, signal, useComputed, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import {
-    get_text,
-    language,
-    loadProjectData,
-    readDir,
-    trpc,
-} from "../trpc/client.ts";
+import { loadProjectData, readDir, trpc } from "../trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
 import type { GeneratedVideo } from "./GenerationCard.tsx";
 import { GenerationDetailModal } from "./GenerationDetailModal.tsx";

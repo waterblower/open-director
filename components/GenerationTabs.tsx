@@ -1,6 +1,6 @@
 import { type Signal } from "@preact/signals";
 import type { Tab } from "./GenerationsGrid.tsx";
-import { get_text, language } from "@/trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 
 const TABS = [
     ["active", "active_generations"],

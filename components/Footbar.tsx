@@ -6,7 +6,7 @@ import {
     LANGUAGE_NAMES,
     setLanguage,
     SUPPORTED_LANGUAGES,
-} from "../trpc/client.ts";
+} from "@/i18n.ts";
 import { McpInfoModal } from "./McpInfoModal.tsx";
 
 export function Footbar(props: { onOpenSettings: () => void }) {

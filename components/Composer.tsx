@@ -23,7 +23,8 @@ import {
 } from "../apigen/mod.ts";
 
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
-import { get_text, Language, language, trpc } from "../trpc/client.ts";
+import { trpc } from "../trpc/client.ts";
+import { get_text, Language, language } from "@/i18n.ts";
 import { delay } from "@std/async";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
 import { updateGenerations } from "@/islands/Application.tsx";

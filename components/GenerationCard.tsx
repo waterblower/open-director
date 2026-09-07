@@ -1,7 +1,8 @@
 import { type Signal, useSignal } from "@preact/signals";
 import type { GenerateInput } from "../apigen/mod.ts";
 import { GENERATION_VIDEO_MIME, PROJECT_FILE_MIME } from "@/constants.ts";
-import { get_text, language, trpc } from "../trpc/client.ts";
+import { trpc } from "../trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 import { GenerationDetailModal } from "./GenerationDetailModal.tsx";
 import { Generation } from "@/db.ts";
 

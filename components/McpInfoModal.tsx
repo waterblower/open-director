@@ -1,7 +1,8 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { get_text, language, trpc } from "../trpc/client.ts";
+import { trpc } from "../trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 
 /** The MCP server info returned by the `getMcpServerInfo` tRPC query. */
 type McpServerInfo = Awaited<

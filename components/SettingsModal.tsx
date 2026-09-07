@@ -1,12 +1,11 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import {
-    get_text,
-    language,
     setShowOpenDirectorDir,
     ShowOpenDirectorDir,
     trpc,
 } from "../trpc/client.ts";
+import { get_text, language } from "@/i18n.ts";
 
 // Each provider's API-key configuration URL.
 const API_KEY_CONFIG_URLS = {
