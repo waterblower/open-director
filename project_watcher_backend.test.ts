@@ -27,7 +27,7 @@ Deno.test("backend watches the opened project and closes old watchers on rapid s
         }
     })();
     try {
-        await watchActiveProject(first);
+        assertEquals(await watchActiveProject(first), undefined);
         await Deno.writeTextFile(join(first, "clip.txt"), "first");
         await waitForChanges(changes);
         assertEquals(changes, [{ type: "fs_changed" }]);
@@ -44,7 +44,7 @@ Deno.test("backend watches the opened project and closes old watchers on rapid s
         await sleep(300);
         assertEquals(changes, [{ type: "fs_changed" }]);
 
-        await watchActiveProject(null);
+        assertEquals(await watchActiveProject(null), undefined);
         changes.length = 0;
         await Deno.writeTextFile(join(third, "clip.txt"), "closed");
         await sleep(300);

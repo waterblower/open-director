@@ -6,8 +6,8 @@
  */
 import { z } from "zod";
 import { global_event_bus } from "./events.ts";
-export { global_event_bus } from "./events.ts";
 import { watchActiveProject } from "../project_watcher_backend.ts";
+export { global_event_bus };
 import { basename, join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
 import {
@@ -298,7 +298,10 @@ export const appRouter = router({
             if (input.projectRoot !== activeRoot) {
                 return asAPIError(new Error("Project is no longer active"));
             }
-            await watchActiveProject(input.projectRoot);
+            const error = await watchActiveProject(input.projectRoot);
+            if (error instanceof Error) {
+                return asAPIError(error);
+            }
             return { error: false as const };
         }),
 

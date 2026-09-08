@@ -9,6 +9,7 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
     // Let macOS finish reporting fixture directory creation before watching.
     await delay(300);
     const watcher = watchProjectFiles(root);
+    assert(!(watcher instanceof Error));
     const received: (void | Error)[] = [];
     const consumer = (async () => {
         for (;;) {
@@ -53,17 +54,10 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
     }
 });
 
-Deno.test("watcher returns startup errors and handles null roots", async () => {
+Deno.test("watcher returns startup errors", async () => {
     const root = await Deno.makeTempDir();
     try {
-        const watcher = watchProjectFiles(join(root, "missing"));
-        assert((await watcher.next()) instanceof Error);
-        assert((await watcher.next()) instanceof Error);
-        assertEquals(await watcher.close(), undefined);
-
-        const empty = watchProjectFiles(null);
-        assert((await empty.next()) instanceof Error);
-        assertEquals(await empty.close(), undefined);
+        assert(watchProjectFiles(join(root, "missing")) instanceof Error);
     }
     finally {
         await Deno.remove(root, { recursive: true });
@@ -73,6 +67,7 @@ Deno.test("watcher returns startup errors and handles null roots", async () => {
 Deno.test("closing before consumption discards pending changes", async () => {
     const root = await Deno.realPath(await Deno.makeTempDir());
     const watcher = watchProjectFiles(root);
+    assert(!(watcher instanceof Error));
     try {
         await Deno.writeTextFile(join(root, "clip.txt"), "data");
         await delay(50);
