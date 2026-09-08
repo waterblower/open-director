@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { parseJSON, safeFetch } from "@/apigen/fetch.ts";
-import { delay } from "@std/async/delay";
+import { sleep } from "@blowater/csp";
 
 /** The one fal endpoint we currently expose, used as a model identifier. */
 export const FAL_REFERENCE_TO_VIDEO = "fal/minimax/h3/reference-to-video";
@@ -142,7 +142,7 @@ export async function wait_for_result(requestID: string, apikey: string) {
         }
         else if (result.status == 400) {
             if (result.detail == "Request is still in progress") {
-                await delay(10000);
+                await sleep(10000);
                 continue;
             }
             else {

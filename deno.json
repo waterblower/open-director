@@ -51,7 +51,7 @@
         },
         "backend": "webview",
         "output": {
-            "macos": "./_dist/OpenDirector.app",
+            "macos": "./_dist/OpenDirector",
             "windows": "./_dist/OpenDirector",
             "linux": "./_dist/open-director"
         }
@@ -59,11 +59,8 @@
     "imports": {
         "@/": "./",
         "@blowater/csp": "jsr:@blowater/csp@^1.0.0",
-        "@fal-ai/client": "npm:@fal-ai/client@^1.10.1",
         "@libs/qrcode": "jsr:@libs/qrcode@^3.0.1",
-        "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.29.0",
         "@std/assert": "jsr:@std/assert@^1.0.19",
-        "@std/async": "jsr:@std/async@^1.4.0",
         "@std/path": "jsr:@std/path@^1.0.9",
         "@std/ulid": "jsr:@std/ulid@^1.0.0",
         "@types/node": "npm:@types/node@^25.9.3",

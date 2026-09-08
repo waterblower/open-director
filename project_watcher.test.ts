@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { delay } from "@std/async";
+import { sleep } from "@blowater/csp";
 import { join } from "@std/path";
 import { watchProjectFiles } from "./project_watcher.ts";
 
@@ -7,7 +7,7 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
     const root = await Deno.realPath(await Deno.makeTempDir());
     await Deno.mkdir(join(root, "nested"));
     // Let macOS finish reporting fixture directory creation before watching.
-    await delay(300);
+    await sleep(300);
     const watcher = watchProjectFiles(root);
     assert(!(watcher instanceof Error));
     const received: (void | Error)[] = [];
@@ -22,7 +22,7 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
     })();
     try {
         await Deno.writeTextFile(join(root, "nested", ".DS_Store"), "metadata");
-        await delay(400);
+        await sleep(400);
         assertEquals(received, []);
 
         await Deno.writeTextFile(join(root, "nested", "clip.txt"), "first");
@@ -33,10 +33,10 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
         );
         const deadline = Date.now() + 5000;
         while (received.length === 0 && Date.now() < deadline) {
-            await delay(20);
+            await sleep(20);
         }
         assertEquals(received, [undefined]);
-        await delay(400);
+        await sleep(400);
         assertEquals(received, [undefined]);
 
         assertEquals(await watcher.close(), undefined);
@@ -44,7 +44,7 @@ Deno.test("watcher batches changes, ignores .DS_Store, and closes pending reads"
         assert((await watcher.next()) instanceof Error);
         assertEquals(await watcher.close(), undefined);
         await Deno.writeTextFile(join(root, "after-close.txt"), "ignored");
-        await delay(250);
+        await sleep(250);
         assertEquals(received, [undefined]);
     }
     finally {
@@ -70,7 +70,7 @@ Deno.test("closing before consumption discards pending changes", async () => {
     assert(!(watcher instanceof Error));
     try {
         await Deno.writeTextFile(join(root, "clip.txt"), "data");
-        await delay(50);
+        await sleep(50);
         assertEquals(await watcher.close(), undefined);
         assert((await watcher.next()) instanceof Error);
     }

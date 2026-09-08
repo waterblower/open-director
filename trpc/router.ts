@@ -57,7 +57,7 @@ import {
     type VideoGenerationContent,
     VideoModelSchema as MiniMaxVideoModelSchema,
 } from "../apigen/minimax.ts";
-import { closed } from "@blowater/csp";
+import { closed, sleep } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
@@ -975,7 +975,6 @@ export const appRouter = router({
 // Export type only — never import the router implementation into the client.
 export type AppRouter = typeof appRouter;
 
-import { delay } from "@std/async";
 import {
     getShowOpenDirectorDir,
     getStoredApiKey,
@@ -990,7 +989,7 @@ import { tRPC_generate } from "@/trpc/generate.ts";
     let i = 0;
     for (;;) {
         await global_event_bus.put({ type: "tick", n: i++ });
-        await delay(10000);
+        await sleep(10000);
     }
 })();
 

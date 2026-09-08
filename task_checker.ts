@@ -8,7 +8,7 @@ import { safeFetch } from "./apigen/fetch.ts";
  * downloaded" when a file with a stem equal to its id exists.
  */
 import type { DatabaseSync } from "node:sqlite";
-import { delay } from "@std/async";
+import { sleep } from "@blowater/csp";
 import { join } from "@std/path";
 import { VIDEOS_DIR } from "./trpc/router.ts";
 import {
@@ -47,7 +47,7 @@ export async function check_and_download(): Promise<void | Error> {
         const project_path = (await getLastOpenedProject(kv))?.path;
         if (!db || !project_path) {
             console.log("[task-checker] no project opened; waiting...");
-            await delay(5000);
+            await sleep(5000);
             continue;
         }
         // 1. Generations still worth polling: logged locally, not yet
@@ -258,7 +258,7 @@ export async function check_and_download(): Promise<void | Error> {
         }
 
         // 5. Re-run the loop every 5 seconds.
-        await delay(5000);
+        await sleep(5000);
     }
 }
 

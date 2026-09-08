@@ -25,7 +25,7 @@ import {
 import type { VideoModel as MiniMaxVideoModel } from "../apigen/minimax.ts";
 import { trpc } from "../trpc/client.ts";
 import { get_text, Language, language } from "@/i18n.ts";
-import { delay } from "@std/async";
+import { sleep } from "@blowater/csp";
 import { GeneratedVideo } from "@/components/GenerationCard.tsx";
 import { updateGenerations } from "@/islands/Application.tsx";
 
@@ -1475,7 +1475,7 @@ export function Composer(props: {
                                                 undefined,
                                         },
                                     );
-                                    await delay(3000);
+                                    await sleep(3000);
                                     genError.value = null;
                                 }
                             }}
