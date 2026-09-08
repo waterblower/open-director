@@ -86,3 +86,11 @@ Name TypeScript test files with the `.test.ts` suffix, not `_test.ts`. For examp
 ## Rule 7: Use Deno standard assertions
 
 Import test assertions from `@std/assert` (for example, `assert` and `assertEquals`). Do not implement custom assertion helpers when the standard library provides the assertion.
+
+## Rule 8: Use CSP sleep for delays
+
+Use `await sleep(milliseconds)` with `import { sleep } from "@blowater/csp"` for delays. Do not use `setTimeout`. When a delay must run alongside an event reader, put the sleep in a separate async task and handle its lifecycle during shutdown.
+
+## Rule 9: Return early on errors
+
+When an error is encountered, handle or record it and immediately return from the current function. Do not use `break` or fall through to later code on an error path. Put required shared cleanup in `finally` so it still runs on early return. Keep catches narrowly scoped to native calls, as required by Rule 3.
