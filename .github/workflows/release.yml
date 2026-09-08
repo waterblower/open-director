@@ -1,0 +1,103 @@
+name: Desktop release
+
+on:
+    push:
+        tags:
+            - "[0-9]*"
+
+permissions:
+    contents: read
+
+concurrency:
+    group: desktop-release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    build:
+        name: Build ${{ matrix.platform }}
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 45
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: macos-14
+                      platform: macos-arm64
+                    - os: windows-2022
+                      platform: windows-x64
+        env:
+            DENO_NO_PROMPT: "1"
+            PLATFORM: ${{ matrix.platform }}
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: denoland/setup-deno@v2
+              with:
+                  deno-version: "2.9.6"
+
+            - name: Install dependencies
+              run: deno install --frozen-lockfile
+
+            - name: Build web application
+              run: deno task build
+
+            - name: Build desktop application
+              run: deno task desktop
+
+            - name: ZIP macOS application
+              if: runner.os == 'macOS'
+              shell: bash
+              run: |
+                  mkdir -p release
+                  ditto -c -k --sequesterRsrc --keepParent \
+                    _dist/OpenDirector.app "release/OpenDirector-${PLATFORM}.zip"
+
+            - name: ZIP Windows application
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  New-Item -ItemType Directory -Path release -Force | Out-Null
+                  Compress-Archive -LiteralPath _dist/OpenDirector `
+                    -DestinationPath "release/OpenDirector-$env:PLATFORM.zip"
+
+            - name: Upload ZIP
+              uses: actions/upload-artifact@v4
+              with:
+                  name: desktop-${{ matrix.platform }}
+                  path: release/*.zip
+                  if-no-files-found: error
+                  compression-level: 0
+
+    release:
+        name: Publish GitHub release
+        needs: build
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            TAG: ${{ github.ref_name }}
+
+        steps:
+            - name: Download ZIPs
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: desktop-*
+                  merge-multiple: true
+                  path: release
+
+            - name: Create release and attach ZIPs
+              shell: bash
+              run: |
+                  if ! gh release view "$TAG" >/dev/null 2>&1; then
+                    gh release create "$TAG" \
+                      --verify-tag \
+                      --title "$TAG" \
+                      --generate-notes \
+                      --draft
+                  fi
+                  gh release upload "$TAG" release/*.zip --clobber
+                  gh release edit "$TAG" --draft=false
