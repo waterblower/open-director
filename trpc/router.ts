@@ -5,6 +5,9 @@
  * type safety. Never import the router implementation into the client.
  */
 import { z } from "zod";
+import { global_event_bus } from "./events.ts";
+import { watchActiveProject } from "../project_watcher_backend.ts";
+export { global_event_bus };
 import { basename, join } from "@std/path";
 import { publicProcedure, router } from "./init.ts";
 import {
@@ -54,7 +57,7 @@ import {
     type VideoGenerationContent,
     VideoModelSchema as MiniMaxVideoModelSchema,
 } from "../apigen/minimax.ts";
-import { chan, closed } from "@blowater/csp";
+import { closed } from "@blowater/csp";
 import { get_video_url, sha256Hex } from "../utils.ts";
 
 /** Directory under the project root where generated videos are stored. */
@@ -70,26 +73,6 @@ function maskKey(key: string): string {
 /** Directory under the project root where uploaded attachments are stored. */
 const UPLOADS_DIR = ".open-director/uploads";
 const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
-export const global_event_bus = chan<
-    | {
-        type: "tick";
-        n: number;
-    }
-    | {
-        type: "generation_finished";
-        gen: Generation;
-    }
-    | {
-        type: "generation_created";
-        gen: {
-            id: string;
-            status: string;
-            request_json: GenerateInput;
-            created_at: string;
-        };
-    }
-    | { type: "fs_changed" }
->();
 
 async function exists(path: string): Promise<boolean> {
     try {
@@ -306,6 +289,21 @@ export const appRouter = router({
         reopenDb(); // point the generations DB at the new project
         return { path };
     }),
+
+    // The frontend starts watching once it has loaded the active project.
+    watchProject: publicProcedure
+        .input(z.object({ projectRoot: z.string().nullable() }))
+        .mutation(async ({ input }) => {
+            const activeRoot = (await getLastOpenedProject(kv))?.path ?? null;
+            if (input.projectRoot !== activeRoot) {
+                return asAPIError(new Error("Project is no longer active"));
+            }
+            const error = await watchActiveProject(input.projectRoot);
+            if (error instanceof Error) {
+                return asAPIError(error);
+            }
+            return { error: false as const };
+        }),
 
     // Archived generations for the same project, in the same shape — shown in
     // the grid's "Archived" tab.

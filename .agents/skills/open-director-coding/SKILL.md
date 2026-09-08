@@ -86,3 +86,48 @@ Name TypeScript test files with the `.test.ts` suffix, not `_test.ts`. For examp
 ## Rule 7: Use Deno standard assertions
 
 Import test assertions from `@std/assert` (for example, `assert` and `assertEquals`). Do not implement custom assertion helpers when the standard library provides the assertion.
+
+## Rule 8: Use CSP sleep for delays
+
+Use `await sleep(milliseconds)` with `import { sleep } from "@blowater/csp"` for delays. Do not use `setTimeout`. When a delay must run alongside an event reader, put the sleep in a separate async task and handle its lifecycle during shutdown.
+
+## Rule 9: Return early on errors
+
+When an error is encountered, handle or record it and immediately return from the current function. Do not use `break` or fall through to later code on an error path. Put required shared cleanup in `finally` so it still runs on early return. Keep catches narrowly scoped to native calls, as required by Rule 3.
+
+## Rule 10: Surface failures at the failure site
+
+Any function that can fail must declare it in its return type as `T | Error` (or `Promise<T | Error>`) and return the `Error` as soon as it occurs. Do not defer the failure by stashing it in a variable, field, or object state for a later call to report.
+
+This applies to constructors and factory functions too: if setting up an object can fail, the factory returns `T | Error` rather than returning a half-built object whose next method call reports the failure.
+
+Do not write:
+
+```ts
+export function watchProjectFiles(root: string): ProjectWatcher {
+    let failure: Error | undefined;
+    try {
+        native = Deno.watchFs(root);
+    } catch (error) {
+        // Deferred: the caller only learns about this from a later next() call.
+        failure = toError(error);
+    }
+    return { next, close };
+}
+```
+
+Write:
+
+```ts
+export function watchProjectFiles(root: string): ProjectWatcher | Error {
+    let native: Deno.FsWatcher;
+    try {
+        native = Deno.watchFs(root);
+    } catch (error) {
+        return toError(error);
+    }
+    return { next, close };
+}
+```
+
+Callers then branch with `instanceof Error` immediately and propagate the error up, per Rule 9. The only failures that may be logged instead of returned are those in detached tasks that no caller is still awaiting; say so in a comment at that site.

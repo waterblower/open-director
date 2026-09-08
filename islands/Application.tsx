@@ -204,7 +204,7 @@ export default function Application() {
         })();
     });
 
-    // Reload the generations grid whenever the active project changes: on the
+    // Start the watcher and reload the grid when the active project changes: on the
     // initial load and when the user picks a different folder in the file
     // explorer. The ref guard skips other `projectData` mutations (expanding a
     // folder, fs refreshes, …) so we only re-fetch when the root path changes.
@@ -218,6 +218,16 @@ export default function Application() {
         (async () => {
             if (!root) {
                 generated_videos.value = new Map();
+                return;
+            }
+            const watching = await trpc.watchProject.mutate({
+                projectRoot: root,
+            });
+            if (watching.error) {
+                console.error(
+                    "[Application] failed to watch project:",
+                    watching,
+                );
                 return;
             }
             const vids = await trpc.open.listGeneratedVideos.query({
