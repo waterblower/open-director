@@ -45,6 +45,7 @@
             "name": "Open Director",
             "identifier": "app.opendirector",
             "icons": {
+                "macos": "./static/icon.png",
                 "windows": "./static/favicon.ico"
             },
             "deepLinks": ["open-director"]
